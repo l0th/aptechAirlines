@@ -579,10 +579,20 @@ export class FlightsService {
         })
         .exec();
 
+      const flightStatus =
+        item.status === 'cancelled'
+          ? FlightStatus.CANCELLED
+          : item.delayed
+            ? FlightStatus.DELAYED
+            : FlightStatus.SCHEDULED;
+      const delayReason = item.delayed ? `Chuyến bay trễ ${item.delayed} phút` : '';
+
       if (flight) {
         flight.scheduled_departure = depTime;
         flight.scheduled_arrival = arrTime;
         flight.duration_minutes = durationMinutes;
+        flight.status = flightStatus;
+        flight.delay_reason = delayReason;
         flight.aircraft = {
           model_code: aircraftModel,
           model_name: `Airbus ${aircraftModel}`,
@@ -599,7 +609,8 @@ export class FlightsService {
           scheduled_arrival: arrTime,
           duration_minutes: durationMinutes,
           distance_miles: 720,
-          status: item.status === 'cancelled' ? FlightStatus.CANCELLED : FlightStatus.SCHEDULED,
+          status: flightStatus,
+          delay_reason: delayReason,
           aircraft: {
             model_code: aircraftModel,
             model_name: `Airbus ${aircraftModel}`,
