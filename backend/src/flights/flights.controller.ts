@@ -46,6 +46,20 @@ export class FlightsController {
     return this.flightsService.getSeatMap(id);
   }
 
+  @Post('sync-airlabs')
+  async syncAirLabs(
+    @Query('dep_iata') depIata?: string,
+    @Query('arr_iata') arrIata?: string,
+    @Query('api_key') apiKey?: string,
+    @Body('api_key') bodyApiKey?: string,
+  ) {
+    return this.flightsService.syncFromAirLabs(
+      depIata || 'HAN',
+      arrIata || 'SGN',
+      apiKey || bodyApiKey,
+    );
+  }
+
   @Post()
   async create(@Body() createFlightDto: CreateFlightDto) {
     return this.flightsService.create(createFlightDto);

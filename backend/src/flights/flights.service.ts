@@ -461,4 +461,162 @@ export class FlightsService {
       rows,
     };
   }
+
+  /**
+   * Đồng bộ chuyến bay thật từ AirLabs API (airlabs.co)
+   * @param depIata Mã sân bay đi (VD: 'HAN')
+   * @param arrIata Mã sân bay đến (VD: 'SGN')
+   * @param customApiKey API Key do người dùng truyền vào (nếu không dùng file .env)
+   */
+  async syncFromAirLabs(
+    depIata: string,
+    arrIata: string,
+    customApiKey?: string,
+  ): Promise<{
+    message: string;
+    synchronized_count: number;
+    flights: any[];
+  }> {
+    const apiKey = customApiKey || process.env.AIRLABS_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException(
+        'Chưa có AirLabs API Key! Vui lòng điền AIRLABS_API_KEY trong file .env hoặc truyền tham số api_key vào request.',
+      );
+    }
+
+    const origin = (depIata || 'HAN').toUpperCase();
+    const dest = (arrIata || 'SGN').toUpperCase();
+
+    // Đảm bảo sân bay đã có trong CSDL
+    try {
+      await this.airportsService.findByIata(origin);
+      await this.airportsService.findByIata(dest);
+    } catch (e) {
+      throw new BadRequestException(`Sân bay ${origin} hoặc ${dest} chưa được định nghĩa trong hệ thống.`);
+    }
+
+    const url = `https://airlabs.co/api/v9/schedules?dep_iata=${origin}&arr_iata=${dest}&api_key=${apiKey}`;
+
+    let responseData: any;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`AirLabs API trả về HTTP mã ${res.status}`);
+      }
+      responseData = await res.json();
+    } catch (err: any) {
+      throw new BadRequestException(`Không thể kết nối tới AirLabs API: ${err.message}`);
+    }
+
+    if (responseData.error) {
+      throw new BadRequestException(`Lỗi từ AirLabs: ${responseData.error.message || JSON.stringify(responseData.error)}`);
+    }
+
+    const schedules = responseData.response || [];
+    if (!Array.isArray(schedules) || schedules.length === 0) {
+      return {
+        message: `Không tìm thấy chuyến bay nào giữa ${origin} và ${dest} trên AirLabs trong khung giờ hiện tại.`,
+        synchronized_count: 0,
+        flights: [],
+      };
+    }
+
+    const savedFlights: any[] = [];
+    const today = new Date().toISOString().split('T')[0];
+
+    for (const item of schedules) {
+      const flightNumber =
+        item.flight_iata ||
+        `${item.airline_iata || 'FL'}${item.flight_number || Math.floor(100 + Math.random() * 900)}`;
+
+      const depTime = item.dep_time
+        ? new Date(item.dep_time)
+        : new Date(Date.now() + 2 * 60 * 60 * 1000);
+      const arrTime = item.arr_time
+        ? new Date(item.arr_time)
+        : new Date(depTime.getTime() + (item.duration || 120) * 60 * 1000);
+      const departureDate = item.dep_time ? item.dep_time.split(' ')[0] : today;
+
+      const durationMinutes =
+        item.duration ||
+        Math.round((arrTime.getTime() - depTime.getTime()) / 60000) ||
+        120;
+      const aircraftModel = item.aircraft_icao || 'A321';
+
+      // Cấu hình khoang vé chuẩn cho chuyến bay thật được đồng bộ về
+      const inventories = [
+        {
+          cabin_class: 'ECONOMY',
+          is_smoking: false,
+          bucket_code: 'Y',
+          base_price: 95,
+          allocated_seats: 140,
+          available_seats: 140,
+        },
+        {
+          cabin_class: 'BUSINESS',
+          is_smoking: false,
+          bucket_code: 'J',
+          base_price: 240,
+          allocated_seats: 30,
+          available_seats: 30,
+        },
+        {
+          cabin_class: 'FIRST',
+          is_smoking: false,
+          bucket_code: 'F',
+          base_price: 420,
+          allocated_seats: 10,
+          available_seats: 10,
+        },
+      ];
+
+      // Upsert: Cập nhật nếu đã có cùng flight_number và departure_date, tạo mới nếu chưa có
+      let flight = await this.flightModel
+        .findOne({
+          flight_number: flightNumber,
+          departure_date: departureDate,
+        })
+        .exec();
+
+      if (flight) {
+        flight.scheduled_departure = depTime;
+        flight.scheduled_arrival = arrTime;
+        flight.duration_minutes = durationMinutes;
+        flight.aircraft = {
+          model_code: aircraftModel,
+          model_name: `Airbus ${aircraftModel}`,
+          total_capacity: 180,
+        };
+        await flight.save();
+      } else {
+        flight = new this.flightModel({
+          flight_number: flightNumber,
+          origin_iata: origin,
+          dest_iata: dest,
+          departure_date: departureDate,
+          scheduled_departure: depTime,
+          scheduled_arrival: arrTime,
+          duration_minutes: durationMinutes,
+          distance_miles: 720,
+          status: item.status === 'cancelled' ? FlightStatus.CANCELLED : FlightStatus.SCHEDULED,
+          aircraft: {
+            model_code: aircraftModel,
+            model_name: `Airbus ${aircraftModel}`,
+            total_capacity: 180,
+          },
+          inventories,
+        });
+        await flight.save();
+      }
+
+      savedFlights.push(flight);
+    }
+
+    return {
+      message: `Đã đồng bộ thành công ${savedFlights.length} chuyến bay thật từ AirLabs!`,
+      synchronized_count: savedFlights.length,
+      flights: savedFlights,
+    };
+  }
 }
