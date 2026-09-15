@@ -1,30 +1,49 @@
-# Airline Reservation System (ARS) - Backend & Database
+# Airline Reservation System (ARS) - Aptech Airlines Fullstack
 
-Hệ thống Quản lý và Đặt vé Máy bay (ARS) - Phân hệ Backend NestJS + Database MongoDB theo chuẩn đồ án eProject.
+Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Aptech Airlines** - Giải pháp Fullstack toàn diện gồm **Backend NestJS**, **Frontend Angular 21**, **Database MongoDB**, và **Containerization Docker** theo chuẩn đồ án eProject.
 
 ---
 
 ## 🛠️ Công nghệ & Kiến trúc
 - **Backend Framework:** NestJS (TypeScript)
+- **Frontend Framework:** Angular 21 (Standalone Components, Signals, Reactive Forms)
+- **Styling & Design System:** Tailwind CSS v3, Typography Inter, Bảng màu Aviation Navy (`#0A2540`) & Royal Gold (`#D4AF37`), Nút dạng viên thuốc (`rounded-full`).
+- **Iconography:** 100% Vector SVG sắc nét qua thư viện `lucide-angular` (Tuyệt đối không dùng Emoji).
 - **Database:** MongoDB (Mongoose ODM)
-- **Containerization:** Docker & Docker Compose
+- **Live Flight Data:** Tích hợp AirLabs API (`airlabs.co`) đồng bộ lịch trình chuyến bay thực tế.
+- **Containerization:** Docker & Docker Compose orchestrate toàn bộ MongoDB + Backend + Frontend (Nginx).
 - **Kiến trúc Module khép kín (Self-contained):** Mỗi module chứa trọn bộ `controller`, `service`, `schema (model)`, `dto`, `guard`.
 
 ---
 
-## 📂 Cấu trúc Thư mục Module
+## 📂 Cấu trúc Thư mục Hệ thống
 ```
-backend/
-├── src/
-│   ├── auth/           # Đăng nhập, đăng ký, JWT, Guard, Roles
-│   ├── users/          # Quản lý tài khoản, hồ sơ, Sky Miles, bảo vệ SUPER_ADMIN
-│   ├── airports/       # Quản lý sân bay, thành phố, tìm kiếm sân bay lân cận
-│   ├── flights/        # Quản lý chuyến bay, giá vé, ghế ngồi, Route Selection Algorithm
-│   ├── policies/       # Quản lý quy tắc hủy vé & % hoàn tiền linh hoạt
-│   ├── bookings/       # Giữ chỗ (Rule 2 tuần), mua vé, đổi vé, hủy vé, tra cứu
-│   ├── seed/           # Tự động nạp dữ liệu mẫu & SUPER_ADMIN duy nhất
-│   ├── app.module.ts   # Root Module kết nối MongoDB
-│   └── main.ts         # Khởi động ứng dụng (CORS, ValidationPipe, Prefix /api)
+đồ án/
+├── backend/            # NestJS Backend API
+│   ├── src/
+│   │   ├── auth/       # Đăng nhập, đăng ký, JWT, Guard, Roles
+│   │   ├── users/      # Quản lý tài khoản, hồ sơ, SkyMiles, bảo vệ SUPER_ADMIN
+│   │   ├── airports/   # Quản lý sân bay, thành phố, tìm kiếm sân bay lân cận
+│   │   ├── flights/    # Quản lý chuyến bay, giá vé, ghế ngồi, Seat Map, AirLabs Sync
+│   │   ├── policies/   # Quản lý quy tắc hủy vé & % hoàn tiền linh hoạt
+│   │   ├── bookings/   # Giữ chỗ (Rule > 14 ngày), mua vé, đổi vé, hủy vé, tra cứu
+│   │   ├── seed/       # Tự động nạp sân bay, chính sách & SUPER_ADMIN duy nhất
+│   │   ├── app.module.ts
+│   │   └── main.ts
+│   └── Dockerfile
+├── frontend/           # Angular 21 Standalone SPA
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── admin/  # Portal Quản trị (Dashboard, Flights, AirLabs Sync, Airports, Users, Bookings, Policies)
+│   │   │   ├── pages/  # Portal Khách hàng (Home Search, Results, Booking, Success, Track/My Trips, SkyMiles)
+│   │   │   ├── shared/ # Components dùng chung (Navbar, Footer, Seat Map Airbus A321, Auth Modal, Toast)
+│   │   │   └── core/   # Services (ApiService, AuthService, LanguageService), Guards, Interceptors, Models
+│   │   ├── index.html
+│   │   └── styles.css
+│   ├── nginx.conf
+│   └── Dockerfile
+├── GUI_Standards_Document.md # Tài liệu Quy chuẩn Thiết kế Giao diện người dùng
+└── docker-compose.yml        # Orchestration MongoDB + Backend + Frontend
 ```
 
 ---
@@ -47,17 +66,26 @@ Yêu cầu bật Docker Desktop, sau đó chạy lệnh tại thư mục gốc:
 ```bash
 docker compose up --build
 ```
-- MongoDB sẽ chạy tại cổng: `localhost:27017`
-- Backend API sẽ chạy tại: `http://localhost:3000/api`
+- **Cổng Frontend (Web Portal):** `http://localhost:4200`
+- **Cổng Backend API:** `http://localhost:3000/api`
+- **Cổng Database MongoDB:** `localhost:27017`
 
-### Cách 2: Chạy cục bộ bằng Node.js & Local MongoDB
-1. Đảm bảo MongoDB đang chạy tại `mongodb://localhost:27017`
-2. Vào thư mục `backend`:
+### Cách 2: Chạy cục bộ từng phân hệ (Development Mode)
+1. **Khởi động Backend:**
    ```bash
    cd backend
    npm install
    npm run start:dev
    ```
+   Backend lắng nghe tại `http://localhost:3000/api`.
+
+2. **Khởi động Frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+   Truy cập giao diện tại `http://localhost:4200`.
 
 ---
 
