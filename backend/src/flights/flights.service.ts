@@ -375,18 +375,7 @@ export class FlightsService {
       }
     }
 
-    // Mô phỏng sẵn một số ghế đã có người ngồi giống như hình ảnh thực tế (hàng 1, 2, 8A, 8B)
-    const simulatedOccupied = [
-      '1A', '1B', '1C', '1D', '1E', '1F',
-      '2A', '2B', '2C', '2D', '2E', '2F',
-      '3A', '3B',
-      '8A', '8B',
-      '15C', '15D',
-    ];
-    for (const s of simulatedOccupied) {
-      occupiedSet.add(s);
-    }
-
+    // Ghế chỉ bị chiếm khi có hành khách thực tế đã đặt chỗ trong Database
     const columns = ['A', 'B', 'C', 'D', 'E', 'F'];
     const totalRows = 31;
     const exitRows = [12, 14];
