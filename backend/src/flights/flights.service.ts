@@ -13,11 +13,13 @@ import {
   UpdateFlightStatusDto,
 } from './flights.dto';
 import { AirportsService } from '../airports/airports.service';
+import { Booking, BookingDocument } from '../bookings/bookings.schema';
 
 @Injectable()
 export class FlightsService {
   constructor(
     @InjectModel(Flight.name) private flightModel: Model<FlightDocument>,
+    @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
     private readonly airportsService: AirportsService,
   ) {}
 
@@ -342,5 +344,132 @@ export class FlightsService {
     }
 
     return connectingOptions;
+  }
+
+  /**
+   * Mô phỏng sơ đồ ghế ngồi chuẩn hàng không (Vietjet / Airbus A321)
+   * Phân loại:
+   * - Hàng 1 - 5: Hàng ghế ĐẶC BIỆT (Skyboss/Thương gia) - Màu đỏ
+   * - Hàng 6 - 11: Hàng ghế TIÊU CHUẨN - Màu xanh lá
+   * - Hàng 12, 14: Hàng ghế LỐI THOÁT HIỂM (Chỗ để chân rộng) - Màu xanh dương (bỏ qua hàng 13)
+   * - Hàng 15 - 31: Hàng ghế TIÊU CHUẨN - Màu xanh lá
+   * - Ghế đã bị đặt: Màu xám / Đỏ dấu X (is_occupied = true)
+   */
+  async getSeatMap(flightId: string) {
+    const flight = await this.findById(flightId);
+
+    // Lấy danh sách ghế đã được đặt trong DB
+    const bookings = await this.bookingModel
+      .find({
+        'ticket_coupons.flight_id': flight._id,
+        status: { $ne: 'CANCELLED' },
+      })
+      .exec();
+
+    const occupiedSet = new Set<string>();
+    for (const b of bookings) {
+      for (const coupon of b.ticket_coupons) {
+        if (coupon.flight_id.toString() === flight._id.toString() && coupon.seat_code) {
+          occupiedSet.add(coupon.seat_code.toUpperCase());
+        }
+      }
+    }
+
+    // Mô phỏng sẵn một số ghế đã có người ngồi giống như hình ảnh thực tế (hàng 1, 2, 8A, 8B)
+    const simulatedOccupied = [
+      '1A', '1B', '1C', '1D', '1E', '1F',
+      '2A', '2B', '2C', '2D', '2E', '2F',
+      '3A', '3B',
+      '8A', '8B',
+      '15C', '15D',
+    ];
+    for (const s of simulatedOccupied) {
+      occupiedSet.add(s);
+    }
+
+    const columns = ['A', 'B', 'C', 'D', 'E', 'F'];
+    const totalRows = 31;
+    const exitRows = [12, 14];
+    const specialRows = [1, 2, 3, 4, 5];
+    const skippedRows = [13]; // Chuẩn hàng không quốc tế bỏ qua hàng 13
+
+    const rows: any[] = [];
+
+    for (let r = 1; r <= totalRows; r++) {
+      if (skippedRows.includes(r)) continue;
+
+      const isExit = exitRows.includes(r);
+      const isSpecial = specialRows.includes(r);
+
+      const seats = columns.map((col) => {
+        const seatCode = `${r}${col}`;
+        let type: 'SPECIAL' | 'EXIT_ROW' | 'STANDARD' = 'STANDARD';
+        let typeLabel = 'Còn trống';
+        let fee = 0;
+        let cabinClass = 'ECONOMY';
+
+        if (isSpecial) {
+          type = 'SPECIAL';
+          typeLabel = 'Đặc biệt';
+          fee = 15; // 15 USD / 150.000đ
+          cabinClass = 'BUSINESS';
+        } else if (isExit) {
+          type = 'EXIT_ROW';
+          typeLabel = 'Hàng ghế gần lối thoát hiểm';
+          fee = 10; // 10 USD / 100.000đ
+          cabinClass = 'ECONOMY';
+        }
+
+        const isOccupied = occupiedSet.has(seatCode);
+
+        return {
+          seat_code: seatCode,
+          row: r,
+          column: col,
+          type,
+          type_label: typeLabel,
+          cabin_class: cabinClass,
+          fee,
+          is_occupied: isOccupied,
+          is_exit_row: isExit,
+          is_special: isSpecial,
+        };
+      });
+
+      rows.push({
+        row_number: r,
+        is_exit_row: isExit,
+        is_special: isSpecial,
+        seats,
+      });
+    }
+
+    return {
+      flight_id: flight._id,
+      flight_number: flight.flight_number,
+      route: `${flight.origin_iata} - ${flight.dest_iata}`,
+      aircraft_model: flight.aircraft?.model_name || 'Airbus A321',
+      departure_time: flight.scheduled_departure,
+      legend: [
+        { type: 'AVAILABLE', label: 'Còn trống', color: '#22c55e', bg: 'bg-green-500' },
+        { type: 'SELECTED', label: 'Đã chọn', color: '#eab308', bg: 'bg-yellow-400' },
+        { type: 'EXIT_ROW', label: 'Hàng ghế gần lối thoát hiểm', color: '#3b82f6', bg: 'bg-blue-500' },
+        { type: 'SPECIAL', label: 'Đặc biệt', color: '#ef4444', bg: 'bg-red-500' },
+        { type: 'OCCUPIED', label: 'Đã bị chọn / không có', color: '#9ca3af', bg: 'bg-gray-400' },
+      ],
+      notice: {
+        skyboss_benefit: 'Với vé Skyboss, quý khách được chọn chỗ ngồi miễn phí.',
+        exit_row_warning:
+          'Chúng tôi không đảm bảo cung cấp đúng chỗ ngồi lối thoát hiểm đã quý khách đặt trước và chỗ này có thể thay đổi mà không cần thông báo. Chỗ ngồi lối thoát hiểm (hàng ghế 12 và 14) chỉ có thể sắp xếp cho những hành khách người lớn và có khả năng hỗ trợ hành khách khác trong trường hợp khẩn cấp. Xin lưu ý rằng hành khách bị hạn chế về khả năng nghe nhìn, hành khách tàn tật hoặc hành khách đi kèm trẻ nhỏ không được phép ngồi chỗ này.',
+      },
+      layout: {
+        left_columns: ['A', 'B', 'C'],
+        right_columns: ['D', 'E', 'F'],
+        exit_rows: exitRows,
+        special_rows: specialRows,
+        skipped_rows: skippedRows,
+      },
+      rows,
+    };
   }
 }

@@ -68,6 +68,9 @@ export class TicketCoupon {
   @Prop({ required: true })
   fare_paid: number;
 
+  @Prop({ default: '' })
+  seat_code?: string; // e.g. '12A', '14C'
+
   @Prop({ default: 'OUTBOUND' })
   leg_type: string; // OUTBOUND, INBOUND, or CONNECTING_LEG
 

@@ -41,6 +41,11 @@ export class FlightsController {
     return this.flightsService.findById(id);
   }
 
+  @Get(':id/seat-map')
+  async getSeatMap(@Param('id') id: string) {
+    return this.flightsService.getSeatMap(id);
+  }
+
   @Post()
   async create(@Body() createFlightDto: CreateFlightDto) {
     return this.flightsService.create(createFlightDto);

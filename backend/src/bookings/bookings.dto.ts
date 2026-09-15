@@ -32,6 +32,10 @@ export class PassengerInputDto {
 
   @IsOptional()
   date_of_birth?: string;
+
+  @IsOptional()
+  @IsString()
+  seat_code?: string;
 }
 
 export class FlightLegSelectionDto {

@@ -112,6 +112,7 @@ export class BookingsService {
           cabin_class: inventory.cabin_class,
           is_smoking: inventory.is_smoking,
           fare_paid: fare,
+          seat_code: p.seat_code || '',
           leg_type: leg.leg_type || 'OUTBOUND',
           coupon_status: 'ACTIVE',
         });
@@ -343,6 +344,7 @@ export class BookingsService {
         cabin_class: newInventory.cabin_class,
         is_smoking: newInventory.is_smoking,
         fare_paid: fare,
+        seat_code: (p as any).seat_code || '',
         leg_type: 'OUTBOUND',
         coupon_status: 'ACTIVE',
       };
