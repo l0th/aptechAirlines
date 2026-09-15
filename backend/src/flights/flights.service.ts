@@ -1,0 +1,346 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Flight, FlightDocument, FlightStatus } from './flights.schema';
+import {
+  CreateFlightDto,
+  SearchFlightDto,
+  UpdateFlightDto,
+  UpdateFlightStatusDto,
+} from './flights.dto';
+import { AirportsService } from '../airports/airports.service';
+
+@Injectable()
+export class FlightsService {
+  constructor(
+    @InjectModel(Flight.name) private flightModel: Model<FlightDocument>,
+    private readonly airportsService: AirportsService,
+  ) {}
+
+  async findAll(status?: FlightStatus, origin?: string, dest?: string): Promise<Flight[]> {
+    const filter: any = {};
+    if (status) filter.status = status;
+    if (origin) filter.origin_iata = origin.toUpperCase();
+    if (dest) filter.dest_iata = dest.toUpperCase();
+    return this.flightModel.find(filter).sort({ scheduled_departure: 1 }).exec();
+  }
+
+  async findById(id: string): Promise<FlightDocument> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid flight ID format');
+    }
+    const flight = await this.flightModel.findById(id).exec();
+    if (!flight) {
+      throw new NotFoundException(`Flight with ID ${id} not found`);
+    }
+    return flight;
+  }
+
+  async create(createFlightDto: CreateFlightDto): Promise<FlightDocument> {
+    // Validate IATAs
+    await this.airportsService.findByIata(createFlightDto.origin_iata);
+    await this.airportsService.findByIata(createFlightDto.dest_iata);
+
+    const created = new this.flightModel({
+      ...createFlightDto,
+      origin_iata: createFlightDto.origin_iata.toUpperCase(),
+      dest_iata: createFlightDto.dest_iata.toUpperCase(),
+      status: FlightStatus.SCHEDULED,
+    });
+    return created.save();
+  }
+
+  async update(id: string, updateFlightDto: UpdateFlightDto): Promise<FlightDocument> {
+    const flight = await this.findById(id);
+
+    if (updateFlightDto.flight_number) flight.flight_number = updateFlightDto.flight_number;
+    if (updateFlightDto.departure_date) flight.departure_date = updateFlightDto.departure_date;
+    if (updateFlightDto.scheduled_departure) flight.scheduled_departure = new Date(updateFlightDto.scheduled_departure);
+    if (updateFlightDto.scheduled_arrival) flight.scheduled_arrival = new Date(updateFlightDto.scheduled_arrival);
+    if (updateFlightDto.duration_minutes !== undefined) flight.duration_minutes = updateFlightDto.duration_minutes;
+    if (updateFlightDto.distance_miles !== undefined) flight.distance_miles = updateFlightDto.distance_miles;
+    if (updateFlightDto.status) flight.status = updateFlightDto.status;
+    if (updateFlightDto.delay_reason !== undefined) flight.delay_reason = updateFlightDto.delay_reason;
+    if (updateFlightDto.inventories) flight.inventories = updateFlightDto.inventories as any;
+
+    return flight.save();
+  }
+
+  async updateStatus(id: string, dto: UpdateFlightStatusDto): Promise<FlightDocument> {
+    const flight = await this.findById(id);
+    flight.status = dto.status;
+    if (dto.delay_reason !== undefined) flight.delay_reason = dto.delay_reason;
+    if (dto.actual_departure) flight.actual_departure = new Date(dto.actual_departure);
+    if (dto.actual_arrival) flight.actual_arrival = new Date(dto.actual_arrival);
+    return flight.save();
+  }
+
+  async delete(id: string): Promise<{ message: string }> {
+    await this.findById(id);
+    await this.flightModel.findByIdAndDelete(id).exec();
+    return { message: `Flight with ID ${id} deleted successfully` };
+  }
+
+  // Atomically decrement or increment available seats
+  async updateAvailableSeats(
+    flightId: string,
+    inventoryId: string,
+    seatCountChange: number, // Negative to reserve/block, positive to release/cancel
+  ): Promise<boolean> {
+    const flight = await this.findById(flightId);
+    const inv = flight.inventories.find(
+      (i: any) => i._id.toString() === inventoryId || i.id === inventoryId,
+    );
+    if (!inv) {
+      throw new NotFoundException(`Inventory with ID ${inventoryId} not found on flight`);
+    }
+
+    if (seatCountChange < 0 && inv.available_seats < Math.abs(seatCountChange)) {
+      throw new BadRequestException(`Not enough available seats in ${inv.cabin_class}. Only ${inv.available_seats} left.`);
+    }
+
+    inv.available_seats += seatCountChange;
+    await flight.save();
+    return true;
+  }
+
+  /**
+   * Requirement 3.3: Advanced Flight Search & Route Selection Algorithm
+   */
+  async searchFlights(dto: SearchFlightDto): Promise<{
+    origin_info: any;
+    dest_info: any;
+    is_round_trip: boolean;
+    passenger_breakdown: { adults: number; children: number; seniors: number; total: number };
+    onward_flights: any[];
+    return_flights?: any[];
+    connecting_routes?: any[]; // Intermediate stopover suggestions if direct not available
+  }> {
+    const adults = Number(dto.adults) || 1;
+    const children = Number(dto.children) || 0;
+    const seniors = Number(dto.seniors) || 0;
+    const totalPassengers = adults + children + seniors;
+
+    // 1. Validate dates (Requirement 3.3.4)
+    if (dto.return_date && dto.return_date < dto.departure_date) {
+      throw new BadRequestException('Return date cannot be earlier than departure date');
+    }
+
+    // 2. Resolve origin and destination
+    const originResolve = await this.airportsService.resolveCity(dto.origin);
+    const destResolve = await this.airportsService.resolveCity(dto.destination);
+
+    const originIata = originResolve.exactMatches[0]?.iata_code || dto.origin.toUpperCase();
+    const destIata = destResolve.exactMatches[0]?.iata_code || dto.destination.toUpperCase();
+
+    // 3. Search Direct Flights for Onward Trip
+    const onwardDirect = await this.findDirectFlights(
+      originIata,
+      destIata,
+      dto.departure_date,
+      dto.departure_date_end,
+      dto.cabin_class,
+      dto.is_smoking,
+      totalPassengers,
+      adults,
+      children,
+      seniors,
+    );
+
+    let connectingRoutes: any[] = [];
+    // Requirement 3.3.1: If no direct operational service, use Route Selection Algorithm
+    if (onwardDirect.length === 0) {
+      connectingRoutes = await this.findConnectingRoutes(
+        originIata,
+        destIata,
+        dto.departure_date,
+        totalPassengers,
+        adults,
+        children,
+        seniors,
+      );
+    }
+
+    // 4. If Round Trip requested, search Return Flights
+    let returnFlights: any[] | undefined = undefined;
+    if (dto.return_date) {
+      returnFlights = await this.findDirectFlights(
+        destIata,
+        originIata,
+        dto.return_date,
+        undefined,
+        dto.cabin_class,
+        dto.is_smoking,
+        totalPassengers,
+        adults,
+        children,
+        seniors,
+      );
+    }
+
+    return {
+      origin_info: {
+        query: dto.origin,
+        resolved_iata: originIata,
+        nearest_suggestion: originResolve.nearestSuggestion,
+      },
+      dest_info: {
+        query: dto.destination,
+        resolved_iata: destIata,
+        nearest_suggestion: destResolve.nearestSuggestion,
+      },
+      is_round_trip: !!dto.return_date,
+      passenger_breakdown: { adults, children, seniors, total: totalPassengers },
+      onward_flights: onwardDirect,
+      return_flights: returnFlights,
+      connecting_routes: connectingRoutes,
+    };
+  }
+
+  private async findDirectFlights(
+    origin: string,
+    dest: string,
+    departureDate: string,
+    departureDateEnd: string | undefined,
+    cabinClass?: string,
+    isSmoking?: boolean,
+    totalPassengers = 1,
+    adults = 1,
+    children = 0,
+    seniors = 0,
+  ) {
+    const filter: any = {
+      origin_iata: origin,
+      dest_iata: dest,
+      status: { $ne: FlightStatus.CANCELLED },
+    };
+
+    if (departureDateEnd) {
+      filter.departure_date = { $gte: departureDate, $lte: departureDateEnd };
+    } else {
+      filter.departure_date = departureDate;
+    }
+
+    const flights = await this.flightModel.find(filter).sort({ scheduled_departure: 1 }).exec();
+
+    const formattedResults: any[] = [];
+    for (const fl of flights) {
+      for (const inv of fl.inventories) {
+        if (cabinClass && inv.cabin_class !== cabinClass) continue;
+        if (isSmoking !== undefined && inv.is_smoking !== isSmoking) continue;
+        if (inv.available_seats < totalPassengers) continue;
+
+        // Pricing calculation:
+        // Adults 100%, Children 75%, Seniors 85%
+        const adultPrice = inv.base_price;
+        const childPrice = Math.round(inv.base_price * 0.75);
+        const seniorPrice = Math.round(inv.base_price * 0.85);
+        const totalPartyPrice =
+          adults * adultPrice + children * childPrice + seniors * seniorPrice;
+
+        formattedResults.push({
+          flight_id: fl._id,
+          flight_number: fl.flight_number,
+          origin_iata: fl.origin_iata,
+          dest_iata: fl.dest_iata,
+          departure_date: fl.departure_date,
+          scheduled_departure: fl.scheduled_departure,
+          scheduled_arrival: fl.scheduled_arrival,
+          duration_minutes: fl.duration_minutes,
+          distance_miles: fl.distance_miles,
+          status: fl.status,
+          delay_reason: fl.delay_reason,
+          aircraft: fl.aircraft,
+          inventory_id: (inv as any)._id,
+          cabin_class: inv.cabin_class,
+          is_smoking: inv.is_smoking,
+          available_seats: inv.available_seats,
+          base_price_per_adult: adultPrice,
+          total_party_price: totalPartyPrice,
+        });
+      }
+    }
+    return formattedResults;
+  }
+
+  /**
+   * Route Selection Algorithm:
+   * Finds intermediate transit airports T where Origin -> T and T -> Destination both have flights
+   */
+  private async findConnectingRoutes(
+    origin: string,
+    dest: string,
+    departureDate: string,
+    totalPassengers: number,
+    adults: number,
+    children: number,
+    seniors: number,
+  ): Promise<any[]> {
+    const leg1Flights = await this.flightModel
+      .find({
+        origin_iata: origin,
+        departure_date: departureDate,
+        status: { $ne: FlightStatus.CANCELLED },
+      })
+      .exec();
+
+    const connectingOptions: any[] = [];
+
+    for (const leg1 of leg1Flights) {
+      const transitIata = leg1.dest_iata;
+      if (transitIata === dest) continue;
+
+      // Find leg 2 from transit to dest
+      const leg2Flights = await this.flightModel
+        .find({
+          origin_iata: transitIata,
+          dest_iata: dest,
+          departure_date: departureDate,
+          scheduled_departure: { $gt: leg1.scheduled_arrival }, // Must depart after leg 1 arrives
+          status: { $ne: FlightStatus.CANCELLED },
+        })
+        .exec();
+
+      for (const leg2 of leg2Flights) {
+        // Layover duration in minutes
+        const layoverMinutes = Math.round(
+          (new Date(leg2.scheduled_departure).getTime() - new Date(leg1.scheduled_arrival).getTime()) / 60000,
+        );
+
+        if (layoverMinutes >= 45 && layoverMinutes <= 720) {
+          // Valid transit connection (45 mins to 12 hours)
+          connectingOptions.push({
+            route_type: 'CONNECTING',
+            transit_airport: transitIata,
+            total_duration_minutes: leg1.duration_minutes + layoverMinutes + leg2.duration_minutes,
+            layover_minutes: layoverMinutes,
+            leg1: {
+              flight_id: leg1._id,
+              flight_number: leg1.flight_number,
+              origin_iata: leg1.origin_iata,
+              dest_iata: leg1.dest_iata,
+              departure: leg1.scheduled_departure,
+              arrival: leg1.scheduled_arrival,
+              inventories: leg1.inventories.filter((i) => i.available_seats >= totalPassengers),
+            },
+            leg2: {
+              flight_id: leg2._id,
+              flight_number: leg2.flight_number,
+              origin_iata: leg2.origin_iata,
+              dest_iata: leg2.dest_iata,
+              departure: leg2.scheduled_departure,
+              arrival: leg2.scheduled_arrival,
+              inventories: leg2.inventories.filter((i) => i.available_seats >= totalPassengers),
+            },
+          });
+        }
+      }
+    }
+
+    return connectingOptions;
+  }
+}
