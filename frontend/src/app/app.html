@@ -1,0 +1,17 @@
+<!-- Global Toasts -->
+<app-toast />
+
+@if (!isAdminRoute()) {
+  <!-- Client Portal Navbar -->
+  <app-navbar />
+}
+
+<!-- Router Content -->
+<main class="min-h-screen">
+  <router-outlet />
+</main>
+
+@if (!isAdminRoute()) {
+  <!-- Client Portal Footer -->
+  <app-footer />
+}

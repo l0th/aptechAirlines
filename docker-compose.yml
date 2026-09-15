@@ -35,6 +35,19 @@ services:
     networks:
       - ars-network
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ars-frontend
+    restart: always
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend
+    networks:
+      - ars-network
+
 networks:
   ars-network:
     driver: bridge

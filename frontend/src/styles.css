@@ -1,0 +1,57 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  body {
+    @apply font-sans bg-slate-50 text-slate-800 antialiased selection:bg-amber-100 selection:text-amber-900;
+  }
+}
+
+@layer components {
+  /* Buttons - Pill Shaped with Shadow Lift as specified in GUI Standards */
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold rounded-full px-6 py-3 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-navy {
+    @apply inline-flex items-center justify-center gap-2 bg-[#0A2540] hover:bg-[#13395F] text-white font-semibold rounded-full px-5 py-2.5 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-outline-navy {
+    @apply inline-flex items-center justify-center gap-2 border-2 border-[#0A2540] text-[#0A2540] hover:bg-slate-100 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-outline-gold {
+    @apply inline-flex items-center justify-center gap-2 border-2 border-amber-500 text-amber-600 hover:bg-amber-50 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 text-slate-700 hover:text-navy hover:bg-slate-100 font-medium rounded-full px-4 py-2 transition-all duration-150 disabled:opacity-50;
+  }
+
+  /* Luxury Card Style */
+  .card-luxury {
+    @apply bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200;
+  }
+
+  .badge-status {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+}
+
+/* Custom Glow for Selected Seat */
+.seat-glow {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.75);
+}
+
+/* Custom Aircraft Shape */
+.aircraft-fuselage {
+  background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 10%, #FFFFFF 90%, #F1F5F9 100%);
+  border: 3px solid #CBD5E1;
+  border-top-left-radius: 9999px;
+  border-top-right-radius: 9999px;
+  border-bottom-left-radius: 40px;
+  border-bottom-right-radius: 40px;
+}
+
