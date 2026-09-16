@@ -1,1 +1,307 @@
-﻿1.  Introduction 2.  Objectives of the project 3.  Problem Statement 4.  Deliverables  Index  5.  Hardware/ Software Requirements    Introduction The  thirst  for  learning,  upgrading  technical  skills  and  applying  the  concepts  in  real life environment at a fast pace is what the industry demands from IT professionals today.  However  busy  work  schedules,  far-flung  locations,  and  unavailability  of convenient time-slots pose as major barriers when it comes to applying the concepts into  realism.   And  hence  the  need  to  look  out  for  alternative  means  of implementation in the form of laddered approach.   The above truly pose as constraints especially for our students too! With their busy schedules,  it  is  indeed  difficult  for  our  students  to  keep  up  with  the  genuine  and constant need for integrated application which can be seen live especially so in the field of  IT  education  where technology  can  change on  the spur of  a moment.  Well,technology does come to our rescue at such times!! Keeping  the  above  in  mind  and  in  tune  with  our  constant  endeavour  to  use Technology in our training model, we at Aptech have thought of revolutionizing the way  our  students  learn  and  implement  the  concepts  using  tools  themselves  by providing a live and synchronous eProject   learning environment! So what is this eProject? eProject is a step by step learning environment that closely simulates the classroom and  Lab  based  learning  environment  into  actual  implementation.  It  is  a  project implementation at your fingertips!! An electronic, live juncture on the machine that allows you to   o	Practice step by step i.e. laddered approach. o	Build a larger more robust application. o	Usage of certain utilities in applications designed by user. o	Single program to unified code leading to a complete application. o	Learn implementation of concepts in a phased manner. o	Enhance skills and add value. o	Work on real life projects.  o	Give a real life scenario and help to create applications more complicated and useful. o	Mentoring through email support. The students at the centre are expected to complete this eProject and send completedocumentation with source code within the time allotted to eProjects TeamLooking forward to a positive response from your end!!   Objectives of the project The  Objective  of  this  program  is  to  give  a  sample  project  to  work  on  real  life projects. These applications help you build a larger more robust application.   The  objective  is  not  to  teach  you  the  software’s  but  to  provide  you  with  a  real  life scenario and help you create basic applications using the tools.  You can revise the topics before you start with the project.   These programs should be done in the Lab sessions with assistance of the faculty if required.  It is very essential that a student has a clear understanding of the subject.   Kindly  get  back  to eProjects Team in  case  of  any  doubts  regarding  the application or its objectives.  Introduction  Problem Statement  The problem statement is attached separately in a file “AirlineReservationSystem.doc” Standards plan: Every code block must have comments.  The  logic  of  the  program  needs  to  be  explained.  Proper  documentation  should  be maintained.  Complete  Project  Report  along  with  synopsis,  code  and  documentation  should  be prepared.  Documentation: No  project  is  complete  without  documentation.  In  fact,  it  is  one  of  the  most important  activities  during  the  development  of  a  project.  The  documentation  of  an ideal  project  will  be  in  the  form  of  a  project  report  comprising  of  the  followingdocuments:  Certificate of Completion. Table of Contents. Problem Definition.  Customer Requirement Specification.  Project Plan. E-R Diagrams. Algorithms. GUI Standards Document. Interface Design Document. Task Sheet. Project Review and Monitoring Report. Unit Testing Check List. Final Check List.     Deliverables You need to submit the following Deliverables: a) Send us 2 (two) eprojects status mail, each should be after 10     days interval from your eprojects start date. Incase if your project     is less than 30 days then also you need to send 2 (two) status     mails (first status mail between 7-10 days and second 3 days     before the end date of project).  b) The status mail should consist of description with review document        (what's going on the project). Also you can send your doubts / clarification orany additional inputs required to complete your eproject any time during theproject planning and execution.  c) At the time of project submission also send us the feedback along              with your documentation (soft copy). The Feedback form isattached with this mail.   Remember that the subject of your email should start either with the word STATUS: or DOUBT: or submission accordingly..Hardware Hardware/ Software Requirements A minimum computer system that will help you access all the tools in thecourses is a Pentium 166 or better  128 Megabytes of RAM or better   Software Visual Studio .Net / ASP IIS server .Net Framework Java Virtual Machine/ J2EE server Notepad/Java editor j2sdk1.4.1_02 (or later). EJB Dev Kit Java enabled web server JSP / Servlets Dev. Kit 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1.  Introduction 
+2.  Objectives of the project 
+3.  Problem Statement 
+4.  Deliverables  
+
+
+
+
+
+
+
+
+
+
+
+
+
+Index  
+
+5.  Hardware/ Software Requirements    
+
+
+
+
+
+
+
+
+
+
+
+
+
+Introduction 
+
+
+The  thirst  for  learning,  upgrading  technical  skills  and  applying  the  concepts  in  real 
+life environment at a fast pace is what the industry demands from IT professionals 
+today.  However  busy  work  schedules,  far-flung  locations,  and  unavailability  of 
+convenient time-slots pose as major barriers when it comes to applying the concepts 
+into  realism.   And  hence  the  need  to  look  out  for  alternative  means  of 
+implementation in the form of laddered approach.   
+
+The above truly pose as constraints especially for our students too! With their busy 
+schedules,  it  is  indeed  difficult  for  our  students  to  keep  up  with  the  genuine  and 
+constant need for integrated application which can be seen live especially so in the 
+field of  IT  education  where technology  can  change on  the spur of  a moment.  Well,
+technology does come to our rescue at such times!! 
+
+Keeping  the  above  in  mind  and  in  tune  with  our  constant  endeavour  to  use 
+Technology in our training model, we at Aptech have thought of revolutionizing the 
+way  our  students  learn  and  implement  the  concepts  using  tools  themselves  by 
+providing a live and synchronous eProject   learning environment! 
+
+So what is this eProject? 
+
+eProject is a step by step learning environment that closely simulates the classroom 
+and  Lab  based  learning  environment  into  actual  implementation.  It  is  a  project 
+implementation at your fingertips!! An electronic, live juncture on the machine that 
+allows you to   
+
+o	Practice step by step i.e. laddered approach. 
+o	Build a larger more robust application. 
+o	Usage of certain utilities in applications designed by user. 
+o	Single program to unified code leading to a complete application. 
+o	Learn implementation of concepts in a phased manner. 
+o	Enhance skills and add value. 
+o	Work on real life projects.  
+o	Give a real life scenario and help to create applications more complicated and 
+useful. 
+o	Mentoring through email support. 
+
+
+
+The students at the centre are expected to complete this eProject and send complete
+documentation with source code within the time allotted to eProjects Team
+
+Looking forward to a positive response from your end!!   
+
+
+
+
+
+
+
+
+
+
+Objectives of the project 
+
+
+The  Objective  of  this  program  is  to  give  a  sample  project  to  work  on  real  life 
+projects. These applications help you build a larger more robust application.   
+
+
+The  objective  is  not  to  teach  you  the  software's  but  to  provide  you  with  a  real  life 
+scenario and help you create basic applications using the tools.  
+
+You can revise the topics before you start with the project.   
+
+These programs should be done in the Lab sessions with assistance of the faculty if 
+required.  
+
+It is very essential that a student has a clear understanding of the subject.   
+
+Kindly  get  back  to eProjects Team in  case  of  any  doubts  regarding  the 
+application or its objectives.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Introduction  
+
+
+
+
+
+
+
+
+
+
+
+Problem Statement  
+
+
+The problem statement is attached separately in a file "AirlineReservationSystem.doc" 
+
+Standards plan: 
+
+Every code block must have comments.  
+The  logic  of  the  program  needs  to  be  explained.  Proper  documentation  should  be 
+maintained.  
+Complete  Project  Report  along  with  synopsis,  code  and  documentation  should  be 
+prepared.  
+
+
+Documentation: 
+
+No  project  is  complete  without  documentation.  In  fact,  it  is  one  of  the  most 
+important  activities  during  the  development  of  a  project.  The  documentation  of  an 
+ideal  project  will  be  in  the  form  of  a  project  report  comprising  of  the  following
+documents:  
+
+Certificate of Completion. 
+Table of Contents. 
+Problem Definition.  
+Customer Requirement Specification.  
+Project Plan. 
+E-R Diagrams. 
+Algorithms. 
+GUI Standards Document. 
+Interface Design Document. 
+Task Sheet. 
+Project Review and Monitoring Report. 
+Unit Testing Check List. 
+Final Check List.     
+
+
+
+
+
+
+
+
+
+
+
+
+
+Deliverables 
+
+
+
+You need to submit the following Deliverables: 
+
+
+a) Send us 2 (two) eprojects status mail, each should be after 10 
+    days interval from your eprojects start date. Incase if your project 
+    is less than 30 days then also you need to send 2 (two) status 
+    mails (first status mail between 7-10 days and second 3 days 
+    before the end date of project).  
+
+b) The status mail should consist of description with review document        
+(what's going on the project). Also you can send your doubts / clarification or
+any additional inputs required to complete your eproject any time during the
+project planning and execution.  
+
+c) At the time of project submission also send us the feedback along              
+with your documentation (soft copy). The Feedback form is
+attached with this mail.   
+
+
+Remember that the subject of your email should start either with the word STATUS: or DOUBT: or submission accordingly..
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Hardware 
+
+
+
+
+
+
+
+
+
+
+
+Hardware/ Software Requirements 
+
+
+
+A minimum computer system that will help you access all the tools in the
+courses is a Pentium 166 or better  
+
+
+128 Megabytes of RAM or better   
+
+
+
+
+Software 
+
+
+Visual Studio .Net / ASP 
+IIS server 
+.Net Framework 
+Java Virtual Machine/ J2EE server 
+Notepad/Java editor 
+j2sdk1.4.1_02 (or later). 
+EJB Dev Kit 
+Java enabled web server 
+JSP / Servlets Dev. Kit 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

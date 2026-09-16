@@ -86,6 +86,12 @@ docker compose up --build
    npm start
    ```
    Truy cập giao diện tại `http://localhost:4200`.
+   Frontend gọi API qua đường dẫn tương đối `/api` — khi chạy `npm start`, `proxy.conf.json`
+   (đã khai báo trong `angular.json`) sẽ proxy `/api` sang `http://localhost:3000`.
+
+> **Lưu ý về dữ liệu chuyến bay:** hệ thống **không** tự seed chuyến bay. Sau khi CSDL mới,
+> hãy tạo chuyến bay bằng **Admin CRUD** (`/admin/flights`) hoặc **đồng bộ AirLabs**
+> (`/admin/airlabs-sync`) trước khi tra cứu, nếu không trang kết quả tìm kiếm sẽ rỗng.
 
 ---
 
