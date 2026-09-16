@@ -13,6 +13,8 @@ export enum BookingStatus {
 export enum BookingType {
   ONE_WAY = 'ONE_WAY',
   ROUND_TRIP = 'ROUND_TRIP',
+  // Requirement 3.3.3: hành trình nhiều chặng (nối chuyến qua điểm trung chuyển)
+  CONNECTING = 'CONNECTING',
 }
 
 export enum PassengerType {
@@ -144,11 +146,29 @@ export class Booking {
 
   @Prop({ type: [PaymentTransaction], default: [] })
   payment_transactions: PaymentTransaction[];
+
+  @Prop()
+  early_bird_percent?: number;
+
+  @Prop()
+  early_bird_label?: string;
+
+  @Prop()
+  early_bird_label_en?: string;
+
+  @Prop()
+  ff_tier?: string;
+
+  @Prop()
+  ff_discount_percent?: number;
+
+  @Prop()
+  pricing_note?: string;
 }
 
 export const BookingSchema = SchemaFactory.createForClass(Booking);
 
-BookingSchema.index({ blocking_number: 1 });
-BookingSchema.index({ confirmation_number: 1 });
-BookingSchema.index({ pnr_code: 1 });
+// LƯU Ý: blocking_number / confirmation_number / pnr_code đã có `unique: true` trong
+// @Prop nên Mongoose tự tạo index — khai báo lại bằng schema.index() sẽ sinh index
+// trùng và log cảnh báo "Duplicate schema index" khi khởi động.
 BookingSchema.index({ user_id: 1 });

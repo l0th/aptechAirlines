@@ -85,11 +85,15 @@ export class UpdateUserDto {
   @IsString()
   preferred_credit_card?: string;
 
+  // Staff-only field. UsersController rejects any non-staff (CUSTOMER) payload
+  // that contains `sky_miles` with 403 to prevent self-crediting miles.
   @IsOptional()
   @IsInt()
   @Min(0)
   sky_miles?: number;
 
+  // Staff-only field. UsersController rejects any non-staff (CUSTOMER) payload
+  // that contains `role` with 403 to prevent self-promotion to ADMIN.
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;

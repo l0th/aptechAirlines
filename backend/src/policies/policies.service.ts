@@ -60,6 +60,7 @@ export class PoliciesService {
     if (updatePolicyDto.max_days_before !== undefined) policy.max_days_before = updatePolicyDto.max_days_before;
     if (updatePolicyDto.refund_percentage !== undefined) policy.refund_percentage = updatePolicyDto.refund_percentage;
     if (updatePolicyDto.description !== undefined) policy.description = updatePolicyDto.description;
+    if (updatePolicyDto.description_en !== undefined) policy.description_en = updatePolicyDto.description_en;
 
     return policy.save();
   }

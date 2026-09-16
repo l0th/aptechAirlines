@@ -28,6 +28,30 @@ export class CreateAirportDto {
   @IsOptional()
   @IsString()
   time_zone?: string;
+
+  @IsOptional()
+  @IsString()
+  icao_code?: string;
+
+  @IsOptional()
+  @IsString()
+  country_code?: string;
+
+  @IsOptional()
+  @IsString()
+  city_code?: string;
+
+  @IsOptional()
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @IsNumber()
+  lng?: number;
+
+  @IsOptional()
+  @IsString()
+  data_source?: string;
 }
 
 export class UpdateAirportDto {
@@ -54,4 +78,28 @@ export class UpdateAirportDto {
   @IsOptional()
   @IsString()
   time_zone?: string;
+
+  @IsOptional()
+  @IsString()
+  icao_code?: string;
+
+  @IsOptional()
+  @IsString()
+  country_code?: string;
+
+  @IsOptional()
+  @IsString()
+  city_code?: string;
+
+  @IsOptional()
+  @IsNumber()
+  lat?: number;
+
+  @IsOptional()
+  @IsNumber()
+  lng?: number;
+
+  @IsOptional()
+  @IsString()
+  data_source?: string;
 }

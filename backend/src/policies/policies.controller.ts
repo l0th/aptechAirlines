@@ -6,10 +6,19 @@ import {
   Param,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { PoliciesService } from './policies.service';
 import { CreatePolicyDto, UpdatePolicyDto } from './policies.dto';
+import { JwtAuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/users.schema';
 
+// Staff roles allowed to mutate fare/refund policies
+const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
+
+// NOTE: all @Get routes stay public (guests may read published policies).
 @Controller('policies')
 export class PoliciesController {
   constructor(private readonly policiesService: PoliciesService) {}
@@ -25,11 +34,15 @@ export class PoliciesController {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...STAFF_ROLES)
   async create(@Body() createPolicyDto: CreatePolicyDto) {
     return this.policiesService.create(createPolicyDto);
   }
 
   @Put(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...STAFF_ROLES)
   async update(
     @Param('id') id: string,
     @Body() updatePolicyDto: UpdatePolicyDto,
@@ -38,6 +51,8 @@ export class PoliciesController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...STAFF_ROLES)
   async delete(@Param('id') id: string) {
     return this.policiesService.delete(id);
   }

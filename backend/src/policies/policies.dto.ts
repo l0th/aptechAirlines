@@ -18,6 +18,10 @@ export class CreatePolicyDto {
   @IsString()
   @IsNotEmpty()
   description: string;
+
+  @IsOptional()
+  @IsString()
+  description_en?: string;
 }
 
 export class UpdatePolicyDto {
@@ -40,4 +44,8 @@ export class UpdatePolicyDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  description_en?: string;
 }

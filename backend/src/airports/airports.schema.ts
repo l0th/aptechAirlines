@@ -27,6 +27,24 @@ export class Airport {
 
   @Prop({ default: 'Asia/Ho_Chi_Minh' })
   time_zone: string;
+
+  @Prop({ required: false })
+  icao_code?: string;
+
+  @Prop({ required: false })
+  country_code?: string;
+
+  @Prop({ required: false })
+  city_code?: string;
+
+  @Prop({ required: false })
+  lat?: number;
+
+  @Prop({ required: false })
+  lng?: number;
+
+  @Prop({ default: 'seed' })
+  data_source?: string;
 }
 
 export const AirportSchema = SchemaFactory.createForClass(Airport);

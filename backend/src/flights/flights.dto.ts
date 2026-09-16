@@ -11,8 +11,17 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { CabinClass, FlightStatus } from './flights.schema';
+
+// Query params always arrive as strings; convert before validation.
+const toNumber = ({ value }: { value: unknown }) =>
+  value === undefined || value === null || value === '' ? undefined : Number(value);
+
+const toBoolean = ({ value }: { value: unknown }) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  return value === true || value === 'true' || value === '1';
+};
 
 export class InventoryDto {
   @IsEnum(CabinClass)
@@ -178,20 +187,24 @@ export class SearchFlightDto {
   cabin_class?: CabinClass;
 
   @IsOptional()
+  @Transform(toBoolean)
   @IsBoolean()
   is_smoking?: boolean;
 
   @IsOptional()
+  @Transform(toNumber)
   @IsInt()
   @Min(1)
   adults?: number;
 
   @IsOptional()
+  @Transform(toNumber)
   @IsInt()
   @Min(0)
   children?: number;
 
   @IsOptional()
+  @Transform(toNumber)
   @IsInt()
   @Min(0)
   seniors?: number;

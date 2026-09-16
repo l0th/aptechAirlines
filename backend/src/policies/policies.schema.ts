@@ -16,6 +16,9 @@ export class CancellationPolicy {
 
   @Prop({ required: true })
   description: string;
+
+  @Prop({ required: false })
+  description_en?: string;
 }
 
 export const CancellationPolicySchema = SchemaFactory.createForClass(CancellationPolicy);

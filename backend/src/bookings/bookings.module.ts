@@ -6,6 +6,9 @@ import { Booking, BookingSchema } from './bookings.schema';
 import { FlightsModule } from '../flights/flights.module';
 import { UsersModule } from '../users/users.module';
 import { PoliciesModule } from '../policies/policies.module';
+import { AuthModule } from '../auth/auth.module';
+import { MailModule } from '../mail/mail.module';
+import { BookingsScheduler } from './bookings.scheduler';
 
 @Module({
   imports: [
@@ -13,9 +16,11 @@ import { PoliciesModule } from '../policies/policies.module';
     FlightsModule,
     UsersModule,
     PoliciesModule,
+    AuthModule,
+    MailModule,
   ],
   controllers: [BookingsController],
-  providers: [BookingsService],
+  providers: [BookingsService, BookingsScheduler],
   exports: [BookingsService, MongooseModule],
 })
 export class BookingsModule {}

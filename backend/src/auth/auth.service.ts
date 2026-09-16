@@ -42,6 +42,9 @@ export class AuthService {
     return {
       access_token: this.jwtService.sign(payload),
       user: {
+        // `_id` là tên field mà toàn bộ frontend dùng (khớp document User và GET /api/auth/me).
+        // `id` được giữ lại để tương thích ngược.
+        _id: user._id,
         id: user._id,
         username: user.username,
         email: user.email,

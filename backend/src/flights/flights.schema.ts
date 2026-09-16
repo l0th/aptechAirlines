@@ -19,14 +19,17 @@ export enum CabinClass {
 
 @Schema({ _id: false })
 export class AircraftInfo {
-  @Prop({ required: true, default: 'A321' })
-  model_code: string;
+  @Prop()
+  model_code?: string;
 
-  @Prop({ required: true, default: 'Airbus A321' })
-  model_name: string;
+  @Prop()
+  model_name?: string;
 
-  @Prop({ required: true, default: 180 })
-  total_capacity: number;
+  @Prop()
+  total_capacity?: number;
+
+  @Prop()
+  registration?: string;
 }
 
 @Schema({ _id: true })
@@ -81,8 +84,10 @@ export class Flight {
   @Prop({ required: true, default: 120 })
   duration_minutes: number;
 
-  // Sky Miles reference (miles earned on this flight)
-  @Prop({ required: true, default: 500 })
+  // Sky Miles reference (miles earned on this flight).
+  // Computed from the real great-circle distance between the two airports' coordinates
+  // (see FlightsService.greatCircleMiles). 0 = unknown, never a made-up constant.
+  @Prop({ required: true, default: 0 })
   distance_miles: number;
 
   @Prop({ type: String, enum: FlightStatus, default: FlightStatus.SCHEDULED })
@@ -92,8 +97,11 @@ export class Flight {
   @Prop({ default: '' })
   delay_reason: string;
 
-  @Prop({ type: AircraftInfo, default: () => ({}) })
-  aircraft: AircraftInfo;
+  @Prop()
+  delay_minutes?: number;
+
+  @Prop({ type: AircraftInfo })
+  aircraft?: AircraftInfo;
 
   @Prop({ type: [FlightInventorySchema], default: [] })
   inventories: FlightInventory[];

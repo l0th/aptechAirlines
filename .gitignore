@@ -40,3 +40,6 @@ logs/
 # Temp files
 tmp/
 temp/
+
+# Ảnh chụp màn hình phục vụ kiểm thử GUI (không cần đưa vào repo)
+browser-screenshots/

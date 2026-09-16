@@ -36,6 +36,9 @@ export class PassengerInputDto {
   @IsOptional()
   @IsString()
   seat_code?: string;
+
+  @IsOptional()
+  seat_codes?: Record<string, string>;
 }
 
 export class FlightLegSelectionDto {
@@ -101,6 +104,15 @@ export class RescheduleTicketDto {
   @IsString()
   @IsNotEmpty()
   new_inventory_id: string;
+
+  // Optional: reschedule the INBOUND leg of a ROUND_TRIP booking as well (Req 3.6.2.2)
+  @IsOptional()
+  @IsString()
+  new_return_flight_id?: string;
+
+  @IsOptional()
+  @IsString()
+  new_return_inventory_id?: string;
 
   @IsOptional()
   @IsString()
