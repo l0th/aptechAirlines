@@ -35,6 +35,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'flight-lookup',
+    loadComponent: () =>
+      import('./pages/flight-lookup/flight-lookup.component').then(
+        (m) => m.FlightLookupComponent,
+      ),
+  },
+  {
     path: 'skymiles',
     loadComponent: () =>
       import('./pages/skymiles/skymiles.component').then(

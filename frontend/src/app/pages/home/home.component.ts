@@ -1,12 +1,38 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  HostListener,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import {
+  Subject,
+  Subscription,
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  of,
+  switchMap,
+} from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
-import { Airport } from '../../core/models/airport.model';
+import {
+  Airport,
+  AirportSuggestion,
+  CitySuggestion,
+  CountrySuggestion,
+  LocationScope,
+  LocationSuggestResponse,
+} from '../../core/models/airport.model';
 import { CabinClass } from '../../core/models/flight.model';
 
 @Component({
@@ -81,6 +107,20 @@ import { CabinClass } from '../../core/models/flight.model';
                 <option [value]="CabinClass.ECONOMY">{{ lang.t('search.economy') }}</option>
                 <option [value]="CabinClass.BUSINESS">{{ lang.t('search.business') }}</option>
                 <option [value]="CabinClass.FIRST">{{ lang.t('search.first') }}</option>
+                <option [value]="CabinClass.CLUB">{{ lang.t('search.club') }}</option>
+              </select>
+            </div>
+
+            <!-- Smoking Preference Picker -->
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-bold text-slate-500 hidden sm:block">{{ lang.t('search.smoking') }}:</label>
+              <select
+                [(ngModel)]="isSmoking"
+                class="bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gold/50"
+              >
+                <option [ngValue]="undefined">{{ lang.t('search.smokingAll') }}</option>
+                <option [ngValue]="true">{{ lang.t('search.smokingYes') }}</option>
+                <option [ngValue]="false">{{ lang.t('search.smokingNo') }}</option>
               </select>
             </div>
           </div>
@@ -88,28 +128,188 @@ import { CabinClass } from '../../core/models/flight.model';
           <!-- Main Search Grid -->
           <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
             
-            <!-- Origin (5 cols in tablet/desktop) -->
-            <div class="md:col-span-3">
-              <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <app-icon name="planetakeoff" class="w-4 h-4 text-gold" />
-                <span>{{ lang.t('search.from') }}</span>
+            <!-- Origin -->
+            <div class="md:col-span-3 relative" #originContainer>
+              <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span class="flex items-center gap-1.5">
+                  <app-icon name="planetakeoff" class="w-4 h-4 text-gold" />
+                  <span>{{ lang.t('search.from') }}</span>
+                </span>
+                @if (originLoading()) {
+                  <span class="text-[10px] text-slate-400 flex items-center gap-1 font-normal">
+                    <app-icon name="refreshcw" class="w-3 h-3 animate-spin text-gold" />
+                    <span>{{ lang.t('search.searchingLocations') }}</span>
+                  </span>
+                }
               </label>
+
               <div class="relative">
-                <select
+                <input
+                  type="text"
                   [(ngModel)]="origin"
-                  class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold appearance-none"
-                >
-                  <option value="" disabled>{{ lang.t('search.selectCity') }}</option>
-                  @for (ap of airports(); track ap.iata_code) {
-                    <option [value]="ap.iata_code">
-                      {{ ap.city_name }} ({{ ap.iata_code }})
-                    </option>
-                  }
-                </select>
-                <div class="absolute right-3.5 top-3.5 pointer-events-none text-slate-400">
-                  <app-icon name="chevrondown" class="w-5 h-5" />
-                </div>
+                  (input)="onOriginInput($event)"
+                  (focus)="onOriginFocus()"
+                  (keydown)="onOriginKeydown($event)"
+                  [placeholder]="lang.t('search.inputOriginPlaceholder')"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  [attr.aria-expanded]="originOpen()"
+                  aria-controls="origin-suggestions-panel"
+                  class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl pl-4 pr-9 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
+                />
+                @if (origin) {
+                  <button
+                    type="button"
+                    (click)="clearOrigin($event)"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    [title]="lang.t('search.clearSelection')"
+                  >
+                    <app-icon name="x" class="w-3.5 h-3.5" />
+                  </button>
+                } @else {
+                  <div class="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <app-icon name="search" class="w-4 h-4" />
+                  </div>
+                }
               </div>
+
+              <!-- Scope Hint Chip under Origin -->
+              @if (originScope()) {
+                <div class="mt-1.5 flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 rounded-full px-2.5 py-0.5 w-fit">
+                  <app-icon name="info" class="w-3 h-3 text-amber-600 shrink-0" />
+                  <span class="font-medium truncate max-w-[200px]" [title]="originScope()?.label">
+                    {{ originScope()?.label }}
+                  </span>
+                  <button
+                    type="button"
+                    (click)="originScope.set(null)"
+                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none"
+                  >
+                    &times;
+                  </button>
+                </div>
+              }
+
+              <!-- Dropdown Suggestion Panel for Origin -->
+              @if (originOpen()) {
+                <div
+                  id="origin-suggestions-panel"
+                  role="listbox"
+                  class="absolute left-0 top-full mt-1.5 w-full sm:min-w-[320px] max-w-full sm:max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden divide-y divide-slate-100 max-h-80 overflow-y-auto"
+                >
+                  @if (hasOriginSuggestions()) {
+                    <!-- Group 1: Countries -->
+                    @if (originSuggestions()?.countries && originSuggestions()!.countries.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="compass" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupCountries') }}</span>
+                        </div>
+                        @for (country of originSuggestions()!.countries; track country.code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isOriginHighlighted('country', country.code)"
+                            (click)="selectCountry('origin', country)"
+                            (mouseenter)="setOriginHighlighted('country', country.code)"
+                            [class.bg-amber-50]="isOriginHighlighted('country', country.code)"
+                            [class.text-navy]="isOriginHighlighted('country', country.code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ lang.isVietnamese() ? (country.name_vi || country.name) : (country.name || country.name_vi) }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                @if (country.airport_count !== undefined) {
+                                  {{ country.airport_count }} {{ lang.t('search.airportsCount') }}
+                                } @else {
+                                  {{ country.code }} · {{ lang.t('search.countryScopeHint') }}
+                                }
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
+                              {{ country.code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Group 2: Cities (multi-airport) -->
+                    @if (originSuggestions()?.cities && originSuggestions()!.cities.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupCities') }}</span>
+                        </div>
+                        @for (city of originSuggestions()!.cities; track city.city_code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isOriginHighlighted('city', city.city_code)"
+                            (click)="selectCity('origin', city)"
+                            (mouseenter)="setOriginHighlighted('city', city.city_code)"
+                            [class.bg-amber-50]="isOriginHighlighted('city', city.city_code)"
+                            [class.text-navy]="isOriginHighlighted('city', city.city_code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ lang.isVietnamese() ? (city.name_vi || city.name) : (city.name || city.name_vi) }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                {{ city.iata_codes && city.iata_codes.length > 0 ? city.iata_codes.join(', ') : city.city_code }}
+                                @if (city.airport_count) {
+                                  · {{ city.airport_count }} {{ lang.t('search.airportsCount') }}
+                                }
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
+                              {{ city.city_code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Group 3: Airports -->
+                    @if (originSuggestions()?.airports && originSuggestions()!.airports.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="plane" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupAirports') }}</span>
+                        </div>
+                        @for (ap of originSuggestions()!.airports; track ap.iata_code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isOriginHighlighted('airport', ap.iata_code)"
+                            (click)="selectAirport('origin', ap)"
+                            (mouseenter)="setOriginHighlighted('airport', ap.iata_code)"
+                            [class.bg-amber-50]="isOriginHighlighted('airport', ap.iata_code)"
+                            [class.text-navy]="isOriginHighlighted('airport', ap.iata_code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ ap.iata_code }} - {{ ap.airport_name }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                {{ ap.city_name }}{{ ap.country_code ? ' · ' + ap.country_code : '' }}
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+                              {{ ap.iata_code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+                  } @else if (!originLoading()) {
+                    <div class="p-4 text-center text-xs text-slate-400">
+                      {{ lang.t('search.noSuggestions') }}
+                    </div>
+                  }
+                </div>
+              }
             </div>
 
             <!-- Swap Button -->
@@ -118,34 +318,194 @@ import { CabinClass } from '../../core/models/flight.model';
                 type="button"
                 (click)="swapAirports()"
                 class="w-10 h-10 rounded-full border border-slate-200 bg-white hover:bg-slate-100 text-navy hover:text-gold shadow-sm flex items-center justify-center transition-all hover:rotate-180"
-                title="{{ lang.t('search.swap') }}"
+                [title]="lang.t('search.swap')"
               >
                 <app-icon name="arrowrightleft" class="w-4 h-4" />
               </button>
             </div>
 
             <!-- Destination -->
-            <div class="md:col-span-3">
-              <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <app-icon name="planelanding" class="w-4 h-4 text-gold" />
-                <span>{{ lang.t('search.to') }}</span>
+            <div class="md:col-span-3 relative" #destContainer>
+              <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span class="flex items-center gap-1.5">
+                  <app-icon name="planelanding" class="w-4 h-4 text-gold" />
+                  <span>{{ lang.t('search.to') }}</span>
+                </span>
+                @if (destLoading()) {
+                  <span class="text-[10px] text-slate-400 flex items-center gap-1 font-normal">
+                    <app-icon name="refreshcw" class="w-3 h-3 animate-spin text-gold" />
+                    <span>{{ lang.t('search.searchingLocations') }}</span>
+                  </span>
+                }
               </label>
+
               <div class="relative">
-                <select
+                <input
+                  type="text"
                   [(ngModel)]="destination"
-                  class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold appearance-none"
-                >
-                  <option value="" disabled>{{ lang.t('search.selectCity') }}</option>
-                  @for (ap of airports(); track ap.iata_code) {
-                    <option [value]="ap.iata_code">
-                      {{ ap.city_name }} ({{ ap.iata_code }})
-                    </option>
-                  }
-                </select>
-                <div class="absolute right-3.5 top-3.5 pointer-events-none text-slate-400">
-                  <app-icon name="chevrondown" class="w-5 h-5" />
-                </div>
+                  (input)="onDestInput($event)"
+                  (focus)="onDestFocus()"
+                  (keydown)="onDestKeydown($event)"
+                  [placeholder]="lang.t('search.inputDestPlaceholder')"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  [attr.aria-expanded]="destOpen()"
+                  aria-controls="dest-suggestions-panel"
+                  class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl pl-4 pr-9 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
+                />
+                @if (destination) {
+                  <button
+                    type="button"
+                    (click)="clearDestination($event)"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+                    [title]="lang.t('search.clearSelection')"
+                  >
+                    <app-icon name="x" class="w-3.5 h-3.5" />
+                  </button>
+                } @else {
+                  <div class="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                    <app-icon name="search" class="w-4 h-4" />
+                  </div>
+                }
               </div>
+
+              <!-- Scope Hint Chip under Destination -->
+              @if (destScope()) {
+                <div class="mt-1.5 flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200/80 rounded-full px-2.5 py-0.5 w-fit">
+                  <app-icon name="info" class="w-3 h-3 text-amber-600 shrink-0" />
+                  <span class="font-medium truncate max-w-[200px]" [title]="destScope()?.label">
+                    {{ destScope()?.label }}
+                  </span>
+                  <button
+                    type="button"
+                    (click)="destScope.set(null)"
+                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none"
+                  >
+                    &times;
+                  </button>
+                </div>
+              }
+
+              <!-- Dropdown Suggestion Panel for Destination -->
+              @if (destOpen()) {
+                <div
+                  id="dest-suggestions-panel"
+                  role="listbox"
+                  class="absolute left-0 sm:left-auto sm:right-0 top-full mt-1.5 w-full sm:min-w-[320px] max-w-full sm:max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden divide-y divide-slate-100 max-h-80 overflow-y-auto"
+                >
+                  @if (hasDestSuggestions()) {
+                    <!-- Group 1: Countries -->
+                    @if (destSuggestions()?.countries && destSuggestions()!.countries.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="compass" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupCountries') }}</span>
+                        </div>
+                        @for (country of destSuggestions()!.countries; track country.code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isDestHighlighted('country', country.code)"
+                            (click)="selectCountry('destination', country)"
+                            (mouseenter)="setDestHighlighted('country', country.code)"
+                            [class.bg-amber-50]="isDestHighlighted('country', country.code)"
+                            [class.text-navy]="isDestHighlighted('country', country.code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ lang.isVietnamese() ? (country.name_vi || country.name) : (country.name || country.name_vi) }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                @if (country.airport_count !== undefined) {
+                                  {{ country.code }} · {{ country.airport_count }} {{ lang.t('search.airportsCount') }}
+                                } @else {
+                                  {{ country.code }} · {{ lang.t('search.countryScopeHint') }}
+                                }
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
+                              {{ country.code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Group 2: Cities (multi-airport) -->
+                    @if (destSuggestions()?.cities && destSuggestions()!.cities.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupCities') }}</span>
+                        </div>
+                        @for (city of destSuggestions()!.cities; track city.city_code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isDestHighlighted('city', city.city_code)"
+                            (click)="selectCity('destination', city)"
+                            (mouseenter)="setDestHighlighted('city', city.city_code)"
+                            [class.bg-amber-50]="isDestHighlighted('city', city.city_code)"
+                            [class.text-navy]="isDestHighlighted('city', city.city_code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ lang.isVietnamese() ? (city.name_vi || city.name) : (city.name || city.name_vi) }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                {{ city.iata_codes && city.iata_codes.length > 0 ? city.iata_codes.join(', ') : city.city_code }}
+                                @if (city.airport_count) {
+                                  · {{ city.airport_count }} {{ lang.t('search.airportsCount') }}
+                                }
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
+                              {{ city.city_code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    <!-- Group 3: Airports -->
+                    @if (destSuggestions()?.airports && destSuggestions()!.airports.length > 0) {
+                      <div class="py-1">
+                        <div class="px-3.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 flex items-center gap-1.5">
+                          <app-icon name="plane" class="w-3.5 h-3.5 text-gold" />
+                          <span>{{ lang.t('search.groupAirports') }}</span>
+                        </div>
+                        @for (ap of destSuggestions()!.airports; track ap.iata_code) {
+                          <div
+                            role="option"
+                            [attr.aria-selected]="isDestHighlighted('airport', ap.iata_code)"
+                            (click)="selectAirport('destination', ap)"
+                            (mouseenter)="setDestHighlighted('airport', ap.iata_code)"
+                            [class.bg-amber-50]="isDestHighlighted('airport', ap.iata_code)"
+                            [class.text-navy]="isDestHighlighted('airport', ap.iata_code)"
+                            class="px-3.5 py-2 cursor-pointer hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-left"
+                          >
+                            <div class="min-w-0">
+                              <div class="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                                {{ ap.iata_code }} - {{ ap.airport_name }}
+                              </div>
+                              <div class="text-[11px] text-slate-400 truncate">
+                                {{ ap.city_name }}{{ ap.country_code ? ' · ' + ap.country_code : '' }}
+                              </div>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+                              {{ ap.iata_code }}
+                            </span>
+                          </div>
+                        }
+                      </div>
+                    }
+                  } @else if (!destLoading()) {
+                    <div class="p-4 text-center text-xs text-slate-400">
+                      {{ lang.t('search.noSuggestions') }}
+                    </div>
+                  }
+                </div>
+              }
             </div>
 
             <!-- Departure Date -->
@@ -158,8 +518,13 @@ import { CabinClass } from '../../core/models/flight.model';
                 type="date"
                 [(ngModel)]="departureDate"
                 [min]="todayStr"
+                [max]="maxBookingDate"
                 class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
               />
+              <p class="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1 truncate" [title]="bookingWindowCaption">
+                <app-icon name="info" class="w-3.5 h-3.5 text-gold shrink-0" />
+                <span>{{ bookingWindowCaption }}</span>
+              </p>
             </div>
 
             <!-- Return Date (Only if Round Trip) -->
@@ -173,6 +538,7 @@ import { CabinClass } from '../../core/models/flight.model';
                   type="date"
                   [(ngModel)]="returnDate"
                   [min]="departureDate || todayStr"
+                  [max]="maxBookingDate"
                   class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
                 />
               </div>
@@ -182,7 +548,7 @@ import { CabinClass } from '../../core/models/flight.model';
             <div class="md:col-span-2">
               <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <app-icon name="users" class="w-4 h-4 text-gold" />
-                <span>Hành khách</span>
+                <span>{{ lang.t('home.passengersLabel') }}</span>
               </label>
               <div class="relative">
                 <button
@@ -190,7 +556,7 @@ import { CabinClass } from '../../core/models/flight.model';
                   (click)="showPassengerPicker.set(!showPassengerPicker())"
                   class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-3 py-3 text-xs sm:text-sm font-semibold text-left flex items-center justify-between"
                 >
-                  <span>{{ totalPassengers() }} khách</span>
+                  <span>{{ totalPassengers() }} {{ lang.t('home.guests') }}</span>
                   <app-icon name="chevrondown" class="w-4 h-4 text-slate-400" />
                 </button>
 
@@ -200,8 +566,8 @@ import { CabinClass } from '../../core/models/flight.model';
                     <!-- Adults -->
                     <div class="flex items-center justify-between">
                       <div>
-                        <div class="text-xs font-bold text-slate-800">Người lớn</div>
-                        <div class="text-[10px] text-slate-400">Từ 12 tuổi trở lên</div>
+                        <div class="text-xs font-bold text-slate-800">{{ lang.t('home.adults') }}</div>
+                        <div class="text-[10px] text-slate-400">{{ lang.t('home.adultsDesc') }}</div>
                       </div>
                       <div class="flex items-center gap-2">
                         <button
@@ -225,8 +591,8 @@ import { CabinClass } from '../../core/models/flight.model';
                     <!-- Children -->
                     <div class="flex items-center justify-between">
                       <div>
-                        <div class="text-xs font-bold text-slate-800">Trẻ em</div>
-                        <div class="text-[10px] text-amber-600 font-medium">2 - 11 tuổi (Giảm 25%)</div>
+                        <div class="text-xs font-bold text-slate-800">{{ lang.t('home.children') }}</div>
+                        <div class="text-[10px] text-amber-600 font-medium">{{ lang.t('home.childrenDesc') }}</div>
                       </div>
                       <div class="flex items-center gap-2">
                         <button
@@ -250,8 +616,8 @@ import { CabinClass } from '../../core/models/flight.model';
                     <!-- Seniors -->
                     <div class="flex items-center justify-between">
                       <div>
-                        <div class="text-xs font-bold text-slate-800">Người cao tuổi</div>
-                        <div class="text-[10px] text-amber-600 font-medium">>= 60 tuổi (Giảm 15%)</div>
+                        <div class="text-xs font-bold text-slate-800">{{ lang.t('home.seniors') }}</div>
+                        <div class="text-[10px] text-amber-600 font-medium">{{ lang.t('home.seniorsDesc') }}</div>
                       </div>
                       <div class="flex items-center gap-2">
                         <button
@@ -277,7 +643,7 @@ import { CabinClass } from '../../core/models/flight.model';
                       (click)="showPassengerPicker.set(false)"
                       class="w-full py-2 bg-navy text-white text-xs font-bold rounded-xl hover:bg-navy-light mt-2"
                     >
-                      Xong
+                      {{ lang.t('home.done') }}
                     </button>
                   </div>
                 }
@@ -286,11 +652,34 @@ import { CabinClass } from '../../core/models/flight.model';
 
           </div>
 
+          <!-- Compact Quick-Select Row for Popular Cities -->
+          <div class="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+            <span class="font-bold text-slate-500 flex items-center gap-1.5 shrink-0">
+              <app-icon name="compass" class="w-3.5 h-3.5 text-gold" />
+              <span>{{ lang.t('search.quickSelect') }}</span>
+            </span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              @for (city of popularCityChips; track city.token) {
+                <button
+                  type="button"
+                  (click)="selectQuickCity(city)"
+                  class="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 hover:bg-gold/20 hover:text-navy text-slate-700 transition-all border border-slate-200/80 flex items-center gap-1"
+                  [class.bg-amber-100]="destination === city.token || origin === city.token"
+                  [class.text-amber-900]="destination === city.token || origin === city.token"
+                  [class.border-amber-300]="destination === city.token || origin === city.token"
+                >
+                  <span>{{ lang.t(city.langKey) }}</span>
+                  <span class="text-[10px] font-mono text-slate-500">({{ city.token }})</span>
+                </button>
+              }
+            </div>
+          </div>
+
           <!-- Action Submit Button -->
           <div class="mt-6 pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div class="text-xs text-slate-500 flex items-center gap-2">
               <app-icon name="shieldcheck" class="w-4 h-4 text-emerald-600" />
-              <span>Giá vé đã bao gồm thuế & phí sân bay theo quy định.</span>
+              <span>{{ lang.t('home.taxIncluded') }}</span>
             </div>
 
             <button
@@ -309,11 +698,11 @@ import { CabinClass } from '../../core/models/flight.model';
       <!-- Popular Routes Section -->
       <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-20">
         <div class="text-center mb-10">
-          <span class="text-xs font-bold uppercase tracking-widest text-gold block mb-1">Mạng đường bay nổi bật</span>
-          <h2 class="text-2xl sm:text-3xl font-bold text-navy">Khám Phá Các Chặng Bay Được Yêu Thích Nhất</h2>
+          <span class="text-xs font-bold uppercase tracking-widest text-gold block mb-1">{{ lang.t('home.popular.subtitle') }}</span>
+          <h2 class="text-2xl sm:text-3xl font-bold text-navy">{{ lang.t('home.popular.title') }}</h2>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           @for (route of popularRoutes; track route.from + route.to) {
             <div
               (click)="selectPopularRoute(route.from, route.to)"
@@ -324,7 +713,7 @@ import { CabinClass } from '../../core/models/flight.model';
                   {{ route.from }} - {{ route.to }}
                 </span>
                 <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  Mỗi ngày
+                  {{ lang.t('home.popular.daily') }}
                 </span>
               </div>
               <h3 class="text-base font-bold text-navy group-hover:text-amber-600 transition-colors">
@@ -332,9 +721,9 @@ import { CabinClass } from '../../core/models/flight.model';
                 <app-icon name="arrowright" class="w-3.5 h-3.5 inline text-slate-400 mx-1" />
                 {{ route.toCity }}
               </h3>
-              <p class="text-xs text-slate-500 mt-1">Thời gian bay: ~{{ route.duration }}</p>
+              <p class="text-xs text-slate-500 mt-1">{{ lang.t('home.popular.duration') }} ~{{ route.duration }}</p>
               <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span class="text-slate-400">Giá chỉ từ</span>
+                <span class="text-slate-400">{{ lang.t('home.popular.priceFrom') }}</span>
                 <span class="font-bold text-navy text-sm">{{ route.price }}</span>
               </div>
             </div>
@@ -351,9 +740,9 @@ import { CabinClass } from '../../core/models/flight.model';
                 <app-icon name="shieldcheck" class="w-6 h-6" />
               </div>
               <div>
-                <h3 class="text-base font-bold text-navy">An Toàn Tuyệt Đối</h3>
+                <h3 class="text-base font-bold text-navy">{{ lang.t('home.feature1.title') }}</h3>
                 <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                  Đội tàu bay hiện đại Airbus A321 Neo & Boeing 787 bảo dưỡng định kỳ theo tiêu chuẩn nghiêm ngặt hàng đầu thế giới.
+                  {{ lang.t('home.feature1.desc') }}
                 </p>
               </div>
             </div>
@@ -363,9 +752,9 @@ import { CabinClass } from '../../core/models/flight.model';
                 <app-icon name="armchair" class="w-6 h-6" />
               </div>
               <div>
-                <h3 class="text-base font-bold text-navy">Tiện Nghi 5 Sao</h3>
+                <h3 class="text-base font-bold text-navy">{{ lang.t('home.feature2.title') }}</h3>
                 <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                  Ghế ngồi êm ái rộng rãi, ẩm thực hàng không hảo hạng và dịch vụ chăm sóc hành khách chu đáo từ phi hành đoàn.
+                  {{ lang.t('home.feature2.desc') }}
                 </p>
               </div>
             </div>
@@ -375,9 +764,9 @@ import { CabinClass } from '../../core/models/flight.model';
                 <app-icon name="award" class="w-6 h-6" />
               </div>
               <div>
-                <h3 class="text-base font-bold text-navy">Tích Lũy Dặm Bay SkyMiles</h3>
+                <h3 class="text-base font-bold text-navy">{{ lang.t('home.feature3.title') }}</h3>
                 <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                  Tích lũy dặm thưởng cho mọi hành trình bay, nâng hạng thẻ hội viên VIP và đổi vé máy bay miễn phí bất kỳ lúc nào.
+                  {{ lang.t('home.feature3.desc') }}
                 </p>
               </div>
             </div>
@@ -387,15 +776,17 @@ import { CabinClass } from '../../core/models/flight.model';
     </div>
   `,
 })
-export class HomeComponent implements OnInit {
+export class HomeComponent implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
   readonly lang = inject(LanguageService);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
 
+  @ViewChild('originContainer') originContainer?: ElementRef<HTMLElement>;
+  @ViewChild('destContainer') destContainer?: ElementRef<HTMLElement>;
+
   readonly isRoundTrip = signal(false);
   readonly showPassengerPicker = signal(false);
-  readonly airports = signal<Airport[]>([]);
 
   origin = 'HAN';
   destination = 'SGN';
@@ -403,18 +794,64 @@ export class HomeComponent implements OnInit {
   returnDate = '';
   cabinClass: CabinClass = CabinClass.ECONOMY;
   CabinClass = CabinClass;
+  isSmoking: boolean | undefined = undefined;
 
   adults = 1;
   children = 0;
   seniors = 0;
 
   todayStr = new Date().toISOString().split('T')[0];
+  maxAdvanceDays = 330;
+  maxBookingDate = this.computeFallbackMaxDate();
+
+  // Autocomplete state
+  readonly originSuggestions = signal<LocationSuggestResponse | null>(null);
+  readonly destSuggestions = signal<LocationSuggestResponse | null>(null);
+  readonly originOpen = signal(false);
+  readonly destOpen = signal(false);
+  readonly originLoading = signal(false);
+  readonly destLoading = signal(false);
+  readonly originScope = signal<LocationScope | null>(null);
+  readonly destScope = signal<LocationScope | null>(null);
+
+  originHighlightedIndex = -1;
+  destHighlightedIndex = -1;
+  activeField: 'origin' | 'destination' = 'destination';
+
+  private readonly originQuery$ = new Subject<string>();
+  private readonly destQuery$ = new Subject<string>();
+  private readonly sub = new Subscription();
+
+  readonly popularCityChips = [
+    { langKey: 'search.city.hanoi', token: 'HAN', isMulti: false },
+    { langKey: 'search.city.sgn', token: 'SGN', isMulti: false },
+    { langKey: 'search.city.danang', token: 'DAD', isMulti: false },
+    { langKey: 'search.city.singapore', token: 'SIN', isMulti: false },
+    { langKey: 'search.city.bangkok', token: 'BKK', isMulti: false },
+    { langKey: 'search.city.tokyo', token: 'Tokyo', isMulti: true },
+  ];
+
+  get bookingWindowCaption(): string {
+    const days = (this.maxAdvanceDays || 330).toString();
+    const maxDate = this.maxBookingDate;
+    return this.lang.t('home.bookingWindowNotice')
+      .replace('{days}', days)
+      .replace('{maxDate}', maxDate);
+  }
+
+  private computeFallbackMaxDate(): string {
+    const d = new Date();
+    d.setDate(d.getDate() + 330);
+    return d.toISOString().split('T')[0];
+  }
 
   popularRoutes = [
     { from: 'HAN', to: 'SGN', fromCity: 'Hà Nội', toCity: 'TP. Hồ Chí Minh', duration: '2h 10m', price: '1.250.000 VND' },
     { from: 'SGN', to: 'DAD', fromCity: 'TP. Hồ Chí Minh', toCity: 'Đà Nẵng', duration: '1h 20m', price: '890.000 VND' },
     { from: 'HAN', to: 'CXR', fromCity: 'Hà Nội', toCity: 'Nha Trang', duration: '1h 50m', price: '1.150.000 VND' },
     { from: 'DAD', to: 'PQC', fromCity: 'Đà Nẵng', toCity: 'Phú Quốc', duration: '1h 45m', price: '1.350.000 VND' },
+    { from: 'HAN', to: 'SIN', fromCity: 'Hà Nội', toCity: 'Singapore', duration: '3h 30m', price: '2.450.000 VND' },
+    { from: 'SGN', to: 'BKK', fromCity: 'TP. Hồ Chí Minh', toCity: 'Bangkok', duration: '1h 30m', price: '1.850.000 VND' },
   ];
 
   ngOnInit(): void {
@@ -427,33 +864,427 @@ export class HomeComponent implements OnInit {
     ret.setDate(ret.getDate() + 3);
     this.returnDate = ret.toISOString().split('T')[0];
 
-    this.fetchAirports();
+    // Không tải toàn bộ danh sách sân bay nữa: sau khi nhập hàng loạt quốc gia,
+    // /api/airports trả hơn 5.000 dòng (~2 MB) và trang chủ chỉ cần ô gợi ý
+    // (GET /reference/suggest) + danh sách chọn nhanh tĩnh.
+    this.loadBookingWindow();
+
+    this.sub.add(
+      this.originQuery$
+        .pipe(
+          debounceTime(250),
+          distinctUntilChanged(),
+          switchMap((q) => {
+            const trimmed = q.trim();
+            if (trimmed.length < 1) {
+              this.originSuggestions.set(null);
+              this.originLoading.set(false);
+              return of(null);
+            }
+            this.originLoading.set(true);
+            return this.api.suggestLocations(trimmed).pipe(
+              catchError(() => of({ countries: [], cities: [], airports: [] }))
+            );
+          })
+        )
+        .subscribe((res) => {
+          this.originLoading.set(false);
+          if (res) {
+            this.originSuggestions.set(res);
+            this.originOpen.set(true);
+            this.originHighlightedIndex = -1;
+          }
+        })
+    );
+
+    this.sub.add(
+      this.destQuery$
+        .pipe(
+          debounceTime(250),
+          distinctUntilChanged(),
+          switchMap((q) => {
+            const trimmed = q.trim();
+            if (trimmed.length < 1) {
+              this.destSuggestions.set(null);
+              this.destLoading.set(false);
+              return of(null);
+            }
+            this.destLoading.set(true);
+            return this.api.suggestLocations(trimmed).pipe(
+              catchError(() => of({ countries: [], cities: [], airports: [] }))
+            );
+          })
+        )
+        .subscribe((res) => {
+          this.destLoading.set(false);
+          if (res) {
+            this.destSuggestions.set(res);
+            this.destOpen.set(true);
+            this.destHighlightedIndex = -1;
+          }
+        })
+    );
   }
 
-  fetchAirports(): void {
-    this.api.getAirports().subscribe({
-      next: (list) => {
-        if (list && list.length > 0) {
-          this.airports.set(list);
-        } else {
-          // Default fallbacks if backend db is newly initiated
-          this.airports.set([
-            { iata_code: 'HAN', city_name: 'Hà Nội', airport_name: 'Nội Bài', is_serviced_directly: true },
-            { iata_code: 'SGN', city_name: 'Hồ Chí Minh', airport_name: 'Tân Sơn Nhất', is_serviced_directly: true },
-            { iata_code: 'DAD', city_name: 'Đà Nẵng', airport_name: 'Đà Nẵng', is_serviced_directly: true },
-            { iata_code: 'CXR', city_name: 'Nha Trang', airport_name: 'Cam Ranh', is_serviced_directly: true },
-            { iata_code: 'PQC', city_name: 'Phú Quốc', airport_name: 'Phú Quốc', is_serviced_directly: true },
-          ]);
+  ngOnDestroy(): void {
+    this.sub.unsubscribe();
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    if (this.originContainer && !this.originContainer.nativeElement.contains(target)) {
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+    }
+    if (this.destContainer && !this.destContainer.nativeElement.contains(target)) {
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+    }
+  }
+
+  hasOriginSuggestions(): boolean {
+    const s = this.originSuggestions();
+    if (!s) return false;
+    return (
+      (s.countries && s.countries.length > 0) ||
+      (s.cities && s.cities.length > 0) ||
+      (s.airports && s.airports.length > 0)
+    );
+  }
+
+  hasDestSuggestions(): boolean {
+    const s = this.destSuggestions();
+    if (!s) return false;
+    return (
+      (s.countries && s.countries.length > 0) ||
+      (s.cities && s.cities.length > 0) ||
+      (s.airports && s.airports.length > 0)
+    );
+  }
+
+  onOriginInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).value;
+    this.origin = val;
+    this.activeField = 'origin';
+    if (this.originScope() && !val.includes(this.originScope()!.token)) {
+      this.originScope.set(null);
+    }
+    if (!val.trim()) {
+      this.originSuggestions.set(null);
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+      return;
+    }
+    this.originQuery$.next(val);
+  }
+
+  onDestInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).value;
+    this.destination = val;
+    this.activeField = 'destination';
+    if (this.destScope() && !val.includes(this.destScope()!.token)) {
+      this.destScope.set(null);
+    }
+    if (!val.trim()) {
+      this.destSuggestions.set(null);
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+      return;
+    }
+    this.destQuery$.next(val);
+  }
+
+  onOriginFocus(): void {
+    this.activeField = 'origin';
+    if (this.origin && this.origin.trim().length >= 1) {
+      if (this.originSuggestions()) {
+        this.originOpen.set(true);
+      } else {
+        this.originQuery$.next(this.origin);
+      }
+    }
+  }
+
+  onDestFocus(): void {
+    this.activeField = 'destination';
+    if (this.destination && this.destination.trim().length >= 1) {
+      if (this.destSuggestions()) {
+        this.destOpen.set(true);
+      } else {
+        this.destQuery$.next(this.destination);
+      }
+    }
+  }
+
+  clearOrigin(event: MouseEvent): void {
+    event.stopPropagation();
+    this.origin = '';
+    this.originScope.set(null);
+    this.originSuggestions.set(null);
+    this.originOpen.set(false);
+    this.originHighlightedIndex = -1;
+  }
+
+  clearDestination(event: MouseEvent): void {
+    event.stopPropagation();
+    this.destination = '';
+    this.destScope.set(null);
+    this.destSuggestions.set(null);
+    this.destOpen.set(false);
+    this.destHighlightedIndex = -1;
+  }
+
+  getFlattenedList(field: 'origin' | 'destination'): Array<{
+    type: 'country' | 'city' | 'airport';
+    data: any;
+  }> {
+    const res = field === 'origin' ? this.originSuggestions() : this.destSuggestions();
+    if (!res) return [];
+    const list: Array<{ type: 'country' | 'city' | 'airport'; data: any }> = [];
+    if (res.countries) {
+      for (const c of res.countries) {
+        list.push({ type: 'country', data: c });
+      }
+    }
+    if (res.cities) {
+      for (const c of res.cities) {
+        list.push({ type: 'city', data: c });
+      }
+    }
+    if (res.airports) {
+      for (const a of res.airports) {
+        list.push({ type: 'airport', data: a });
+      }
+    }
+    return list;
+  }
+
+  onOriginKeydown(event: KeyboardEvent): void {
+    if (!this.originOpen()) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (this.origin.trim().length >= 1) {
+          this.originQuery$.next(this.origin);
+          this.originOpen.set(true);
+        }
+      }
+      return;
+    }
+
+    const list = this.getFlattenedList('origin');
+    if (list.length === 0) {
+      if (event.key === 'Escape') {
+        this.originOpen.set(false);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIdx = this.originHighlightedIndex < list.length - 1 ? this.originHighlightedIndex + 1 : 0;
+      this.originHighlightedIndex = nextIdx;
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const prevIdx = this.originHighlightedIndex > 0 ? this.originHighlightedIndex - 1 : list.length - 1;
+      this.originHighlightedIndex = prevIdx;
+    } else if (event.key === 'Enter') {
+      if (this.originHighlightedIndex >= 0 && this.originHighlightedIndex < list.length) {
+        event.preventDefault();
+        const item = list[this.originHighlightedIndex];
+        this.pickItem('origin', item);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+    }
+  }
+
+  onDestKeydown(event: KeyboardEvent): void {
+    if (!this.destOpen()) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (this.destination.trim().length >= 1) {
+          this.destQuery$.next(this.destination);
+          this.destOpen.set(true);
+        }
+      }
+      return;
+    }
+
+    const list = this.getFlattenedList('destination');
+    if (list.length === 0) {
+      if (event.key === 'Escape') {
+        this.destOpen.set(false);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIdx = this.destHighlightedIndex < list.length - 1 ? this.destHighlightedIndex + 1 : 0;
+      this.destHighlightedIndex = nextIdx;
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const prevIdx = this.destHighlightedIndex > 0 ? this.destHighlightedIndex - 1 : list.length - 1;
+      this.destHighlightedIndex = prevIdx;
+    } else if (event.key === 'Enter') {
+      if (this.destHighlightedIndex >= 0 && this.destHighlightedIndex < list.length) {
+        event.preventDefault();
+        const item = list[this.destHighlightedIndex];
+        this.pickItem('destination', item);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+    }
+  }
+
+  pickItem(field: 'origin' | 'destination', item: { type: 'country' | 'city' | 'airport'; data: any }): void {
+    if (item.type === 'country') {
+      this.selectCountry(field, item.data);
+    } else if (item.type === 'city') {
+      this.selectCity(field, item.data);
+    } else if (item.type === 'airport') {
+      this.selectAirport(field, item.data);
+    }
+  }
+
+  selectCountry(field: 'origin' | 'destination', country: CountrySuggestion): void {
+    const countryName = this.lang.isVietnamese() ? (country.name_vi || country.name) : (country.name || country.name_vi);
+    const scope: LocationScope = {
+      kind: 'country',
+      token: countryName,
+      label: this.lang.t('search.allAirportsScope').replace('{name}', countryName),
+    };
+
+    if (field === 'origin') {
+      this.origin = countryName;
+      this.originScope.set(scope);
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+    } else {
+      this.destination = countryName;
+      this.destScope.set(scope);
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+    }
+  }
+
+  selectCity(field: 'origin' | 'destination', city: CitySuggestion): void {
+    const cityName = this.lang.isVietnamese() ? (city.name_vi || city.name) : (city.name || city.name_vi);
+    const isMulti = (city.airport_count && city.airport_count > 1) || (city.iata_codes && city.iata_codes.length > 1);
+    const scope: LocationScope | null = isMulti ? {
+      kind: 'city',
+      token: cityName,
+      label: this.lang.t('search.allAirportsScope').replace('{name}', cityName),
+      iata_codes: city.iata_codes,
+    } : null;
+
+    if (field === 'origin') {
+      this.origin = cityName;
+      this.originScope.set(scope);
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+    } else {
+      this.destination = cityName;
+      this.destScope.set(scope);
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+    }
+  }
+
+  selectAirport(field: 'origin' | 'destination', ap: AirportSuggestion): void {
+    if (field === 'origin') {
+      this.origin = ap.iata_code;
+      this.originScope.set(null);
+      this.originOpen.set(false);
+      this.originHighlightedIndex = -1;
+    } else {
+      this.destination = ap.iata_code;
+      this.destScope.set(null);
+      this.destOpen.set(false);
+      this.destHighlightedIndex = -1;
+    }
+  }
+
+  selectQuickCity(chip: { langKey: string; token: string; isMulti?: boolean }): void {
+    const labelName = this.lang.t(chip.langKey);
+    const scope: LocationScope | null = chip.isMulti ? {
+      kind: 'city',
+      token: chip.token,
+      label: this.lang.t('search.allAirportsScope').replace('{name}', labelName),
+    } : null;
+
+    if (this.activeField === 'origin') {
+      this.origin = chip.token;
+      this.originScope.set(scope);
+      this.originOpen.set(false);
+    } else {
+      this.destination = chip.token;
+      this.destScope.set(scope);
+      this.destOpen.set(false);
+    }
+  }
+
+  isOriginHighlighted(type: 'country' | 'city' | 'airport', id: string): boolean {
+    if (this.originHighlightedIndex < 0) return false;
+    const list = this.getFlattenedList('origin');
+    const item = list[this.originHighlightedIndex];
+    if (!item || item.type !== type) return false;
+    if (type === 'country') return item.data.code === id;
+    if (type === 'city') return item.data.city_code === id;
+    if (type === 'airport') return item.data.iata_code === id;
+    return false;
+  }
+
+  setOriginHighlighted(type: 'country' | 'city' | 'airport', id: string): void {
+    const list = this.getFlattenedList('origin');
+    this.originHighlightedIndex = list.findIndex((item) => {
+      if (item.type !== type) return false;
+      if (type === 'country') return item.data.code === id;
+      if (type === 'city') return item.data.city_code === id;
+      if (type === 'airport') return item.data.iata_code === id;
+      return false;
+    });
+  }
+
+  isDestHighlighted(type: 'country' | 'city' | 'airport', id: string): boolean {
+    if (this.destHighlightedIndex < 0) return false;
+    const list = this.getFlattenedList('destination');
+    const item = list[this.destHighlightedIndex];
+    if (!item || item.type !== type) return false;
+    if (type === 'country') return item.data.code === id;
+    if (type === 'city') return item.data.city_code === id;
+    if (type === 'airport') return item.data.iata_code === id;
+    return false;
+  }
+
+  setDestHighlighted(type: 'country' | 'city' | 'airport', id: string): void {
+    const list = this.getFlattenedList('destination');
+    this.destHighlightedIndex = list.findIndex((item) => {
+      if (item.type !== type) return false;
+      if (type === 'country') return item.data.code === id;
+      if (type === 'city') return item.data.city_code === id;
+      if (type === 'airport') return item.data.iata_code === id;
+      return false;
+    });
+  }
+
+  loadBookingWindow(): void {
+    this.api.getBookingWindow().subscribe({
+      next: (res) => {
+        if (res?.max_date) {
+          this.maxBookingDate = res.max_date;
+        }
+        if (res?.max_advance_days) {
+          this.maxAdvanceDays = res.max_advance_days;
         }
       },
       error: () => {
-        this.airports.set([
-          { iata_code: 'HAN', city_name: 'Hà Nội', airport_name: 'Nội Bài', is_serviced_directly: true },
-          { iata_code: 'SGN', city_name: 'Hồ Chí Minh', airport_name: 'Tân Sơn Nhất', is_serviced_directly: true },
-          { iata_code: 'DAD', city_name: 'Đà Nẵng', airport_name: 'Đà Nẵng', is_serviced_directly: true },
-          { iata_code: 'CXR', city_name: 'Nha Trang', airport_name: 'Cam Ranh', is_serviced_directly: true },
-          { iata_code: 'PQC', city_name: 'Phú Quốc', airport_name: 'Phú Quốc', is_serviced_directly: true },
-        ]);
+        this.maxBookingDate = this.computeFallbackMaxDate();
       },
     });
   }
@@ -462,11 +1293,17 @@ export class HomeComponent implements OnInit {
     const temp = this.origin;
     this.origin = this.destination;
     this.destination = temp;
+
+    const tempScope = this.originScope();
+    this.originScope.set(this.destScope());
+    this.destScope.set(tempScope);
   }
 
   selectPopularRoute(from: string, to: string): void {
     this.origin = from;
     this.destination = to;
+    this.originScope.set(null);
+    this.destScope.set(null);
     window.scrollTo({ top: 120, behavior: 'smooth' });
   }
 
@@ -476,15 +1313,23 @@ export class HomeComponent implements OnInit {
 
   onSearch(): void {
     if (!this.origin || !this.destination) {
-      this.toast.warning('Vui lòng chọn cả điểm đi và điểm đến');
+      this.toast.warning(this.lang.t('home.validation.empty'));
       return;
     }
     if (this.origin === this.destination) {
-      this.toast.warning('Điểm đi và điểm đến không được trùng nhau');
+      this.toast.warning(this.lang.t('home.validation.same'));
       return;
     }
     if (!this.departureDate) {
-      this.toast.warning('Vui lòng chọn ngày khởi hành');
+      this.toast.warning(this.lang.t('home.validation.date'));
+      return;
+    }
+    if (this.maxBookingDate && this.departureDate > this.maxBookingDate) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? `Ngày khởi hành vượt quá thời hạn mở bán (${this.maxBookingDate})`
+          : `Departure date exceeds booking window (${this.maxBookingDate})`,
+      );
       return;
     }
 
@@ -498,6 +1343,10 @@ export class HomeComponent implements OnInit {
       seniors: this.seniors,
     };
 
+    if (this.isSmoking !== undefined) {
+      queryParams.is_smoking = this.isSmoking;
+    }
+
     if (this.isRoundTrip() && this.returnDate) {
       queryParams.return_date = this.returnDate;
     }
@@ -505,3 +1354,4 @@ export class HomeComponent implements OnInit {
     this.router.navigate(['/results'], { queryParams });
   }
 }
+

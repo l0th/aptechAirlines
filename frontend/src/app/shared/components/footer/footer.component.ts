@@ -22,53 +22,53 @@ import { IconComponent } from '../icon/icon.component';
               </span>
             </div>
             <p class="text-xs text-slate-400 leading-relaxed">
-              {{ lang.t('nav.slogan') }}. Cam kết mang đến trải nghiệm hành trình bay chuẩn quốc tế 5 sao, an toàn tuyệt đối và tiện nghi đẳng cấp.
+              {{ lang.t('nav.slogan') }}. {{ lang.t('footer.brandDesc') }}
             </p>
             <div class="flex items-center gap-2 pt-2 text-xs text-amber-400 font-semibold">
               <app-icon name="shieldcheck" class="w-4 h-4 text-gold" />
-              <span>Chứng chỉ An toàn Bay Quốc tế IATA</span>
+              <span>{{ lang.t('footer.iataCert') }}</span>
             </div>
           </div>
 
           <!-- Quick Links -->
           <div>
             <h4 class="text-white font-bold text-sm uppercase tracking-wider mb-4 border-b border-slate-700 pb-2">
-              Dịch vụ Bay
+              {{ lang.t('footer.flightServices') }}
             </h4>
             <ul class="space-y-2 text-xs">
-              <li><a href="/" class="hover:text-gold transition-colors">Tìm & Đặt vé máy bay</a></li>
-              <li><a href="/track" class="hover:text-gold transition-colors">Tra cứu mã PNR / Vé</a></li>
-              <li><a href="/track" class="hover:text-gold transition-colors">Đổi chuyến & Hủy vé</a></li>
-              <li><a href="/skymiles" class="hover:text-gold transition-colors">Chương trình SkyMiles</a></li>
+              <li><a href="/" class="hover:text-gold transition-colors">{{ lang.t('footer.searchBook') }}</a></li>
+              <li><a href="/track" class="hover:text-gold transition-colors">{{ lang.t('footer.lookupPnr') }}</a></li>
+              <li><a href="/track" class="hover:text-gold transition-colors">{{ lang.t('footer.changeCancel') }}</a></li>
+              <li><a href="/skymiles" class="hover:text-gold transition-colors">{{ lang.t('footer.skyMilesProgram') }}</a></li>
             </ul>
           </div>
 
           <!-- Travel Policies -->
           <div>
             <h4 class="text-white font-bold text-sm uppercase tracking-wider mb-4 border-b border-slate-700 pb-2">
-              Chính sách & Quy định
+              {{ lang.t('footer.policiesRegulations') }}
             </h4>
             <ul class="space-y-2 text-xs">
-              <li><a href="/track" class="hover:text-gold transition-colors">Quy định hoàn vé & Giữ chỗ</a></li>
-              <li><a href="/" class="hover:text-gold transition-colors">Tiêu chuẩn hành lý xách tay</a></li>
-              <li><a href="/" class="hover:text-gold transition-colors">Điều kiện ghế thoát hiểm</a></li>
-              <li><a href="/" class="hover:text-gold transition-colors">Chính sách bảo mật thông tin</a></li>
+              <li><a href="/track" class="hover:text-gold transition-colors">{{ lang.t('footer.refundHoldRules') }}</a></li>
+              <li><a href="/" class="hover:text-gold transition-colors">{{ lang.t('footer.baggageStandards') }}</a></li>
+              <li><a href="/" class="hover:text-gold transition-colors">{{ lang.t('footer.exitRowConditions') }}</a></li>
+              <li><a href="/" class="hover:text-gold transition-colors">{{ lang.t('footer.privacyPolicy') }}</a></li>
             </ul>
           </div>
 
           <!-- Contact & Support -->
           <div>
             <h4 class="text-white font-bold text-sm uppercase tracking-wider mb-4 border-b border-slate-700 pb-2">
-              Hỗ trợ 24/7
+              {{ lang.t('footer.support247') }}
             </h4>
             <div class="space-y-3 text-xs">
               <div class="flex items-center gap-2">
                 <app-icon name="clock" class="w-4 h-4 text-gold" />
-                <span>Tổng đài Chăm sóc Khách hàng: 1900-APTECH</span>
+                <span>{{ lang.t('footer.hotlineLabel') }}1900-APTECH</span>
               </div>
               <div class="flex items-center gap-2">
                 <app-icon name="mappin" class="w-4 h-4 text-gold" />
-                <span>Trụ sở: Tòa nhà Aptech Aviation, Hà Nội</span>
+                <span>{{ lang.t('footer.headquartersLabel') }}Tòa nhà Aptech Aviation, Hà Nội</span>
               </div>
               <div class="pt-2 text-[11px] text-slate-400">
                 Email: support&#64;aptechairlines.vn
@@ -78,7 +78,7 @@ import { IconComponent } from '../icon/icon.component';
         </div>
 
         <div class="mt-12 pt-8 border-t border-slate-800 text-center text-xs text-slate-400">
-          <p>© 2026 Aptech Airlines Reservation System. Toàn bộ bản quyền được bảo lưu.</p>
+          <p>{{ lang.t('footer.copyright') }}</p>
         </div>
       </div>
     </footer>

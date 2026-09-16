@@ -21,7 +21,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             </div>
             <div>
               <span class="font-bold text-white tracking-wider text-sm block">APTECH ADMIN</span>
-              <span class="text-[10px] text-amber-400 font-mono">Quản Trị Hàng Không</span>
+              <span class="text-[10px] text-amber-400 font-mono">{{ lang.isVietnamese() ? 'Quản Trị Hàng Không' : 'Aviation Administration' }}</span>
             </div>
           </div>
 
@@ -127,11 +127,22 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
       <div class="flex-1 flex flex-col min-w-0">
         <header class="bg-white border-b border-slate-200/80 px-6 py-4 flex items-center justify-between shadow-sm">
           <div>
-            <h2 class="text-lg font-bold text-navy">Aptech Airlines Management Console</h2>
-            <p class="text-xs text-slate-400">Phiên bản Hệ thống v2.4 • Cập nhật chuyến bay & trạng thái thời gian thực</p>
+            <h2 class="text-lg font-bold text-navy">{{ lang.isVietnamese() ? 'Bảng Điều Khiển Quản Trị Aptech Airlines' : 'Aptech Airlines Management Console' }}</h2>
+            <p class="text-xs text-slate-400">{{ lang.isVietnamese() ? 'Phiên bản Hệ thống v2.4 • Cập nhật chuyến bay & trạng thái thời gian thực' : 'System Version v2.4 • Real-time flight & status updates' }}</p>
           </div>
 
           <div class="flex items-center gap-4">
+            <button
+              type="button"
+              (click)="lang.toggleLang()"
+              class="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1.5"
+              [title]="lang.isVietnamese() ? 'Chuyển sang Tiếng Anh' : 'Switch to Vietnamese'"
+            >
+              <!-- GUI Standards: 100% icon vector Lucide, không dùng emoji -->
+              <app-icon name="languages" class="w-3.5 h-3.5" />
+              <span class="font-mono text-[11px] font-bold">{{ lang.label() }}</span>
+            </button>
+
             <div class="text-right">
               <div class="text-xs font-bold text-slate-800">
                 {{ auth.currentUser()?.first_name }} {{ auth.currentUser()?.last_name }}

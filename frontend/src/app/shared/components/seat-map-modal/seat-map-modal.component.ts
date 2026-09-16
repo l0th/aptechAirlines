@@ -44,7 +44,7 @@ export interface PassengerSeatSelection {
                     {{ flightNumber || seatMapData()?.flight_number }}
                   </span>
                 </h3>
-                <p class="text-xs text-slate-300">{{ routeInfo }} • {{ aircraftModel || seatMapData()?.aircraft_model || 'Airbus A321 Neo' }}</p>
+                <p class="text-xs text-slate-300">{{ routeInfo }} • {{ aircraftModel || seatMapData()?.aircraft_model || this.lang.t('lookup.unknownAircraft') }}</p>
               </div>
             </div>
 
@@ -80,10 +80,10 @@ export interface PassengerSeatSelection {
                     >
                       <div class="min-w-0">
                         <div class="text-xs font-bold text-slate-800 truncate">
-                          {{ p.name || ('Hành khách ' + ($index + 1)) }}
+                          {{ p.name || (lang.t('seatmap.passenger') + ' ' + ($index + 1)) }}
                         </div>
                         <div class="text-[11px] text-slate-500">
-                          {{ p.type || 'Người lớn' }}
+                          {{ p.type || lang.t('seatmap.adult') }}
                         </div>
                       </div>
                       <div class="shrink-0 pl-2">
@@ -93,7 +93,7 @@ export interface PassengerSeatSelection {
                             {{ assignedSeats()[$index] }}
                           </span>
                         } @else {
-                          <span class="text-[11px] text-slate-400 italic">Chưa chọn</span>
+                          <span class="text-[11px] text-slate-400 italic">{{ lang.t('seatmap.unselected') }}</span>
                         }
                       </div>
                     </button>
@@ -105,7 +105,7 @@ export interface PassengerSeatSelection {
               <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <app-icon name="info" class="w-4 h-4 text-navy" />
-                  <span>Chú thích Ghế ngồi (Legend)</span>
+                  <span>{{ lang.t('seatmap.legendTitle') }}</span>
                 </h4>
                 <div class="space-y-2 text-xs">
                   <!-- Business / Skyboss (Gold) -->
@@ -113,7 +113,7 @@ export interface PassengerSeatSelection {
                     <div class="w-5 h-5 rounded-md bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                       <app-icon name="crown" class="w-3 h-3" />
                     </div>
-                    <span class="text-slate-700 font-medium">Hàng 1 - 5: Thương gia / SkyBoss</span>
+                    <span class="text-slate-700 font-medium">{{ lang.t('seatmap.legend.businessDesc') }}</span>
                   </div>
 
                   <!-- Available (Emerald) -->
@@ -121,7 +121,7 @@ export interface PassengerSeatSelection {
                     <div class="w-5 h-5 rounded-md bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                       <app-icon name="check" class="w-3 h-3" />
                     </div>
-                    <span class="text-slate-700 font-medium">Hàng thường: Chỗ ngồi Còn trống</span>
+                    <span class="text-slate-700 font-medium">{{ lang.t('seatmap.legend.availableDesc') }}</span>
                   </div>
 
                   <!-- Exit Row (Navy/Sky) -->
@@ -129,7 +129,7 @@ export interface PassengerSeatSelection {
                     <div class="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                       <app-icon name="shieldcheck" class="w-3 h-3" />
                     </div>
-                    <span class="text-slate-700 font-medium">Hàng 12, 14: Ghế Lối thoát hiểm</span>
+                    <span class="text-slate-700 font-medium">{{ lang.t('seatmap.legend.exitDesc') }}</span>
                   </div>
 
                   <!-- Currently Selected (Gold Glow) -->
@@ -137,7 +137,7 @@ export interface PassengerSeatSelection {
                     <div class="w-5 h-5 rounded-md bg-amber-400 text-navy ring-2 ring-amber-500 seat-glow flex items-center justify-center text-[10px] font-bold">
                       <app-icon name="armchair" class="w-3 h-3" />
                     </div>
-                    <span class="text-slate-700 font-medium">Ghế đang được chọn (Phát sáng)</span>
+                    <span class="text-slate-700 font-medium">{{ lang.t('seatmap.legend.selectedDesc') }}</span>
                   </div>
 
                   <!-- Occupied / Locked (Gray with lock) -->
@@ -145,7 +145,7 @@ export interface PassengerSeatSelection {
                     <div class="w-5 h-5 rounded-md bg-slate-300 text-slate-500 flex items-center justify-center">
                       <app-icon name="lock" class="w-3 h-3" />
                     </div>
-                    <span class="text-slate-500 font-medium">Đã có khách đặt / Khóa</span>
+                    <span class="text-slate-500 font-medium">{{ lang.t('seatmap.legend.occupiedDesc') }}</span>
                   </div>
                 </div>
               </div>
@@ -154,7 +154,7 @@ export interface PassengerSeatSelection {
               <div class="bg-amber-50/70 p-4 rounded-2xl border border-amber-200/80 text-xs space-y-2">
                 <div class="font-bold text-amber-900 flex items-center gap-1.5">
                   <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600" />
-                  <span>Quy định An toàn Hàng không</span>
+                  <span>{{ lang.t('seatmap.safetyRegulations') }}</span>
                 </div>
                 <p class="text-slate-600 leading-relaxed text-[11px]">
                   {{ seatMapData()?.notice?.exit_row_warning || lang.t('seatmap.notice.exit') }}
@@ -212,7 +212,7 @@ export interface PassengerSeatSelection {
                       <!-- Exit Row Divider Alert before row 12 or 14 -->
                       @if (row.is_exit_row) {
                         <div class="flex items-center justify-between py-1 px-2 my-1 bg-sky-50 border-y border-sky-200 text-sky-800 text-[10px] font-bold rounded">
-                          <span>LỐI THOÁT HIỂM KHẨN CẤP</span>
+                          <span>{{ lang.t('seatmap.emergencyExit') }}</span>
                           <span class="font-mono">EXIT ROW {{ row.row_number }}</span>
                         </div>
                       }
@@ -286,8 +286,8 @@ export interface PassengerSeatSelection {
           <!-- Modal Footer with Confirm Button -->
           <div class="bg-white p-4 sm:p-5 border-t border-slate-200 flex items-center justify-between shrink-0">
             <div class="text-xs text-slate-600">
-              <span>Đã chọn: </span>
-              <strong class="text-navy font-bold">{{ selectedCount() }}/{{ passengerList.length }} ghế</strong>
+              <span>{{ lang.t('seatmap.selectedLabel') }}</span>
+              <strong class="text-navy font-bold">{{ selectedCount() }}/{{ passengerList.length }} {{ lang.t('seatmap.seatsCount') }}</strong>
             </div>
 
             <div class="flex items-center gap-3">
@@ -319,7 +319,7 @@ export class SeatMapModalComponent implements OnChanges {
   @Input() flightNumber = '';
   @Input() routeInfo = '';
   @Input() aircraftModel = '';
-  @Input() passengerList: Array<{ name: string; type?: string }> = [{ name: 'Hành khách 1' }];
+  @Input() passengerList: Array<{ name: string; type?: string }> = [{ name: 'Passenger 1' }];
   @Input() initialSeats: Record<number, string> = {};
 
   @Output() closeEvent = new EventEmitter<void>();
@@ -424,11 +424,11 @@ export class SeatMapModalComponent implements OnChanges {
 
   getSeatTooltip(seat: SeatItem | undefined, row: SeatRow): string {
     if (!seat) return '';
-    if (seat.is_occupied) return `Ghế ${seat.seat_code}: Đã có người đặt`;
-    let type = 'Phổ thông';
-    if (row.row_number <= 5) type = 'Thương gia / SkyBoss';
-    if (row.is_exit_row) type = 'Ghế Lối thoát hiểm';
-    return `Ghế ${seat.seat_code} (${type})`;
+    if (seat.is_occupied) return `${this.lang.t('seatmap.seat')} ${seat.seat_code}: ${this.lang.t('seatmap.occupied')}`;
+    let type = this.lang.t('seatmap.economy');
+    if (row.row_number <= 5) type = this.lang.t('seatmap.business');
+    if (row.is_exit_row) type = this.lang.t('seatmap.exitRow');
+    return `${this.lang.t('seatmap.seat')} ${seat.seat_code} (${type})`;
   }
 
   selectSeat(seat?: SeatItem): void {
@@ -483,7 +483,7 @@ export class SeatMapModalComponent implements OnChanges {
       const seats: SeatItem[] = ['A', 'B', 'C', 'D', 'E', 'F'].map((col) => ({
         seat_code: `${r}${col}`,
         column: col,
-        is_occupied: (r === 2 && col === 'B') || (r === 8 && col === 'C') || (r === 15 && col === 'D'),
+        is_occupied: false,
         cabin_class: isBusiness ? CabinClass.BUSINESS : CabinClass.ECONOMY,
       }));
 
@@ -497,15 +497,14 @@ export class SeatMapModalComponent implements OnChanges {
 
     return {
       flight_id: this.flightId,
-      flight_number: this.flightNumber || 'VN-128',
-      route: this.routeInfo || 'HAN - SGN',
-      aircraft_model: this.aircraftModel || 'Airbus A321 Neo',
+      flight_number: this.flightNumber || '',
+      route: this.routeInfo || '',
+      aircraft_model: this.aircraftModel || this.lang.t('seatmap.mockNotice'),
       departure_time: new Date().toISOString(),
       legend: [],
       notice: {
-        skyboss_benefit: 'Hạng Thương gia / SkyBoss: Miễn phí chọn bất kỳ chỗ ngồi ưu tiên nào.',
-        exit_row_warning:
-          'Hàng ghế lối thoát hiểm (hàng 12 và 14) chỉ dành cho hành khách người lớn có sức khỏe tốt, sẵn sàng hỗ trợ phi hành đoàn trong trường hợp khẩn cấp.',
+        skyboss_benefit: this.lang.t('seatmap.notice.skyboss'),
+        exit_row_warning: this.lang.t('seatmap.notice.exit'),
       },
       layout: {
         left_columns: ['A', 'B', 'C'],

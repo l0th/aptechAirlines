@@ -1,5 +1,6 @@
-import { Component, Input, computed } from '@angular/core';
+import { Component, Input, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 @Component({
   selector: 'app-icon',
@@ -35,6 +36,8 @@ export class IconComponent {
   @Input() name = '';
   @Input() size: number | string = 20;
   @Input() class = '';
+
+  private readonly sanitizer = inject(DomSanitizer);
 
   private readonly icons: Record<string, string> = {
     // Aircraft & Aviation
@@ -121,8 +124,15 @@ export class IconComponent {
       '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   };
 
-  iconSvg = computed(() => {
+  /**
+   * Angular sanitize [innerHTML] theo SecurityContext.HTML và allowlist của nó
+   * KHÔNG chứa thẻ SVG (svg/path/circle/rect/line/polyline/polygon), nên toàn bộ
+   * icon bị strip thành rỗng. Markup ở đây là hằng số do lập trình viên viết
+   * (không nhận dữ liệu người dùng) nên bypass an toàn.
+   */
+  iconSvg = computed<SafeHtml>(() => {
     const key = (this.name || '').toLowerCase().replace(/[-_]/g, '');
-    return this.icons[key] || this.icons['plane'];
+    const markup = this.icons[key] || this.icons['plane'];
+    return this.sanitizer.bypassSecurityTrustHtml(markup);
   });
 }

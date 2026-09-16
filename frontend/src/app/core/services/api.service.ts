@@ -7,7 +7,12 @@ import {
   SeatMapResponse,
   FlightStatus,
 } from '../models/flight.model';
-import { Airport, CityResolveResult } from '../models/airport.model';
+import {
+  Airport,
+  CityResolveResult,
+  CountrySuggestion,
+  LocationSuggestResponse,
+} from '../models/airport.model';
 import {
   Booking,
   BookingStatus,
@@ -15,12 +20,80 @@ import {
 } from '../models/booking.model';
 import { AuthResponse, User, UserRole } from '../models/user.model';
 
+export type AirLabsSyncMode = 'route' | 'departure' | 'arrival' | 'airline' | 'flight';
+
+export interface AirLabsSyncParams {
+  mode?: AirLabsSyncMode;
+  dep_iata?: string;
+  arr_iata?: string;
+  airline_iata?: string;
+  flight_iata?: string;
+  limit?: number;
+  offset?: number;
+  api_key?: string;
+}
+
+export interface AirLabsSyncResponse {
+  message: string;
+  mode?: AirLabsSyncMode;
+  request_params?: any;
+  fetched_count?: number;
+  created_or_updated_count?: number;
+  synchronized_count?: number;
+  has_more?: boolean;
+  next_offset?: number;
+  window_note?: string;
+  flights?: any[];
+}
+
+export interface AirportSyncAllResponse {
+  checked: number;
+  updated: number;
+  failed: number;
+  errors?: any[];
+  message?: string;
+}
+
+export interface AirportImportCountryResult {
+  country_code: string;
+  fetched: number;
+  imported: number;
+  updated: number;
+  skipped_without_iata: number;
+  error?: string;
+}
+
+export interface AirportImportCountriesResponse {
+  requested: number;
+  done: number;
+  failed: number;
+  rate_limited: boolean;
+  results: AirportImportCountryResult[];
+}
+
+export interface AirportFixCityNamesResponse {
+  checked: number;
+  fixed: number;
+  samples?: Array<Record<string, any>>;
+  sample_fixes?: Array<Record<string, any>>;
+  message?: string;
+  [key: string]: any;
+}
+
+export interface SyncRoutesHubsResponse {
+  message?: string;
+  results?: any[];
+  [key: string]: any;
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class ApiService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = 'http://localhost:3000/api';
+  // Relative path so the app works from any host: `ng serve` proxies /api via
+  // proxy.conf.json; in Docker nginx proxies /api to the backend.
+  private readonly baseUrl = '/api';
 
   // ===================== AUTH =====================
   login(credentials: { username: string; password: string }): Observable<AuthResponse> {
@@ -59,6 +132,13 @@ export class ApiService {
     });
   }
 
+  lookupFlights(flightNumber: string, date: string): Observable<Flight[]> {
+    const params = new HttpParams()
+      .set('flight_number', flightNumber)
+      .set('date', date);
+    return this.http.get<Flight[]>(`${this.baseUrl}/flights/lookup`, { params });
+  }
+
   getFlights(filter?: {
     status?: FlightStatus;
     origin?: string;
@@ -79,20 +159,90 @@ export class ApiService {
     return this.http.get<SeatMapResponse>(`${this.baseUrl}/flights/${flightId}/seat-map`);
   }
 
+  getBookingWindow(): Observable<{ max_advance_days: number; min_date: string; max_date: string }> {
+    return this.http.get<{ max_advance_days: number; min_date: string; max_date: string }>(
+      `${this.baseUrl}/flights/booking-window`,
+    );
+  }
+
+  /**
+   * Đồng bộ lịch bay từ AirLabs với các chế độ linh hoạt (route, departure, arrival, airline, flight).
+   */
+  syncAirLabsModes(params: AirLabsSyncParams): Observable<AirLabsSyncResponse> {
+    let httpParams = new HttpParams();
+    const body: Record<string, any> = {};
+
+    const mode = params.mode || 'route';
+    httpParams = httpParams.set('mode', mode);
+    body['mode'] = mode;
+
+    if (params.dep_iata) {
+      const dep = params.dep_iata.trim().toUpperCase();
+      httpParams = httpParams.set('dep_iata', dep);
+      body['dep_iata'] = dep;
+    }
+    if (params.arr_iata) {
+      const arr = params.arr_iata.trim().toUpperCase();
+      httpParams = httpParams.set('arr_iata', arr);
+      body['arr_iata'] = arr;
+    }
+    if (params.airline_iata) {
+      const airline = params.airline_iata.trim().toUpperCase();
+      httpParams = httpParams.set('airline_iata', airline);
+      body['airline_iata'] = airline;
+    }
+    if (params.flight_iata) {
+      const flight = params.flight_iata.trim().toUpperCase();
+      httpParams = httpParams.set('flight_iata', flight);
+      body['flight_iata'] = flight;
+    }
+    if (params.limit !== undefined && params.limit !== null && (params.limit as any) !== '') {
+      httpParams = httpParams.set('limit', String(params.limit));
+      body['limit'] = Number(params.limit);
+    }
+    if (params.offset !== undefined && params.offset !== null && (params.offset as any) !== '') {
+      httpParams = httpParams.set('offset', String(params.offset));
+      body['offset'] = Number(params.offset);
+    }
+    if (params.api_key && params.api_key.trim()) {
+      httpParams = httpParams.set('api_key', params.api_key.trim());
+      body['api_key'] = params.api_key.trim();
+    }
+
+    return this.http.post<AirLabsSyncResponse>(`${this.baseUrl}/flights/sync-airlabs`, body, {
+      params: httpParams,
+    });
+  }
+
+  /**
+   * Đồng bộ lịch bay thật từ AirLabs.
+   * KHÔNG hardcode API key trong bundle frontend: nếu không truyền `apiKey`,
+   * backend sẽ dùng AIRLABS_API_KEY trong biến môi trường (.env).
+   */
   syncAirLabs(
     depIata = 'HAN',
     arrIata = 'SGN',
-    apiKey = '8b45eda3-b158-40d3-a6fa-892632ed8075',
-  ): Observable<{ message: string; synchronized_count: number; flights: any[] }> {
-    let params = new HttpParams()
-      .set('dep_iata', depIata)
-      .set('arr_iata', arrIata)
-      .set('api_key', apiKey);
-    return this.http.post<{
-      message: string;
-      synchronized_count: number;
-      flights: any[];
-    }>(`${this.baseUrl}/flights/sync-airlabs`, { api_key: apiKey }, { params });
+    apiKey?: string,
+  ): Observable<AirLabsSyncResponse> {
+    return this.syncAirLabsModes({
+      mode: 'route',
+      dep_iata: depIata,
+      arr_iata: arrIata,
+      api_key: apiKey,
+    });
+  }
+
+  getAirlineFleet(airlineIata: string): Observable<any> {
+    const params = new HttpParams().set('airline_iata', airlineIata);
+    return this.http.get<any>(`${this.baseUrl}/flights/airline-fleet`, { params });
+  }
+
+  enrichAirborneFlightsForToday(): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/flights/enrich-airborne`, {});
+  }
+
+  enrichAircraftFromAirLabs(id: string): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/flights/${id}/enrich-aircraft`, {});
   }
 
   createFlight(flightData: any): Observable<Flight> {
@@ -119,7 +269,16 @@ export class ApiService {
     return this.http.delete<{ message: string }>(`${this.baseUrl}/flights/${id}`);
   }
 
-  // ===================== AIRPORTS =====================
+  // ===================== AIRPORTS & REFERENCE =====================
+  suggestLocations(q: string): Observable<LocationSuggestResponse> {
+    const params = new HttpParams().set('q', q);
+    return this.http.get<LocationSuggestResponse>(`${this.baseUrl}/reference/suggest`, { params });
+  }
+
+  getCountries(): Observable<CountrySuggestion[]> {
+    return this.http.get<CountrySuggestion[]>(`${this.baseUrl}/reference/countries`);
+  }
+
   getAirports(search?: string): Observable<Airport[]> {
     let params = new HttpParams();
     if (search) params = params.set('search', search);
@@ -145,6 +304,63 @@ export class ApiService {
 
   deleteAirport(iata: string): Observable<{ message: string }> {
     return this.http.delete<{ message: string }>(`${this.baseUrl}/airports/${iata}`);
+  }
+
+  syncAirportFromAirLabs(iata: string, apiKey?: string): Observable<any> {
+    const code = iata.trim().toUpperCase();
+    let params = new HttpParams().set('iata_code', code);
+    const body: Record<string, any> = { iata_code: code };
+    if (apiKey && apiKey.trim()) {
+      params = params.set('api_key', apiKey.trim());
+      body['api_key'] = apiKey.trim();
+    }
+    return this.http.post<any>(`${this.baseUrl}/airports/sync-airlabs`, body, { params });
+  }
+
+  syncAllAirportsFromAirLabs(apiKey?: string): Observable<AirportSyncAllResponse> {
+    let params = new HttpParams();
+    const body: Record<string, any> = {};
+    if (apiKey && apiKey.trim()) {
+      params = params.set('api_key', apiKey.trim());
+      body['api_key'] = apiKey.trim();
+    }
+    return this.http.post<AirportSyncAllResponse>(
+      `${this.baseUrl}/airports/sync-airlabs-all`,
+      body,
+      { params },
+    );
+  }
+
+  importAirportsForCountries(codes: string[]): Observable<AirportImportCountriesResponse> {
+    const cleanCodes = codes.map((c) => c.trim().toUpperCase()).filter(Boolean).join(',');
+    const params = new HttpParams().set('codes', cleanCodes);
+    return this.http.post<AirportImportCountriesResponse>(
+      `${this.baseUrl}/airports/import-countries`,
+      {},
+      { params },
+    );
+  }
+
+  fixAirportCityNames(): Observable<AirportFixCityNamesResponse> {
+    return this.http.post<AirportFixCityNamesResponse>(
+      `${this.baseUrl}/airports/fix-city-names`,
+      {},
+    );
+  }
+
+  syncRoutesForHubs(hubs?: string[]): Observable<SyncRoutesHubsResponse> {
+    let params = new HttpParams();
+    if (hubs && hubs.length > 0) {
+      const cleanHubs = hubs.map((h) => h.trim().toUpperCase()).filter(Boolean).join(',');
+      if (cleanHubs) {
+        params = params.set('hubs', cleanHubs);
+      }
+    }
+    return this.http.post<SyncRoutesHubsResponse>(
+      `${this.baseUrl}/reference/sync-routes-hubs`,
+      {},
+      { params },
+    );
   }
 
   // ===================== BOOKINGS =====================

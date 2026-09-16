@@ -1,24 +1,26 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/services/api.service';
 import { ToastService } from '../../shared/services/toast.service';
+import { LanguageService } from '../../core/services/language.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
+import { PaginationComponent } from '../../shared/components/pagination/pagination.component';
 import { CancellationPolicy } from '../../core/models/booking.model';
 
 @Component({
   selector: 'app-policies-manage',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule, IconComponent, PaginationComponent],
   template: `
     <div class="space-y-6">
       
       <!-- Top Bar -->
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 class="text-xl sm:text-2xl font-black text-navy">Chính sách Hoàn Tiền Hủy Vé</h1>
+          <h1 class="text-xl sm:text-2xl font-black text-navy">{{ lang.t('admin.policies.title') }}</h1>
           <p class="text-xs text-slate-500">
-            Quy định tỷ lệ hoàn tiền theo số ngày khách hàng gửi yêu cầu hủy vé trước ngày khởi hành.
+            {{ lang.t('admin.policies.subtitle') }}
           </p>
         </div>
 
@@ -28,7 +30,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
           class="btn-gold text-xs !py-2.5 !px-5 font-bold"
         >
           <app-icon name="plus" class="w-4 h-4" />
-          <span>Thêm Chính Sách</span>
+          <span>{{ lang.t('admin.policies.addPolicy') }}</span>
         </button>
       </div>
 
@@ -38,11 +40,11 @@ import { CancellationPolicy } from '../../core/models/booking.model';
           <table class="w-full text-left text-xs">
             <thead class="bg-navy text-slate-200 uppercase font-semibold">
               <tr>
-                <th class="py-3.5 px-4">Số ngày tối thiểu</th>
-                <th class="py-3.5 px-4">Số ngày tối đa</th>
-                <th class="py-3.5 px-4">Tỷ lệ Hoàn tiền (%)</th>
-                <th class="py-3.5 px-4">Mô tả chi tiết</th>
-                <th class="py-3.5 px-4 text-right">Thao tác</th>
+                <th class="py-3.5 px-4">{{ lang.t('admin.policies.minDays') }}</th>
+                <th class="py-3.5 px-4">{{ lang.t('admin.policies.maxDays') }}</th>
+                <th class="py-3.5 px-4">{{ lang.t('admin.policies.refundPercentage') }}</th>
+                <th class="py-3.5 px-4">{{ lang.t('admin.policies.description') }}</th>
+                <th class="py-3.5 px-4 text-right">{{ lang.t('common.action') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 font-medium bg-white">
@@ -50,17 +52,17 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                 <tr>
                   <td colspan="5" class="text-center py-10 text-slate-400">
                     <app-icon name="refreshcw" class="w-6 h-6 animate-spin mx-auto text-gold mb-2" />
-                    Đang tải danh sách chính sách...
+                    {{ lang.t('admin.policies.loading') }}
                   </td>
                 </tr>
               } @else {
-                @for (p of policies(); track p._id) {
+                @for (p of pagedPolicies(); track p._id) {
                   <tr class="hover:bg-slate-50 transition-colors">
                     <td class="py-3.5 px-4 font-mono font-bold text-navy">
-                      >= {{ p.min_days_before }} ngày
+                      >= {{ p.min_days_before }} {{ lang.t('admin.policies.days') }}
                     </td>
                     <td class="py-3.5 px-4 font-mono text-slate-600">
-                      {{ p.max_days_before !== null ? ('<= ' + p.max_days_before + ' ngày') : 'Không giới hạn' }}
+                      {{ p.max_days_before !== null ? ('<= ' + p.max_days_before + ' ' + lang.t('admin.policies.days')) : lang.t('admin.policies.unlimited') }}
                     </td>
                     <td class="py-3.5 px-4">
                       <span
@@ -71,7 +73,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                       </span>
                     </td>
                     <td class="py-3.5 px-4 text-slate-600">
-                      {{ p.description }}
+                      {{ (!lang.isVietnamese() && p.description_en) ? p.description_en : p.description }}
                     </td>
                     <td class="py-3.5 px-4 text-right">
                       <div class="flex items-center justify-end gap-2">
@@ -79,7 +81,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                           type="button"
                           (click)="openEditModal(p)"
                           class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"
-                          title="Chỉnh sửa"
+                          [title]="lang.t('common.edit')"
                         >
                           <app-icon name="edit" class="w-4 h-4" />
                         </button>
@@ -87,7 +89,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                           type="button"
                           (click)="deletePolicy(p)"
                           class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors"
-                          title="Xóa"
+                          [title]="lang.t('common.delete')"
                         >
                           <app-icon name="trash2" class="w-4 h-4" />
                         </button>
@@ -99,6 +101,15 @@ import { CancellationPolicy } from '../../core/models/booking.model';
             </tbody>
           </table>
         </div>
+
+        <app-pagination
+          [total]="policies().length"
+          [page]="page()"
+          [pageSize]="pageSize()"
+          [pageSizeOptions]="pageSizeOptions"
+          (pageChange)="onPageChange($event)"
+          (pageSizeChange)="onPageSizeChange($event)"
+        />
       </div>
 
     </div>
@@ -110,7 +121,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
           <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 class="text-base font-bold text-navy flex items-center gap-2">
               <app-icon name="shieldcheck" class="w-5 h-5 text-gold" />
-              <span>{{ isEditMode ? 'Sửa Chính Sách' : 'Thêm Chính Sách Mới' }}</span>
+              <span>{{ isEditMode ? lang.t('admin.policies.editPolicy') : lang.t('admin.policies.addNewPolicy') }}</span>
             </h3>
             <button (click)="showModal.set(false)" class="text-slate-400 hover:text-slate-600">
               <app-icon name="x" class="w-5 h-5" />
@@ -120,7 +131,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
           <form (ngSubmit)="savePolicy()" class="space-y-3 text-xs">
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block font-semibold text-slate-600 mb-1">Số ngày tối thiểu (min)</label>
+                <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.policies.minDaysLabel') }}</label>
                 <input
                   type="number"
                   [(ngModel)]="formData.min_days_before"
@@ -131,7 +142,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
               </div>
 
               <div>
-                <label class="block font-semibold text-slate-600 mb-1">Số ngày tối đa (max - để trống nếu vô hạn)</label>
+                <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.policies.maxDaysLabel') }}</label>
                 <input
                   type="number"
                   [(ngModel)]="formData.max_days_before"
@@ -143,7 +154,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
             </div>
 
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">% Hoàn tiền (0 - 100)</label>
+              <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.policies.refundPctLabel') }}</label>
               <input
                 type="number"
                 [(ngModel)]="formData.refund_percentage"
@@ -156,20 +167,31 @@ import { CancellationPolicy } from '../../core/models/booking.model';
             </div>
 
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">Mô tả điều kiện áp dụng</label>
+              <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.policies.descLabel') || 'Mô tả (VI)' }}</label>
               <textarea
                 [(ngModel)]="formData.description"
                 name="desc"
                 rows="2"
                 required
-                placeholder="VD: Hủy trước ngày bay trên 30 ngày: hoàn 90% giá vé"
+                [placeholder]="lang.t('admin.policies.descPlaceholder')"
+                class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+              ></textarea>
+            </div>
+
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Mô tả (EN)</label>
+              <textarea
+                [(ngModel)]="formData.description_en"
+                name="desc_en"
+                rows="2"
+                placeholder="English description"
                 class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
               ></textarea>
             </div>
 
             <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
-              <button type="button" (click)="showModal.set(false)" class="btn-ghost text-xs">Hủy</button>
-              <button type="submit" class="btn-gold text-xs !py-2 !px-5 font-bold">Lưu chính sách</button>
+              <button type="button" (click)="showModal.set(false)" class="btn-ghost text-xs">{{ lang.t('common.cancel') }}</button>
+              <button type="submit" class="btn-gold text-xs !py-2 !px-5 font-bold">{{ lang.t('admin.policies.savePolicyBtn') }}</button>
             </div>
           </form>
         </div>
@@ -180,9 +202,22 @@ import { CancellationPolicy } from '../../core/models/booking.model';
 export class PoliciesManageComponent implements OnInit {
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
+  readonly lang = inject(LanguageService);
 
   readonly policies = signal<CancellationPolicy[]>([]);
   readonly loading = signal(false);
+
+  readonly page = signal(1);
+  readonly pageSize = signal(20);
+  readonly pageSizeOptions = [10, 20, 30, 50, 100];
+
+  readonly pagedPolicies = computed(() => {
+    const list = this.policies();
+    const p = this.page();
+    const size = this.pageSize();
+    const start = (p - 1) * size;
+    return list.slice(start, start + size);
+  });
 
   readonly showModal = signal(false);
   isEditMode = false;
@@ -198,12 +233,25 @@ export class PoliciesManageComponent implements OnInit {
       next: (list) => {
         this.policies.set(list);
         this.loading.set(false);
+        const maxPage = Math.max(1, Math.ceil(list.length / this.pageSize()));
+        if (this.page() > maxPage) {
+          this.page.set(maxPage);
+        }
       },
       error: (err) => {
         this.loading.set(false);
-        this.toast.error(err.error?.message || 'Không thể tải chính sách hủy vé.');
+        this.toast.error(err.error?.message || this.lang.t('admin.policies.loadError'));
       },
     });
+  }
+
+  onPageChange(newPage: number): void {
+    this.page.set(newPage);
+  }
+
+  onPageSizeChange(newSize: number): void {
+    this.pageSize.set(newSize);
+    this.page.set(1);
   }
 
   openCreateModal(): void {
@@ -213,6 +261,7 @@ export class PoliciesManageComponent implements OnInit {
       max_days_before: 14,
       refund_percentage: 50,
       description: '',
+      description_en: '',
     };
     this.showModal.set(true);
   }
@@ -225,41 +274,42 @@ export class PoliciesManageComponent implements OnInit {
 
   savePolicy(): void {
     if (this.formData.refund_percentage === undefined || this.formData.min_days_before === undefined) {
-      this.toast.warning('Vui lòng điền đầy đủ thông tin');
+      this.toast.warning(this.lang.t('admin.policies.fillAllWarning'));
       return;
     }
 
     if (this.isEditMode && this.formData._id) {
       this.api.updatePolicy(this.formData._id, this.formData).subscribe({
         next: () => {
-          this.toast.success('Cập nhật chính sách thành công!');
+          this.toast.success(this.lang.t('admin.policies.updateSuccess'));
           this.showModal.set(false);
           this.loadPolicies();
         },
-        error: (err) => this.toast.error(err.error?.message || 'Cập nhật thất bại.'),
+        error: (err) => this.toast.error(err.error?.message || this.lang.t('admin.policies.updateError')),
       });
     } else {
       this.api.createPolicy(this.formData).subscribe({
         next: () => {
-          this.toast.success('Tạo chính sách mới thành công!');
+          this.toast.success(this.lang.t('admin.policies.createSuccess'));
           this.showModal.set(false);
           this.loadPolicies();
         },
-        error: (err) => this.toast.error(err.error?.message || 'Tạo chính sách thất bại.'),
+        error: (err) => this.toast.error(err.error?.message || this.lang.t('admin.policies.createError')),
       });
     }
   }
 
   deletePolicy(p: CancellationPolicy): void {
     if (!p._id) return;
-    if (!confirm(`Bạn có chắc muốn xóa chính sách hoàn ${p.refund_percentage}%?`)) return;
+    const confirmMsg = `${this.lang.t('admin.policies.confirmDelete')} ${p.refund_percentage}%?`;
+    if (!confirm(confirmMsg)) return;
 
     this.api.deletePolicy(p._id).subscribe({
       next: () => {
-        this.toast.success('Đã xóa chính sách');
+        this.toast.success(this.lang.t('admin.policies.deleteSuccess'));
         this.loadPolicies();
       },
-      error: (err) => this.toast.error(err.error?.message || 'Xóa thất bại.'),
+      error: (err) => this.toast.error(err.error?.message || this.lang.t('admin.policies.deleteError')),
     });
   }
 }

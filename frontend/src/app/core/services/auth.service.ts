@@ -54,11 +54,17 @@ export class AuthService {
   refreshProfile(): void {
     this.api.getProfile().subscribe({
       next: (user) => {
-        this.currentUser.set(user);
-        localStorage.setItem('auth_user', JSON.stringify(user));
+        const normalized = this.normalizeUser(user);
+        this.currentUser.set(normalized);
+        localStorage.setItem('auth_user', JSON.stringify(normalized));
       },
-      error: () => {
-        this.logout();
+      error: (err) => {
+        // Chỉ đăng xuất khi token thực sự không hợp lệ (401/403).
+        // Lỗi mạng/backend đang khởi động lại không được phép xoá phiên đăng nhập,
+        // vì như vậy người dùng đang thao tác sẽ bị đá ra ngoài.
+        if (err?.status === 401 || err?.status === 403) {
+          this.logout();
+        }
       },
     });
   }
@@ -72,10 +78,23 @@ export class AuthService {
   }
 
   private setSession(token: string, user: User): void {
+    const normalized = this.normalizeUser(user);
     this.token.set(token);
-    this.currentUser.set(user);
+    this.currentUser.set(normalized);
     localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
+    localStorage.setItem('auth_user', JSON.stringify(normalized));
+  }
+
+  /**
+   * Backend cũ trả `user.id` trong khi mọi component dùng `user._id`
+   * (khớp document User và GET /api/auth/me). Chuẩn hoá tại đây để khách vừa
+   * đăng nhập/đăng ký không bị coi là "chưa đăng nhập".
+   */
+  private normalizeUser(user: any): User {
+    if (user && !user._id && user.id) {
+      return { ...user, _id: user.id } as User;
+    }
+    return user as User;
   }
 
   private getStoredToken(): string | null {
@@ -89,7 +108,7 @@ export class AuthService {
   private getStoredUser(): User | null {
     try {
       const u = localStorage.getItem('auth_user');
-      return u ? JSON.parse(u) : null;
+      return u ? this.normalizeUser(JSON.parse(u)) : null;
     } catch {
       return null;
     }

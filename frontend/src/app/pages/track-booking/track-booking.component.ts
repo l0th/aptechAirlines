@@ -1,14 +1,134 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
+import { AuthService } from '../../core/services/auth.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
+import { AuthModalService } from '../../shared/services/auth-modal.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
-import { Booking, BookingStatus } from '../../core/models/booking.model';
-import { Flight } from '../../core/models/flight.model';
+import { BookingStatus, CancellationPolicy } from '../../core/models/booking.model';
+import { Flight, FlightStatus } from '../../core/models/flight.model';
+
+/* ------------------------------------------------------------------ *
+ * LOCAL SHAPES — khớp CHÍNH XÁC shape thật của backend.
+ * (Không import type vé từ booking.model.ts để tránh phụ thuộc chéo.)
+ * ------------------------------------------------------------------ */
+
+/** Hạng ghế trên phiếu vé (booking_info.ticket_coupons[]). */
+interface LocalTicketCoupon {
+  coupon_number: string;
+  passenger_name: string;
+  flight_id: string;
+  flight_number: string;
+  inventory_id: string;
+  cabin_class: string;
+  is_smoking?: boolean;
+  fare_paid: number;
+  seat_code?: string;
+  /** OUTBOUND | INBOUND | CONNECTING_1 | CONNECTING_2 */
+  leg_type?: string;
+  coupon_status?: string;
+}
+
+interface LocalPassenger {
+  first_name: string;
+  last_name: string;
+  passenger_type: string;
+  id_card_or_passport?: string;
+  nationality?: string;
+  date_of_birth?: string;
+}
+
+interface LocalPaymentTransaction {
+  transaction_type: string;
+  amount: number;
+  card_masked?: string;
+  status?: string;
+  created_at?: string;
+}
+
+/** Document Booking trần (không phải envelope) — backend trả ở confirm/reschedule/cancel. */
+interface LocalBooking {
+  _id: string;
+  pnr_code: string;
+  booking_type: string;
+  status: string;
+  blocking_number?: string | null;
+  confirmation_number?: string | null;
+  cancellation_number?: string | null;
+  time_limit_deadline?: string | null;
+  total_amount: number;
+  total_miles_accrued?: number;
+  passengers: LocalPassenger[];
+  ticket_coupons: LocalTicketCoupon[];
+  payment_transactions: LocalPaymentTransaction[];
+}
+
+/**
+ * Một phần tử của envelope.flight_coupons[].
+ * LƯU Ý shape thật: backend spread một Mongoose subdocument
+ * (`{ ...coupon, origin_iata, ... }`) nên CHỈ các field làm giàu là own-property;
+ * `flight_number` / `leg_type` nằm trong `_doc`. Vì vậy ta luôn đọc hành trình
+ * chính từ `booking_info.ticket_coupons` và chỉ dùng mảng này để lấy giờ bay /
+ * điểm đi-đến / tình trạng chuyến theo `flight_id`.
+ */
+interface LocalFlightCouponEnrichment {
+  flight_id?: string;
+  origin_iata?: string;
+  dest_iata?: string;
+  scheduled_departure?: string;
+  scheduled_arrival?: string;
+  actual_departure?: string;
+  actual_arrival?: string;
+  flight_status?: string;
+  delay_reason?: string;
+  is_highlighted_change?: boolean;
+}
+
+/** envelope thật của GET /api/bookings/track/:code */
+interface TrackBookingEnvelope {
+  booking_info: LocalBooking;
+  has_emergency_changes: boolean;
+  flight_coupons: LocalFlightCouponEnrichment[];
+}
+
+/** Model đã gộp sẵn để render template (mỗi chặng bay = 1 nhóm coupon). */
+interface TrackedLegView {
+  key: string;
+  leg_type: string;
+  leg_label: string;
+  flight_id: string;
+  flight_number: string;
+  origin_iata: string;
+  dest_iata: string;
+  scheduled_departure?: string;
+  scheduled_arrival?: string;
+  actual_departure?: string;
+  actual_arrival?: string;
+  flight_status?: string;
+  delay_reason?: string;
+  delay_minutes?: number;
+  is_highlighted_change: boolean;
+  cabin_class: string;
+  passenger_names: string[];
+  seat_codes: string[];
+  fare_paid: number;
+  coupon_count: number;
+}
+
+interface TrackedPassengerView {
+  first_name: string;
+  last_name: string;
+  passenger_type: string;
+  id_card_or_passport?: string;
+  nationality?: string;
+  seat_code?: string;
+  fare_paid?: number;
+  cabin_class?: string;
+}
 
 @Component({
   selector: 'app-track-booking',
@@ -17,7 +137,7 @@ import { Flight } from '../../core/models/flight.model';
   template: `
     <div class="min-h-screen bg-slate-50 py-10">
       <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         <!-- Header -->
         <div class="text-center mb-8">
           <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-navy text-gold text-xs font-semibold mb-3">
@@ -28,7 +148,7 @@ import { Flight } from '../../core/models/flight.model';
             {{ lang.t('track.title') }}
           </h1>
           <p class="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto mt-1">
-            Tra cứu thông tin vé máy bay, kiểm tra tình trạng chuyến bay thời gian thực, đổi lịch trình hoặc yêu cầu hoàn hủy vé.
+            {{ lang.t('track.subtitle') }}
           </p>
         </div>
 
@@ -62,33 +182,81 @@ import { Flight } from '../../core/models/flight.model';
           </form>
         </div>
 
+        <!-- Empty state: đã tra cứu nhưng không còn kết quả -->
+        @if (searched() && !loading() && !bookingInfo()) {
+          <div class="card-luxury p-8 text-center border-slate-200">
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-slate-100 text-slate-400 mb-3">
+              <app-icon name="search" class="w-7 h-7" />
+            </div>
+            <h3 class="text-sm font-bold text-navy mb-1">{{ lang.isVietnamese() ? 'Không tìm thấy vé phù hợp' : 'No matching ticket found' }}</h3>
+            <p class="text-xs text-slate-500">
+              {{ lang.isVietnamese() ? 'Vui lòng kiểm tra lại mã PNR / mã giữ chỗ (BLK) / mã xác nhận (CNF) rồi tra cứu lại.' : 'Please verify your PNR code / hold code (BLK) / ticket confirmation code (CNF) and try again.' }}
+            </p>
+          </div>
+        }
+
         <!-- Results Display -->
-        @if (booking()) {
+        @if (bookingInfo(); as b) {
           <div class="space-y-6 animate-fade-in">
-            
-            <!-- EMERGENCY DELAY / CANCEL WEATHER ALERT (Highlight cam/đỏ theo yêu cầu) -->
-            @if (booking()?.delay_or_cancellation_info?.is_affected) {
-              <div class="p-5 rounded-3xl border shadow-lg animate-pulse"
-                [ngClass]="booking()?.delay_or_cancellation_info?.flight_status === 'CANCELLED' ? 'bg-red-50 border-red-300 text-red-950' : 'bg-amber-50 border-amber-300 text-amber-950'"
+
+            <!-- ===== 3.9 EMERGENCY DELAY / CANCELLATION ALERT ===== -->
+            @if (hasEmergencyChanges()) {
+              <div class="p-5 rounded-3xl border shadow-lg"
+                [ngClass]="alertSeverity() === 'cancelled'
+                  ? 'bg-red-50 border-red-300 text-red-950'
+                  : (alertSeverity() === 'delayed' ? 'bg-amber-50 border-amber-300 text-amber-950' : 'bg-blue-50 border-blue-300 text-blue-950')"
               >
                 <div class="flex items-start gap-3">
                   <div class="p-2 rounded-full shrink-0"
-                    [ngClass]="booking()?.delay_or_cancellation_info?.flight_status === 'CANCELLED' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'"
+                    [ngClass]="alertSeverity() === 'cancelled'
+                      ? 'bg-red-100 text-red-600'
+                      : (alertSeverity() === 'delayed' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600')"
                   >
                     <app-icon name="alerttriangle" class="w-6 h-6" />
                   </div>
-                  <div>
+                  <div class="flex-1">
                     <h3 class="text-sm sm:text-base font-black uppercase tracking-wide">
-                      {{ lang.t('track.weatherAlert') }} CHUYẾN BAY {{ booking()?.delay_or_cancellation_info?.flight_status === 'CANCELLED' ? 'ĐÃ BỊ HỦY' : 'BỊ HOÃN CHUYẾN' }}
+                      {{ lang.t('track.weatherAlert') }}
+                      {{ alertSeverity() === 'cancelled'
+                        ? (lang.isVietnamese() ? 'CHUYẾN BAY ĐÃ BỊ HỦY' : 'FLIGHT HAS BEEN CANCELLED')
+                        : (alertSeverity() === 'delayed'
+                            ? (lang.isVietnamese() ? 'CHUYẾN BAY BỊ HOÃN CHUYẾN' : 'FLIGHT HAS BEEN DELAYED')
+                            : (lang.isVietnamese() ? 'CHUYẾN BAY CÓ THAY ĐỔI KHẨN CẤP' : 'FLIGHT HAS EMERGENCY CHANGES')) }}
                     </h3>
                     <p class="text-xs sm:text-sm mt-1 leading-relaxed font-semibold">
-                      {{ booking()?.delay_or_cancellation_info?.message }}
+                      {{ lang.isVietnamese() ? 'Hãng hàng không vừa cập nhật tình trạng các chuyến bay trong hành trình của quý khách. Vui lòng kiểm tra chi tiết bên dưới trước khi ra sân bay.' : 'The airline has updated the status of flights in your itinerary. Please review the details below before heading to the airport.' }}
                     </p>
-                    @if (booking()?.delay_or_cancellation_info?.delay_reason) {
-                      <div class="mt-2 text-xs bg-white/80 p-2.5 rounded-xl border border-amber-200">
-                        <strong>Lý do từ hãng hàng không:</strong> {{ booking()?.delay_or_cancellation_info?.delay_reason }}
-                      </div>
-                    }
+
+                    <!-- Danh sách chuyến bị ảnh hưởng: số hiệu + giờ dự kiến/thực tế -->
+                    <ul class="mt-3 space-y-2">
+                      @for (leg of affectedLegs(); track leg.key) {
+                        <li class="text-xs bg-white/80 p-2.5 rounded-xl border"
+                          [ngClass]="leg.flight_status === 'CANCELLED' ? 'border-red-200' : 'border-amber-200'">
+                          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 font-bold">
+                            <span class="font-mono text-navy">{{ leg.flight_number || '—' }}</span>
+                            <span>{{ leg.origin_iata }} → {{ leg.dest_iata }}</span>
+                            <span class="px-2 py-0.5 rounded-full text-[11px] font-black"
+                              [ngClass]="leg.flight_status === 'CANCELLED' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'">
+                              {{ leg.flight_status === 'CANCELLED' ? (lang.isVietnamese() ? 'ĐÃ HỦY' : 'CANCELLED') : (leg.flight_status || (lang.isVietnamese() ? 'THAY ĐỔI' : 'CHANGED')) }}
+                            </span>
+                          </div>
+                          <div class="mt-1 text-[11px]">
+                            {{ lang.isVietnamese() ? 'Giờ dự kiến: ' : 'Scheduled: ' }}
+                            <strong>{{ leg.scheduled_departure ? (leg.scheduled_departure | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
+                            @if (leg.actual_departure != null) {
+                              <span class="mx-1">•</span>
+                              {{ lang.isVietnamese() ? 'Giờ thực tế: ' : 'Actual: ' }}
+                              <strong class="text-rose-700">{{ leg.actual_departure | date: 'dd/MM/yyyy HH:mm' }}</strong>
+                            }
+                          </div>
+                          @if (leg.delay_reason || leg.delay_minutes) {
+                            <div class="mt-1 text-[11px] italic">
+                              {{ lang.isVietnamese() ? 'Lý do từ hãng hàng không: ' : 'Airline reason: ' }}<strong>{{ delayText(leg.delay_reason, leg.delay_minutes) }}</strong>
+                            </div>
+                          }
+                        </li>
+                      }
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -96,16 +264,22 @@ import { Flight } from '../../core/models/flight.model';
 
             <!-- Ticket Card -->
             <div class="card-luxury p-6 sm:p-8 shadow-xl border-slate-200">
-              
+
               <!-- Ticket Header -->
               <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5 mb-6">
                 <div>
-                  <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Mã đặt chỗ (PNR)</div>
+                  <div class="text-xs text-slate-400 font-semibold uppercase tracking-wider">{{ lang.isVietnamese() ? 'Mã đặt chỗ (PNR)' : 'Booking Reference (PNR)' }}</div>
                   <div class="text-2xl font-black font-mono text-navy tracking-wider">
-                    {{ booking()?.pnr_number }}
+                    {{ b.pnr_code }}
                   </div>
                   <div class="text-xs text-slate-500 mt-0.5">
-                    Mã số vé: <strong class="font-mono text-amber-600">{{ booking()?.confirmation_number || booking()?.blocking_number }}</strong>
+                    {{ lang.isVietnamese() ? 'Mã số vé: ' : 'Ticket code: ' }}
+                    <strong class="font-mono text-amber-600">
+                      {{ b.confirmation_number || b.blocking_number || b.cancellation_number || '—' }}
+                    </strong>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">
+                    {{ lang.isVietnamese() ? 'Loại đặt chỗ: ' : 'Booking type: ' }}<strong>{{ bookingTypeLabel(b.booking_type) }}</strong>
                   </div>
                 </div>
 
@@ -113,89 +287,202 @@ import { Flight } from '../../core/models/flight.model';
                   <span
                     class="badge-status"
                     [ngClass]="{
-                      'bg-emerald-100 text-emerald-800 border border-emerald-300': booking()?.status === BookingStatus.CONFIRMED,
-                      'bg-amber-100 text-amber-800 border border-amber-300': booking()?.status === BookingStatus.BLOCKED,
-                      'bg-rose-100 text-rose-800 border border-rose-300': booking()?.status === BookingStatus.CANCELLED,
-                      'bg-blue-100 text-blue-800 border border-blue-300': booking()?.status === BookingStatus.RESCHEDULED
+                      'bg-emerald-100 text-emerald-800 border border-emerald-300': b.status === BookingStatus.CONFIRMED,
+                      'bg-amber-100 text-amber-800 border border-amber-300': b.status === BookingStatus.BLOCKED,
+                      'bg-rose-100 text-rose-800 border border-rose-300': b.status === BookingStatus.CANCELLED,
+                      'bg-blue-100 text-blue-800 border border-blue-300': b.status === BookingStatus.RESCHEDULED
                     }"
                   >
-                    {{ booking()?.status }}
+                    {{ b.status }}
                   </span>
                 </div>
               </div>
 
-              <!-- Flight Legs Timeline -->
-              <div class="space-y-4 mb-6">
-                <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-2">Hành trình chuyến bay</h4>
-                @for (leg of booking()?.legs; track $index) {
-                  <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div class="flex items-center gap-4">
-                      <div class="w-10 h-10 rounded-xl bg-navy text-gold flex items-center justify-center font-mono font-bold text-xs">
-                        {{ leg.origin_iata }}
-                      </div>
-                      <div>
-                        <div class="text-sm font-black text-navy flex items-center gap-2">
-                          <span class="text-amber-600 font-mono">{{ leg.flight_number }}</span>
-                          <span>•</span>
-                          <span>{{ leg.origin_iata }}</span>
-                          <app-icon name="arrowright" class="w-3.5 h-3.5 text-slate-400" />
-                          <span>{{ leg.dest_iata }}</span>
-                        </div>
-                        <div class="text-xs text-slate-500 mt-1">
-                          Khởi hành: <strong>{{ leg.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</strong>
-                        </div>
-                      </div>
+              <!-- Thông tin giữ chỗ / xác nhận / hủy -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 text-xs">
+                @if (b.blocking_number) {
+                  <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200">
+                    <div class="text-[11px] text-amber-700 font-semibold uppercase tracking-wide">
+                      {{ b.status === BookingStatus.BLOCKED ? (lang.isVietnamese() ? 'Mã giữ chỗ' : 'Hold Code') : (lang.isVietnamese() ? 'Mã giữ chỗ (đã xác nhận)' : 'Hold Code (confirmed)') }}
                     </div>
-
-                    <div>
-                      <span class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-200 text-slate-700">
-                        Hạng {{ leg.cabin_class }}
-                      </span>
-                    </div>
+                    <div class="font-mono font-black text-amber-900">{{ b.blocking_number }}</div>
+                  </div>
+                }
+                @if (b.confirmation_number) {
+                  <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200">
+                    <div class="text-[11px] text-emerald-700 font-semibold uppercase tracking-wide">{{ lang.isVietnamese() ? 'Mã xác nhận' : 'Confirmation code' }}</div>
+                    <div class="font-mono font-black text-emerald-900">{{ b.confirmation_number }}</div>
+                  </div>
+                }
+                @if (b.cancellation_number) {
+                  <div class="p-3 rounded-2xl bg-rose-50 border border-rose-200">
+                    <div class="text-[11px] text-rose-700 font-semibold uppercase tracking-wide">{{ lang.isVietnamese() ? 'Số hủy vé' : 'Cancellation code' }}</div>
+                    <div class="font-mono font-black text-rose-900">{{ b.cancellation_number }}</div>
+                  </div>
+                }
+                @if (b.status === BookingStatus.BLOCKED && b.blocking_number && b.time_limit_deadline) {
+                  <div class="p-3 rounded-2xl bg-slate-50 border border-slate-200">
+                    <div class="text-[11px] text-slate-500 font-semibold uppercase tracking-wide">{{ lang.isVietnamese() ? 'Hạn thanh toán' : 'Payment deadline' }}</div>
+                    <div class="font-bold text-navy">{{ b.time_limit_deadline | date: 'dd/MM/yyyy HH:mm' }}</div>
                   </div>
                 }
               </div>
 
-              <!-- Passengers and Seats -->
+              <!-- ===== Hành trình: gom ticket_coupons theo leg_type ===== -->
+              <div class="space-y-4 mb-6">
+                <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-2">{{ lang.isVietnamese() ? 'Hành trình chuyến bay' : 'Flight Itinerary' }}</h4>
+
+                @if (journeyLegs().length === 0) {
+                  <div class="p-4 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-xs text-slate-500">
+                    {{ lang.isVietnamese() ? 'Chưa có thông tin chặng bay cho vé này.' : 'No flight leg information available for this ticket.' }}
+                  </div>
+                }
+
+                @for (group of journeyGroups(); track group.leg_type) {
+                  <div class="space-y-3">
+                    <div class="flex items-center gap-2">
+                      <span class="text-[11px] font-black uppercase tracking-wider text-navy bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                        {{ legTypeLabel(group.leg_type) }}
+                      </span>
+                      <span class="h-px flex-1 bg-slate-100"></span>
+                    </div>
+
+                    @for (leg of group.legs; track leg.key) {
+                      <div class="p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                        [ngClass]="leg.is_highlighted_change ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200/80'"
+                      >
+                        <div class="flex items-center gap-4">
+                          <div class="w-10 h-10 rounded-xl bg-navy text-gold flex items-center justify-center font-mono font-bold text-xs shrink-0">
+                            {{ leg.origin_iata || '??' }}
+                          </div>
+                          <div>
+                            <div class="text-sm font-black text-navy flex flex-wrap items-center gap-2">
+                              <span class="text-amber-600 font-mono">{{ leg.flight_number || '—' }}</span>
+                              <span>•</span>
+                              <span>{{ leg.origin_iata || '—' }}</span>
+                              <app-icon name="arrowright" class="w-3.5 h-3.5 text-slate-400" />
+                              <span>{{ leg.dest_iata || '—' }}</span>
+                              @if (leg.is_highlighted_change) {
+                                <span class="text-[10px] font-black px-2 py-0.5 rounded-full"
+                                  [ngClass]="leg.flight_status === 'CANCELLED' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'">
+                                  {{ leg.flight_status === 'CANCELLED' ? (lang.isVietnamese() ? 'ĐÃ HỦY' : 'CANCELLED') : (leg.flight_status || (lang.isVietnamese() ? 'THAY ĐỔI' : 'CHANGED')) }}
+                                </span>
+                              }
+                            </div>
+                            <div class="text-xs text-slate-500 mt-1">
+                              {{ lang.isVietnamese() ? 'Khởi hành: ' : 'Departure: ' }}<strong>{{ leg.scheduled_departure ? (leg.scheduled_departure | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
+                              <span class="mx-1">•</span>
+                              {{ lang.isVietnamese() ? 'Đến: ' : 'Arrival: ' }}<strong>{{ leg.scheduled_arrival ? (leg.scheduled_arrival | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
+                            </div>
+                            @if (leg.actual_departure != null) {
+                              <div class="text-[11px] text-rose-600 mt-0.5">
+                                {{ lang.isVietnamese() ? 'Thực tế: ' : 'Actual: ' }}<strong>{{ leg.actual_departure | date: 'dd/MM/yyyy HH:mm' }}</strong>
+                                @if (leg.delay_reason || leg.delay_minutes) {
+                                  <span> — {{ delayText(leg.delay_reason, leg.delay_minutes) }}</span>
+                                }
+                              </div>
+                            }
+                            <div class="text-[11px] text-slate-400 mt-0.5">
+                              {{ lang.isVietnamese() ? 'Phiếu vé: ' : 'Coupons: ' }}<span class="font-mono">{{ leg.coupon_count }}</span>
+                              <span class="mx-1">•</span>
+                              {{ lang.isVietnamese() ? 'Ghế: ' : 'Seat: ' }}
+                              <strong class="font-mono text-amber-600">{{ leg.seat_codes.length ? leg.seat_codes.join(', ') : (lang.isVietnamese() ? 'Chưa chọn' : 'Not selected') }}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="text-right shrink-0">
+                          <span class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-200 text-slate-700">
+                            {{ lang.isVietnamese() ? 'Hạng ' : 'Class ' }}{{ leg.cabin_class || '—' }}
+                          </span>
+                          <div class="text-xs font-black text-navy mt-1.5">{{ leg.fare_paid | currencyFormat }}</div>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+
+              <!-- ===== Hành khách: ghế lấy từ ticket_coupons theo passenger_name ===== -->
               <div class="border-t border-slate-100 pt-5 mb-6">
-                <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-3">Danh sách hành khách</h4>
+                <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-3">{{ lang.isVietnamese() ? 'Danh sách hành khách' : 'Passenger List' }}</h4>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  @for (p of booking()?.passengers; track $index) {
+                  @for (p of passengerViews(); track $index) {
                     <div class="p-3 bg-slate-50 rounded-xl border border-slate-200/60 flex items-center justify-between text-xs">
                       <div>
                         <div class="font-bold text-slate-800 uppercase">{{ p.last_name }} {{ p.first_name }}</div>
-                        <span class="text-slate-400 text-[11px]">{{ p.passenger_type }} • {{ p.id_card_or_passport || 'N/A' }}</span>
+                        <span class="text-slate-400 text-[11px]">
+                          {{ passengerTypeLabel(p.passenger_type) }} • {{ p.id_card_or_passport || 'N/A' }}
+                        </span>
+                        @if (p.cabin_class) {
+                          <div class="text-[11px] text-slate-400">{{ lang.isVietnamese() ? 'Hạng ' : 'Class ' }}{{ p.cabin_class }}</div>
+                        }
                       </div>
                       <span class="font-mono font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                        {{ p.seat_code || 'Chưa chọn' }}
+                        {{ p.seat_code || (lang.isVietnamese() ? 'Chưa chọn' : 'Not selected') }}
                       </span>
                     </div>
                   }
                 </div>
               </div>
 
-              <!-- Payment Summary -->
+              <!-- ===== Giao dịch thanh toán & tổng tiền ===== -->
+              @if (paymentTransactions().length) {
+                <div class="border-t border-slate-100 pt-5 mb-6">
+                  <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-3">{{ lang.isVietnamese() ? 'Lịch sử giao dịch' : 'Transaction History' }}</h4>
+                  <div class="space-y-2">
+                    @for (tx of paymentTransactions(); track $index) {
+                      <div class="flex items-center justify-between text-xs p-3 rounded-xl border"
+                        [ngClass]="tx.transaction_type === 'REFUND' ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200/60'"
+                      >
+                        <div>
+                          <strong class="text-slate-800">{{ transactionLabel(tx.transaction_type) }}</strong>
+                          <div class="text-[11px] text-slate-400">
+                            {{ tx.card_masked || '—' }}
+                            @if (tx.created_at) {
+                              <span> • {{ tx.created_at | date: 'dd/MM/yyyy HH:mm' }}</span>
+                            }
+                          </div>
+                        </div>
+                        <span class="font-mono font-black"
+                          [ngClass]="tx.transaction_type === 'REFUND' ? 'text-emerald-600' : 'text-navy'">
+                          {{ tx.transaction_type === 'REFUND' ? '+' : '' }}{{ tx.amount | currencyFormat }}
+                        </span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+
               <div class="flex items-center justify-between pt-4 border-t border-slate-100 text-xs text-slate-600">
-                <span>Tổng giá trị đơn vé:</span>
-                <span class="text-lg font-black text-navy">{{ booking()?.total_amount | currencyFormat }}</span>
+                <span>{{ lang.isVietnamese() ? 'Tổng giá trị đơn vé:' : 'Total ticket value:' }}</span>
+                <span class="text-lg font-black text-navy">{{ b.total_amount | currencyFormat }}</span>
               </div>
 
-              <!-- ACTION BUTTONS: Reschedule, Cancel, Confirm Hold -->
+              <!-- ===== Nút hành động theo trạng thái ===== -->
               <div class="mt-6 pt-5 border-t border-slate-100 flex flex-wrap items-center justify-end gap-3">
-                <!-- If Blocked: Confirm Payment -->
-                @if (booking()?.status === BookingStatus.BLOCKED) {
+
+                @if (b.status === BookingStatus.BLOCKED) {
                   <button
                     type="button"
-                    (click)="showConfirmHoldModal.set(true)"
+                    (click)="openConfirmHoldModal()"
                     class="btn-gold text-xs !py-2.5 !px-5"
                   >
                     <app-icon name="creditcard" class="w-4 h-4" />
-                    <span>{{ lang.t('track.payHoldBtn') }}</span>
+                    <span>{{ lang.isVietnamese() ? 'Xác nhận vé' : 'Confirm ticket' }}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    (click)="openCancelModal()"
+                    class="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-all"
+                  >
+                    <app-icon name="xcircle" class="w-4 h-4" />
+                    <span>{{ lang.isVietnamese() ? 'Huỷ giữ chỗ' : 'Cancel hold' }}</span>
                   </button>
                 }
 
-                <!-- If Confirmed: Reschedule -->
-                @if (booking()?.status === BookingStatus.CONFIRMED) {
+                @if (b.status === BookingStatus.CONFIRMED) {
                   <button
                     type="button"
                     (click)="openRescheduleModal()"
@@ -204,10 +491,7 @@ import { Flight } from '../../core/models/flight.model';
                     <app-icon name="calendar" class="w-4 h-4 text-navy" />
                     <span>{{ lang.t('track.rescheduleBtn') }}</span>
                   </button>
-                }
 
-                <!-- If not already Cancelled: Cancel Ticket -->
-                @if (booking()?.status !== BookingStatus.CANCELLED) {
                   <button
                     type="button"
                     (click)="openCancelModal()"
@@ -217,7 +501,38 @@ import { Flight } from '../../core/models/flight.model';
                     <span>{{ lang.t('track.cancelBtn') }}</span>
                   </button>
                 }
+
+                @if (b.status === BookingStatus.CANCELLED) {
+                  <div class="w-full flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs">
+                    <div>
+                      <div class="text-[11px] text-rose-700 font-semibold uppercase tracking-wide">{{ lang.isVietnamese() ? 'Số hủy vé' : 'Cancellation code' }}</div>
+                      <div class="font-mono font-black text-rose-900">{{ b.cancellation_number || '—' }}</div>
+                    </div>
+                    <div class="text-right">
+                      <div class="text-[11px] text-rose-700 font-semibold uppercase tracking-wide">{{ lang.isVietnamese() ? 'Số tiền đã hoàn' : 'Refunded amount' }}</div>
+                      <div class="font-black text-emerald-600">
+                        {{ refundedAmount() | currencyFormat }}
+                        @if (refundedPercentage() !== null) {
+                          <span class="text-rose-700 font-semibold">({{ refundedPercentage() }}%)</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                }
+
+                @if (b.status === BookingStatus.RESCHEDULED) {
+                  <div class="w-full text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-2xl p-3">
+                    {{ lang.isVietnamese() ? 'Vé đã được đổi lịch trình. Vui lòng kiểm tra lại hành trình và mã xác nhận mới.' : 'Ticket itinerary has been changed. Please check the updated itinerary and new confirmation code.' }}
+                  </div>
+                }
               </div>
+
+              <!-- Thông báo kết quả hành động gần nhất -->
+              @if (actionMessage()) {
+                <div class="mt-4 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                  {{ actionMessage() }}
+                </div>
+              }
 
             </div>
           </div>
@@ -227,13 +542,13 @@ import { Flight } from '../../core/models/flight.model';
     </div>
 
     <!-- Modal 1: Confirm Hold Ticket (Thanh toán vé giữ chỗ) -->
-    @if (showConfirmHoldModal()) {
+    @if (showConfirmHoldModal() && bookingInfo(); as b) {
       <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
         <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-slate-200">
           <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 class="text-base font-bold text-navy flex items-center gap-2">
               <app-icon name="creditcard" class="w-5 h-5 text-gold" />
-              <span>Thanh toán vé giữ chỗ</span>
+              <span>{{ lang.isVietnamese() ? 'Thanh toán vé giữ chỗ' : 'Pay for Hold Booking' }}</span>
             </h3>
             <button (click)="showConfirmHoldModal.set(false)" class="text-slate-400 hover:text-slate-600">
               <app-icon name="x" class="w-5 h-5" />
@@ -241,12 +556,30 @@ import { Flight } from '../../core/models/flight.model';
           </div>
 
           <p class="text-xs text-slate-500 mb-4 leading-relaxed">
-            Nhập thẻ tín dụng để chuyển đổi mã vé giữ chỗ <strong>{{ booking()?.blocking_number }}</strong> thành vé máy bay chính thức.
+            @if (lang.isVietnamese()) {
+              {{ lang.t('track.holdPaymentNotice1') }} <strong>{{ b.blocking_number }}</strong> {{ lang.t('track.holdPaymentNotice2') }}
+            } @else {
+              Enter credit card details to convert hold booking <strong>{{ b.blocking_number }}</strong> into a confirmed ticket.
+            }
           </p>
+
+          @if (b.time_limit_deadline) {
+            <div class="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+              @if (lang.isVietnamese()) {
+                {{ lang.t('track.holdDeadlineLabel') }} <strong>{{ b.time_limit_deadline | date: 'dd/MM/yyyy HH:mm' }}</strong>.
+                {{ lang.t('track.holdExpiredNotice') }}
+              } @else {
+                Payment deadline: <strong>{{ b.time_limit_deadline | date: 'dd/MM/yyyy HH:mm' }}</strong>.
+                After expiry, the hold reservation will be cancelled automatically.
+              }
+            </div>
+          }
 
           <div class="space-y-3 text-xs mb-5">
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">Số thẻ tín dụng (16 số)</label>
+              <label class="block font-semibold text-slate-600 mb-1">
+                {{ lang.isVietnamese() ? 'Số thẻ tín dụng (16 số)' : 'Credit Card Number (16 digits)' }}
+              </label>
               <input
                 type="text"
                 [(ngModel)]="confirmCardNumber"
@@ -255,13 +588,13 @@ import { Flight } from '../../core/models/flight.model';
               />
             </div>
             <div class="text-right text-xs">
-              <span class="text-slate-500">Số tiền cần thanh toán: </span>
-              <strong class="text-navy font-bold">{{ booking()?.total_amount | currencyFormat }}</strong>
+              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Số tiền cần thanh toán: ' : 'Amount to pay: ' }}</span>
+              <strong class="text-navy font-bold">{{ b.total_amount | currencyFormat }}</strong>
             </div>
           </div>
 
           <div class="flex justify-end gap-3">
-            <button (click)="showConfirmHoldModal.set(false)" class="btn-ghost text-xs">Hủy</button>
+            <button (click)="showConfirmHoldModal.set(false)" class="btn-ghost text-xs">{{ lang.t('common.cancel') }}</button>
             <button
               [disabled]="submittingAction()"
               (click)="executeConfirmHold()"
@@ -270,7 +603,7 @@ import { Flight } from '../../core/models/flight.model';
               @if (submittingAction()) {
                 <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
               }
-              <span>Xác nhận thanh toán</span>
+              <span>{{ lang.isVietnamese() ? 'Xác nhận thanh toán' : 'Confirm Payment' }}</span>
             </button>
           </div>
         </div>
@@ -278,13 +611,13 @@ import { Flight } from '../../core/models/flight.model';
     }
 
     <!-- Modal 2: Reschedule Modal (Đổi chuyến bay) -->
-    @if (showRescheduleModal()) {
+    @if (showRescheduleModal() && bookingInfo(); as b) {
       <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
         <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 border border-slate-200">
           <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 class="text-base font-bold text-navy flex items-center gap-2">
               <app-icon name="calendar" class="w-5 h-5 text-gold" />
-              <span>Đổi chuyến bay (Reschedule)</span>
+              <span>{{ lang.isVietnamese() ? 'Đổi chuyến bay (Reschedule)' : 'Reschedule Flight' }}</span>
             </h3>
             <button (click)="showRescheduleModal.set(false)" class="text-slate-400 hover:text-slate-600">
               <app-icon name="x" class="w-5 h-5" />
@@ -292,40 +625,72 @@ import { Flight } from '../../core/models/flight.model';
           </div>
 
           <p class="text-xs text-slate-500 mb-4">
-            Chọn chuyến bay thay thế khả dụng trên cùng chặng bay cho mã xác nhận <strong>{{ booking()?.confirmation_number }}</strong>.
+            @if (lang.isVietnamese()) {
+              {{ lang.t('track.rescheduleNotice') }}
+              <strong>{{ b.confirmation_number }}</strong>.
+            } @else {
+              Select an available alternative flight on the same route for confirmation number
+              <strong>{{ b.confirmation_number }}</strong>.
+            }
           </p>
 
-          <div class="space-y-2 max-h-60 overflow-y-auto mb-4">
-            @for (fl of availableAlternativeFlights(); track fl._id) {
-              <button
-                type="button"
-                (click)="selectedNewFlightId.set(fl._id); selectedNewInventoryId.set(fl.inventories[0]?._id || '')"
-                [class.border-gold]="selectedNewFlightId() === fl._id"
-                [class.bg-amber-50]="selectedNewFlightId() === fl._id"
-                class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all flex items-center justify-between text-xs"
-              >
-                <div>
-                  <strong class="font-mono font-bold text-navy">{{ fl.flight_number }}</strong>
-                  <span class="text-slate-500 ml-2">{{ fl.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
-                </div>
-                <div class="text-right">
-                  <span class="text-amber-600 font-bold font-mono">{{ fl.inventories[0]?.base_price | currencyFormat }}</span>
-                </div>
-              </button>
-            }
-          </div>
+          @if (loadingAlternatives()) {
+            <div class="py-8 text-center text-xs text-slate-500">
+              <app-icon name="refreshcw" class="w-5 h-5 animate-spin mx-auto mb-2 text-gold" />
+              {{ lang.isVietnamese() ? 'Đang tải danh sách chuyến bay thay thế...' : 'Loading alternative flights...' }}
+            </div>
+          } @else if (availableAlternativeFlights().length === 0) {
+            <div class="py-8 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
+              <app-icon name="alerttriangle" class="w-6 h-6 mx-auto mb-2 text-slate-400" />
+              @if (lang.isVietnamese()) {
+                {{ lang.t('track.noRescheduleOptions1') }}
+                <strong>{{ currentCabinClass() || '—' }}</strong>, {{ lang.t('track.seatsAvailable') }}
+                <strong>{{ passengerCount() }}</strong> {{ lang.t('track.noRescheduleOptions2') }}
+              } @else {
+                No suitable alternative flight available (same cabin
+                <strong>{{ currentCabinClass() || '—' }}</strong>, with at least
+                <strong>{{ passengerCount() }}</strong> seats). Please consider cancellation or contact support.
+              }
+            </div>
+          } @else {
+            <div class="space-y-2 max-h-60 overflow-y-auto mb-4">
+              @for (fl of availableAlternativeFlights(); track fl._id) {
+                <button
+                  type="button"
+                  (click)="selectAlternativeFlight(fl)"
+                  [class.border-gold]="selectedNewFlightId() === fl._id"
+                  [class.bg-amber-50]="selectedNewFlightId() === fl._id"
+                  class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all flex items-center justify-between text-xs"
+                >
+                  <div>
+                    <strong class="font-mono font-bold text-navy">{{ fl.flight_number }}</strong>
+                    <span class="text-slate-500 ml-2">{{ fl.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
+                    <div class="text-[11px] text-slate-400 mt-0.5">
+                      {{ lang.isVietnamese() ? 'Hạng' : 'Cabin' }} {{ selectedInventory(fl)?.cabin_class }} •
+                      {{ lang.isVietnamese() ? 'còn' : 'remaining' }} {{ selectedInventory(fl)?.available_seats }} {{ lang.isVietnamese() ? 'ghế' : 'seats' }}
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-amber-600 font-bold font-mono">
+                      {{ selectedInventory(fl)?.base_price | currencyFormat }}
+                    </span>
+                  </div>
+                </button>
+              }
+            </div>
+          }
 
           <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
-            <button (click)="showRescheduleModal.set(false)" class="btn-ghost text-xs">Đóng</button>
+            <button (click)="showRescheduleModal.set(false)" class="btn-ghost text-xs">{{ lang.t('track.close') }}</button>
             <button
-              [disabled]="!selectedNewFlightId() || submittingAction()"
+              [disabled]="!selectedNewFlightId() || submittingAction() || loadingAlternatives()"
               (click)="executeReschedule()"
               class="btn-navy text-xs !py-2.5 !px-5"
             >
               @if (submittingAction()) {
                 <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
               }
-              <span>Xác nhận đổi chuyến</span>
+              <span>{{ lang.isVietnamese() ? 'Xác nhận đổi chuyến' : 'Confirm Reschedule' }}</span>
             </button>
           </div>
         </div>
@@ -333,41 +698,64 @@ import { Flight } from '../../core/models/flight.model';
     }
 
     <!-- Modal 3: Cancel Ticket Modal (Hủy vé & Tính % hoàn tiền) -->
-    @if (showCancelModal()) {
+    @if (showCancelModal() && bookingInfo(); as b) {
       <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
         <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-slate-200">
           <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 class="text-base font-bold text-rose-600 flex items-center gap-2">
               <app-icon name="alerttriangle" class="w-5 h-5 text-rose-600" />
-              <span>Xác nhận Yêu cầu Hủy vé</span>
+              <span>{{ lang.isVietnamese() ? 'Xác nhận Yêu cầu Hủy vé' : 'Confirm Ticket Cancellation' }}</span>
             </h3>
             <button (click)="showCancelModal.set(false)" class="text-slate-400 hover:text-slate-600">
               <app-icon name="x" class="w-5 h-5" />
             </button>
           </div>
 
-          <!-- Refund Calculation Preview -->
+          <!-- Refund Calculation Preview (chính sách thật từ GET /api/policies) -->
           <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 mb-4 space-y-2 text-xs">
             <div class="flex items-center justify-between">
-              <span class="text-slate-500">Mã vé:</span>
-              <strong class="font-mono text-navy">{{ booking()?.confirmation_number || booking()?.blocking_number }}</strong>
+              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Mã vé:' : 'Ticket Code:' }}</span>
+              <strong class="font-mono text-navy">
+                {{ b.confirmation_number || b.blocking_number || b.pnr_code }}
+              </strong>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-slate-500">Tổng tiền vé đã trả:</span>
-              <span>{{ booking()?.total_amount | currencyFormat }}</span>
+              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Tổng tiền vé đã trả:' : 'Total paid fare:' }}</span>
+              <span>{{ b.total_amount | currencyFormat }}</span>
             </div>
-            <div class="flex items-center justify-between pt-2 border-t border-slate-200">
-              <span class="text-slate-500">{{ lang.t('track.cancelPolicyInfo') }}</span>
-              <span class="font-bold text-amber-600">{{ estimatedRefundPercent() }}% hoàn tiền</span>
+            <div class="flex items-center justify-between">
+              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Chuyến khởi hành sớm nhất:' : 'Earliest departure:' }}</span>
+              <strong>{{ earliestDeparture() ? (earliestDeparture() | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
             </div>
-            <div class="flex items-center justify-between text-sm font-bold pt-1">
-              <span class="text-slate-700">{{ lang.t('track.refundEstimate') }}</span>
-              <span class="text-emerald-600">{{ estimatedRefundAmount() | currencyFormat }}</span>
-            </div>
+
+            @if (calculatingRefund()) {
+              <div class="flex items-center gap-2 pt-2 border-t border-slate-200 text-slate-500">
+                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                {{ lang.isVietnamese() ? 'Đang tính chính sách hoàn tiền...' : 'Calculating refund policy...' }}
+              </div>
+            } @else {
+              <div class="flex items-center justify-between pt-2 border-t border-slate-200">
+                <span class="text-slate-500">{{ lang.t('track.cancelPolicyInfo') }}</span>
+                <span class="font-bold text-amber-600">{{ estimatedRefundPercent() }}% {{ lang.isVietnamese() ? 'hoàn tiền' : 'refund' }}</span>
+              </div>
+              <div class="flex items-center justify-between text-sm font-bold pt-1">
+                <span class="text-slate-700">{{ lang.t('track.refundEstimate') }}</span>
+                <span class="text-emerald-600">{{ estimatedRefundAmount() | currencyFormat }}</span>
+              </div>
+              @if (matchedPolicyDescription()) {
+                <div class="text-[11px] text-slate-400 italic pt-1">{{ matchedPolicyDescription() }}</div>
+              }
+            }
+
+            @if (b.status === BookingStatus.BLOCKED) {
+              <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 mt-1">
+                {{ lang.isVietnamese() ? 'Vé đang giữ chỗ chưa thanh toán nên sẽ không được hoàn tiền.' : 'Unpaid hold booking will not be refunded.' }}
+              </div>
+            }
           </div>
 
           <div class="mb-5 text-xs">
-            <label class="block font-semibold text-slate-600 mb-1">Lý do hủy vé</label>
+            <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Lý do hủy vé' : 'Cancellation Reason' }}</label>
             <textarea
               [(ngModel)]="cancelReason"
               rows="3"
@@ -377,7 +765,7 @@ import { Flight } from '../../core/models/flight.model';
           </div>
 
           <div class="flex justify-end gap-3">
-            <button (click)="showCancelModal.set(false)" class="btn-ghost text-xs">Không hủy</button>
+            <button (click)="showCancelModal.set(false)" class="btn-ghost text-xs">{{ lang.isVietnamese() ? 'Không hủy' : 'Keep Booking' }}</button>
             <button
               [disabled]="submittingAction()"
               (click)="executeCancel()"
@@ -397,13 +785,26 @@ import { Flight } from '../../core/models/flight.model';
 export class TrackBookingComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(ApiService);
+  private readonly auth = inject(AuthService);
+  readonly authModal = inject(AuthModalService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
 
   searchCode = '';
   readonly loading = signal(false);
-  readonly booking = signal<Booking | null>(null);
+  /** true khi đã thực hiện ít nhất 1 lần tra cứu (để hiện empty-state). */
+  readonly searched = signal(false);
+
+  /** Envelope thật của GET /api/bookings/track/:code. */
+  readonly trackResult = signal<TrackBookingEnvelope | null>(null);
   readonly submittingAction = signal(false);
+  readonly actionMessage = signal('');
+
+  /** booking_info đã đọc từ envelope. */
+  readonly bookingInfo = computed<LocalBooking | null>(
+    () => this.trackResult()?.booking_info ?? null,
+  );
+  readonly hasEmergencyChanges = computed(() => !!this.trackResult()?.has_emergency_changes);
 
   BookingStatus = BookingStatus;
 
@@ -413,16 +814,174 @@ export class TrackBookingComponent implements OnInit {
   readonly showCancelModal = signal(false);
 
   confirmCardNumber = '4111222233334444';
-  cancelReason = 'Kế hoạch cá nhân thay đổi';
+  cancelReason = this.lang.isVietnamese() ? this.lang.t('track.personalPlanChanged') || '' : 'Personal plans changed';
 
   // Reschedule alternatives
   readonly availableAlternativeFlights = signal<Flight[]>([]);
+  readonly loadingAlternatives = signal(false);
   readonly selectedNewFlightId = signal('');
   readonly selectedNewInventoryId = signal('');
 
-  // Refund estimates
-  readonly estimatedRefundPercent = signal(75);
+  // Refund estimates (tính từ chính sách thật + ngày khởi hành sớm nhất)
+  readonly estimatedRefundPercent = signal(0);
   readonly estimatedRefundAmount = signal(0);
+  readonly calculatingRefund = signal(false);
+  readonly matchedPolicyDescription = signal('');
+  private policies: CancellationPolicy[] | null = null;
+
+  // ------------------------- derived view models -------------------------
+
+  /** Chặng bay đã gộp: ticket_coupons (nguồn chính) + flight_coupons (giờ bay/tình trạng). */
+  readonly journeyLegs = computed<TrackedLegView[]>(() => {
+    const b = this.bookingInfo();
+    if (!b) return [];
+
+    const enrichments = this.getFlightCoupons();
+    const byFlightId = new Map<string, LocalFlightCouponEnrichment>();
+    const byFlightNumber = new Map<string, LocalFlightCouponEnrichment>();
+    for (const fc of enrichments) {
+      if (fc.flight_id) byFlightId.set(String(fc.flight_id), fc);
+      const num = (fc as any).flight_number || (fc as any)._doc?.flight_number;
+      if (num) byFlightNumber.set(String(num), fc);
+    }
+
+    const coupons = b.ticket_coupons || [];
+    const order: string[] = [];
+    const grouped = new Map<string, LocalTicketCoupon[]>();
+
+    for (const c of coupons) {
+      const legType = this.normalizeLegType(c.leg_type);
+      const key = `${legType}::${c.flight_id}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+        order.push(key);
+      }
+      grouped.get(key)!.push(c);
+    }
+
+    return order.map((key) => {
+      const group = grouped.get(key)!;
+      const first = group[0];
+      const info =
+        byFlightId.get(String(first.flight_id)) ||
+        (first.flight_number ? byFlightNumber.get(String(first.flight_number)) : undefined) ||
+        {};
+
+      const isAltered =
+        info.is_highlighted_change === true ||
+        (info.flight_status !== undefined && info.flight_status !== FlightStatus.SCHEDULED) ||
+        !!info.delay_reason;
+
+      return {
+        key,
+        leg_type: this.normalizeLegType(first.leg_type),
+        leg_label: this.legTypeLabel(first.leg_type),
+        flight_id: String(first.flight_id),
+        flight_number: first.flight_number,
+        origin_iata: info.origin_iata || '',
+        dest_iata: info.dest_iata || '',
+        scheduled_departure: info.scheduled_departure,
+        scheduled_arrival: info.scheduled_arrival,
+        actual_departure: info.actual_departure,
+        actual_arrival: info.actual_arrival,
+        flight_status: info.flight_status,
+        delay_reason: info.delay_reason || '',
+        is_highlighted_change: isAltered,
+        cabin_class: first.cabin_class,
+        passenger_names: group.map((c) => c.passenger_name),
+        seat_codes: group.map((c) => c.seat_code || '').filter((s) => !!s),
+        fare_paid: group.reduce((sum, c) => sum + (Number(c.fare_paid) || 0), 0),
+        coupon_count: group.length,
+      } as TrackedLegView;
+    });
+  });
+
+  /** Nhóm chặng bay theo leg_type để render theo chặng đi / chặng về / nối chuyến. */
+  readonly journeyGroups = computed<{ leg_type: string; legs: TrackedLegView[] }[]>(() => {
+    const groups: { leg_type: string; legs: TrackedLegView[] }[] = [];
+    for (const leg of this.journeyLegs()) {
+      const existing = groups.find((g) => g.leg_type === leg.leg_type);
+      if (existing) existing.legs.push(leg);
+      else groups.push({ leg_type: leg.leg_type, legs: [leg] });
+    }
+    return groups;
+  });
+
+  /** Chỉ những chặng bị ảnh hưởng khẩn cấp (delay / huỷ / đổi giờ). */
+  readonly affectedLegs = computed(() =>
+    this.journeyLegs().filter(
+      (l) => l.is_highlighted_change || l.flight_status === FlightStatus.DELAYED || l.flight_status === FlightStatus.CANCELLED,
+    ),
+  );
+
+  readonly alertSeverity = computed<'cancelled' | 'delayed' | 'changed'>(() => {
+    const legs = this.affectedLegs();
+    if (legs.some((l) => l.flight_status === FlightStatus.CANCELLED)) return 'cancelled';
+    if (legs.some((l) => l.flight_status === FlightStatus.DELAYED)) return 'delayed';
+    return 'changed';
+  });
+
+  /** Hành khách + ghế/giá lấy từ ticket_coupons theo passenger_name. */
+  readonly passengerViews = computed<TrackedPassengerView[]>(() => {
+    const b = this.bookingInfo();
+    if (!b) return [];
+    const used = new Set<number>();
+    const coupons = b.ticket_coupons || [];
+
+    return (b.passengers || []).map((p) => {
+      const match = this.findCouponForPassenger(coupons, p, used);
+      return {
+        first_name: p.first_name,
+        last_name: p.last_name,
+        passenger_type: p.passenger_type,
+        id_card_or_passport: p.id_card_or_passport,
+        nationality: p.nationality,
+        seat_code: match?.seat_code || '',
+        fare_paid: match?.fare_paid,
+        cabin_class: match?.cabin_class,
+      } as TrackedPassengerView;
+    });
+  });
+
+  readonly paymentTransactions = computed<LocalPaymentTransaction[]>(
+    () => this.bookingInfo()?.payment_transactions || [],
+  );
+
+  /** Số tiền hoàn thực tế (từ giao dịch REFUND trong payment_transactions). */
+  readonly refundedAmount = computed(() => {
+    const refunds = this.paymentTransactions().filter((t) => t.transaction_type === 'REFUND');
+    return refunds.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  });
+
+  readonly refundedPercentage = computed<number | null>(() => {
+    const b = this.bookingInfo();
+    if (!b || this.refundedAmount() <= 0 || !b.total_amount) return null;
+    return Math.round((this.refundedAmount() / b.total_amount) * 100);
+  });
+
+  readonly passengerCount = computed(() => this.bookingInfo()?.passengers?.length || 1);
+
+  /** Hạng khoang của chặng đi (dùng để lọc chuyến thay thế). */
+  readonly currentCabinClass = computed(() => {
+    const b = this.bookingInfo();
+    if (!b) return '';
+    const outbound = (b.ticket_coupons || []).find(
+      (c) => this.normalizeLegType(c.leg_type) === 'OUTBOUND',
+    );
+    return (outbound || (b.ticket_coupons || [])[0])?.cabin_class || '';
+  });
+
+  readonly earliestDeparture = computed<string | null>(() => {
+    const times = this.journeyLegs()
+      .map((l) => l.scheduled_departure)
+      .filter((d): d is string => !!d)
+      .map((d) => new Date(d).getTime())
+      .filter((t) => !isNaN(t));
+    if (!times.length) return null;
+    return new Date(Math.min(...times)).toISOString();
+  });
+
+  // ------------------------------- lifecycle -------------------------------
 
   ngOnInit(): void {
     this.route.queryParams.subscribe((params) => {
@@ -434,139 +993,607 @@ export class TrackBookingComponent implements OnInit {
     });
   }
 
+  // -------------------------------- search --------------------------------
+
   handleSearch(): void {
-    if (!this.searchCode) {
-      this.toast.warning('Vui lòng nhập mã PNR hoặc mã vé cần tra cứu');
+    const code = (this.searchCode || '').trim().toUpperCase();
+    this.searchCode = code;
+
+    if (!code) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.requirePnr') || ''
+          : 'Please enter PNR or ticket code to track',
+      );
       return;
     }
 
+    // Tra cứu mới: xoá kết quả cũ + thông báo cũ
+    this.trackResult.set(null);
+    this.actionMessage.set('');
+    this.searched.set(true);
     this.loading.set(true);
-    this.api.trackBooking(this.searchCode.trim()).subscribe({
-      next: (b) => {
-        this.booking.set(b);
+
+    this.api.trackBooking(code).subscribe({
+      next: (res) => {
+        const env = res as unknown as TrackBookingEnvelope;
         this.loading.set(false);
+        if (!env?.booking_info) {
+          this.trackResult.set(null);
+          this.toast.error(
+            this.lang.isVietnamese()
+              ? this.lang.t('track.invalidData') || ''
+              : 'Invalid ticket data returned. Please try again.',
+          );
+          return;
+        }
+        this.trackResult.set(env);
       },
       error: (err) => {
         this.loading.set(false);
-        this.toast.error(err.error?.message || 'Không tìm thấy vé tương ứng với mã cung cấp.');
+        this.trackResult.set(null);
+        this.toast.error(
+          err?.error?.message ||
+            (this.lang.isVietnamese()
+              ? this.lang.t('track.notFound') || ''
+              : 'No booking found with the provided code.'),
+        );
       },
     });
   }
 
+  /** Luôn nạp lại state bằng envelope thật sau mỗi hành động. */
+  private reloadBooking(successMessage?: string): void {
+    const b = this.bookingInfo();
+    const code = (b?.pnr_code || this.searchCode || '').trim().toUpperCase();
+    if (!code) return;
+
+    this.api.trackBooking(code).subscribe({
+      next: (res) => {
+        const env = res as unknown as TrackBookingEnvelope;
+        if (env?.booking_info) this.trackResult.set(env);
+        this.loading.set(false);
+        this.searched.set(true);
+        if (successMessage) {
+          this.actionMessage.set(successMessage);
+          this.toast.success(successMessage);
+        }
+      },
+      error: (err) => {
+        this.loading.set(false);
+        // Vé vừa bị huỷ vẫn tra cứu được, nhưng nếu lỗi ta thông báo rõ ràng.
+        this.toast.warning(
+          err?.error?.message ||
+            (this.lang.isVietnamese()
+              ? this.lang.t('track.actionCompleteReloadFailed') || ''
+              : 'Action completed, but failed to reload ticket details. Please track again.'),
+        );
+      },
+    });
+  }
+
+  // ------------------------------ action guards ------------------------------
+
+  /**
+   * confirm/reschedule/cancel đều yêu cầu JWT. Chủ động mở modal đăng nhập
+   * nếu chưa đăng nhập, và xử lý 401 khi token hết hạn.
+   */
+  private requireLogin(): boolean {
+    if (this.auth.isAuthenticated()) return true;
+    this.authModal.open();
+    this.toast.warning(
+      this.lang.isVietnamese()
+        ? this.lang.t('track.loginRequired') || ''
+        : 'Please sign in to manage your booking (confirm / reschedule / cancel).',
+    );
+    return false;
+  }
+
+  private handleUnauthorized(err: any): boolean {
+    if (err?.status === 401 || err?.status === 403) {
+      this.toast.error(
+        err?.status === 401
+          ? (this.lang.isVietnamese()
+              ? this.lang.t('track.sessionExpired') || ''
+              : 'Session expired. Please sign in again to continue.')
+          : (err?.error?.message ||
+              (this.lang.isVietnamese()
+                ? this.lang.t('track.noPermission') || ''
+                : 'You do not have permission to manage this booking.')),
+      );
+      this.authModal.open();
+      return true;
+    }
+    return false;
+  }
+
+  // ----------------------------- confirm (BLOCKED) -----------------------------
+
+  openConfirmHoldModal(): void {
+    if (!this.requireLogin()) return;
+    this.showConfirmHoldModal.set(true);
+  }
+
   executeConfirmHold(): void {
-    const b = this.booking();
-    if (!b?.blocking_number) return;
+    const b = this.bookingInfo();
+    if (!b?.blocking_number) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.noBlockingNumber') || ''
+          : 'Blocking number not found for this booking.',
+      );
+      return;
+    }
+    if (!this.requireLogin()) return;
 
     this.submittingAction.set(true);
     this.api
       .confirmBooking({
         blocking_number: b.blocking_number,
-        credit_card_number: this.confirmCardNumber,
+        credit_card_number: (this.confirmCardNumber || '').replace(/\s+/g, ''),
       })
       .subscribe({
-        next: (updated) => {
+        next: () => {
+          // Backend trả document Booking trần → KHÔNG gán wrapper, nạp lại envelope.
           this.submittingAction.set(false);
-          this.booking.set(updated);
           this.showConfirmHoldModal.set(false);
-          this.toast.success('Thanh toán giữ chỗ thành công! Vé đã được xác nhận.');
+          // Xác nhận vé làm backend cộng dặm SkyMiles → làm mới cache hồ sơ.
+          this.auth.refreshProfile();
+          this.reloadBooking(
+            this.lang.isVietnamese()
+              ? this.lang.t('track.holdPaymentSuccess') || ''
+              : 'Hold payment successful! Ticket has been confirmed.',
+          );
         },
         error: (err) => {
           this.submittingAction.set(false);
-          this.toast.error(err.error?.message || 'Thanh toán giữ chỗ không thành công.');
+          if (this.handleUnauthorized(err)) return;
+          this.toast.error(
+            err?.error?.message ||
+              (this.lang.isVietnamese()
+                ? this.lang.t('track.holdPaymentFailed') || ''
+                : 'Hold payment failed.'),
+          );
         },
       });
   }
 
-  openRescheduleModal(): void {
-    const b = this.booking();
-    if (!b?.legs?.[0]) return;
+  // ------------------------------ reschedule ------------------------------
 
+  openRescheduleModal(): void {
+    if (!this.requireLogin()) return;
+
+    const legs = this.journeyLegs();
+    const outbound = legs.find((l) => l.leg_type === 'OUTBOUND') || legs[0];
+    if (!outbound) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.noFlightInfoForReschedule') || ''
+          : 'No flight leg info found to reschedule.',
+      );
+      return;
+    }
+    if (!outbound.origin_iata || !outbound.dest_iata) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.unknownFlightSegment') || ''
+          : 'Flight route not identified. Please track again.',
+      );
+      return;
+    }
+
+    this.selectedNewFlightId.set('');
+    this.selectedNewInventoryId.set('');
+    this.availableAlternativeFlights.set([]);
     this.showRescheduleModal.set(true);
-    // Fetch alternative flights on same route
-    const firstLeg = b.legs[0];
+    this.loadingAlternatives.set(true);
+
     this.api
-      .getFlights({ origin: firstLeg.origin_iata, dest: firstLeg.dest_iata })
+      .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
       .subscribe({
         next: (flights) => {
-          this.availableAlternativeFlights.set(
-            flights.filter((f) => f._id !== firstLeg.flight_id),
+          this.loadingAlternatives.set(false);
+          this.availableAlternativeFlights.set(this.filterAlternativeFlights(flights, outbound));
+        },
+        error: (err) => {
+          this.loadingAlternatives.set(false);
+          this.availableAlternativeFlights.set([]);
+          this.toast.error(
+            err?.error?.message ||
+              (this.lang.isVietnamese()
+                ? this.lang.t('track.failedToLoadAlternative') || ''
+                : 'Failed to load alternative flights.'),
           );
         },
       });
+  }
+
+  /** Lọc chuyến thay thế: khác chuyến hiện tại, không huỷ, đúng hạng khoang và đủ ghế. */
+  private filterAlternativeFlights(flights: Flight[], current: TrackedLegView): Flight[] {
+    const needed = this.passengerCount();
+    const cabin = current.cabin_class;
+    const currentFlightId = String(current.flight_id);
+
+    return (flights || [])
+      .filter((f) => String(f._id) !== currentFlightId)
+      .filter((f) => f.status !== FlightStatus.CANCELLED)
+      .filter((f) => this.pickInventory(f, cabin, needed) !== null);
+  }
+
+  /** Inventory khớp cabin_class của coupon cũ và còn đủ ghế cho số khách. */
+  private pickInventory(flight: Flight, cabinClass: string, needed: number) {
+    const inventories = flight?.inventories || [];
+    return (
+      inventories.find(
+        (inv) =>
+          (!cabinClass || inv.cabin_class === cabinClass) &&
+          (Number(inv.available_seats) || 0) >= needed,
+      ) || null
+    );
+  }
+
+  /** Inventory hiển thị cho 1 chuyến thay thế (dùng chung logic chọn). */
+  selectedInventory(flight: Flight) {
+    return this.pickInventory(flight, this.currentCabinClass(), this.passengerCount());
+  }
+
+  selectAlternativeFlight(flight: Flight): void {
+    const inv = this.selectedInventory(flight);
+    this.selectedNewFlightId.set(flight._id);
+    this.selectedNewInventoryId.set(inv?._id || '');
   }
 
   executeReschedule(): void {
-    const b = this.booking();
+    const b = this.bookingInfo();
     if (!b?.confirmation_number || !this.selectedNewFlightId()) return;
+    if (!this.requireLogin()) return;
 
+    const targetFlightId = this.selectedNewFlightId();
+    const targetCabin = this.currentCabinClass();
+    const needed = this.passengerCount();
     this.submittingAction.set(true);
-    this.api
-      .rescheduleBooking({
-        confirmation_number: b.confirmation_number,
-        new_flight_id: this.selectedNewFlightId(),
-        new_inventory_id: this.selectedNewInventoryId(),
-      })
-      .subscribe({
-        next: (updated) => {
+
+    // Nạp lại chuyến bay mục tiêu để lấy inventory_id hiện hành
+    // (id inventory của một số chuyến seed có thể đổi giữa các lần đọc).
+    this.api.getFlightById(targetFlightId).subscribe({
+      next: (flight) => {
+        const inv = this.pickInventory(flight, targetCabin, needed);
+        const inventoryId = inv?._id || this.selectedNewInventoryId();
+        if (!inventoryId) {
           this.submittingAction.set(false);
-          this.booking.set(updated);
-          this.showRescheduleModal.set(false);
-          this.toast.success('Đổi chuyến bay thành công!');
-        },
-        error: (err) => {
-          this.submittingAction.set(false);
-          this.toast.error(err.error?.message || 'Đổi chuyến bay thất bại.');
-        },
-      });
+          this.toast.error(
+            this.lang.isVietnamese()
+              ? this.lang.t('track.notEnoughSeats') || ''
+              : 'Selected flight no longer has enough seats for the booked cabin. Please choose another flight.',
+          );
+          return;
+        }
+        this.submitReschedule(b, targetFlightId, inventoryId);
+      },
+      error: (err) => {
+        this.submittingAction.set(false);
+        if (this.handleUnauthorized(err)) return;
+        this.toast.error(
+          err?.error?.message ||
+            (this.lang.isVietnamese()
+              ? this.lang.t('track.failedToCheckFlight') || ''
+              : 'Failed to verify selected flight.'),
+        );
+      },
+    });
   }
 
+  private submitReschedule(b: LocalBooking, flightId: string, inventoryId: string): void {
+    const payload: any = {
+      confirmation_number: b.confirmation_number,
+      new_flight_id: flightId,
+      new_inventory_id: inventoryId,
+    };
+
+    this.api.rescheduleBooking(payload).subscribe({
+      next: (res: any) => {
+        // Response thật: { booking, price_difference, message }
+        this.submittingAction.set(false);
+        this.showRescheduleModal.set(false);
+        const diff = Number(res?.price_difference) || 0;
+        const isVi = this.lang.isVietnamese();
+        const diffText = diff === 0
+          ? this.lang.t('track.noFareDifference')
+          : (diff > 0
+              ? (isVi
+                  ? (this.lang.t('track.surcharge') || '').replace('{amount}', new Intl.NumberFormat('vi-VN').format(Math.abs(diff)))
+                  : `Additional fare: ${new Intl.NumberFormat('en-US').format(Math.abs(diff))} VND.`)
+              : (isVi
+                  ? (this.lang.t('track.refundDifference') || '').replace('{amount}', new Intl.NumberFormat('vi-VN').format(Math.abs(diff)))
+                  : `Fare difference refunded: ${new Intl.NumberFormat('en-US').format(Math.abs(diff))} VND.`));
+        const defaultMsg = this.lang.t('track.rescheduleSuccess');
+        const msg = res?.message || defaultMsg;
+        this.reloadBooking(`${msg} ${diffText}`);
+      },
+      error: (err) => {
+        this.submittingAction.set(false);
+        if (this.handleUnauthorized(err)) return;
+        this.toast.error(
+          err?.error?.message ||
+            (this.lang.isVietnamese() ? 'Đổi chuyến bay thất bại.' : 'Rescheduling flight failed.'),
+        );
+      },
+    });
+  }
+
+  // -------------------------------- cancel --------------------------------
+
   openCancelModal(): void {
-    const b = this.booking();
+    if (!this.requireLogin()) return;
+    const b = this.bookingInfo();
     if (!b) return;
 
-    // Calculate approximate days before flight
-    const depTime = b.legs?.[0]?.scheduled_departure;
-    let days = 15;
-    if (depTime) {
-      days = Math.max(0, Math.ceil((new Date(depTime).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    this.cancelReason = this.lang.isVietnamese()
+      ? this.lang.t('track.personalPlanChanged') || ''
+      : 'Personal plans changed';
+    this.showCancelModal.set(true);
+    void this.computeRefundEstimate(b);
+  }
+
+  /** % hoàn tiền lấy từ chính sách thật (GET /api/policies) + ngày khởi hành sớm nhất. */
+  private async computeRefundEstimate(b: LocalBooking): Promise<void> {
+    this.calculatingRefund.set(true);
+    this.matchedPolicyDescription.set('');
+
+    const total = Number(b.total_amount) || 0;
+
+    // Vé giữ chỗ (chưa thanh toán) không được hoàn tiền (backend cũng trả 0%).
+    if (b.status === BookingStatus.BLOCKED) {
+      this.estimatedRefundPercent.set(0);
+      this.estimatedRefundAmount.set(0);
+      this.matchedPolicyDescription.set(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.unpaidHoldNoRefund') || ''
+          : 'Unpaid hold booking: refund not applicable.',
+      );
+      this.calculatingRefund.set(false);
+      return;
     }
 
-    let pct = 0;
-    if (days >= 30) pct = 90;
-    else if (days >= 15) pct = 75;
-    else if (days >= 7) pct = 50;
-    else pct = 0;
+    const policies = await this.loadPolicies();
+    const departure = this.earliestDeparture();
+
+    if (!policies.length || !departure) {
+      this.estimatedRefundPercent.set(0);
+      this.estimatedRefundAmount.set(0);
+      this.matchedPolicyDescription.set(
+        policies.length
+          ? ''
+          : (this.lang.isVietnamese()
+              ? this.lang.t('track.failedToLoadRefundPolicy') || ''
+              : 'Failed to load refund policy table from system.'),
+      );
+      this.calculatingRefund.set(false);
+      return;
+    }
+
+    const days = Math.max(
+      0,
+      (new Date(departure).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+    );
+    const policy = this.matchRefundPolicy(policies, days);
+    const pct = policy?.refund_percentage ?? 0;
 
     this.estimatedRefundPercent.set(pct);
-    this.estimatedRefundAmount.set(Math.round((b.total_amount * pct) / 100));
-    this.showCancelModal.set(true);
+    this.estimatedRefundAmount.set(Math.round((total * pct) / 100));
+    const isVi = this.lang.isVietnamese();
+    this.matchedPolicyDescription.set(
+      policy
+        ? (isVi
+            ? (this.lang.t('track.refundPolicyDesc') || '').replace('{desc}', policy.description).replace('{days}', Math.floor(days).toString())
+            : `${policy.description} (${Math.floor(days)} days before departure)`)
+        : (isVi
+            ? this.lang.t('track.noMatchingRefundPolicy') || ''
+            : 'No refund policy applicable at this time.'),
+    );
+    this.calculatingRefund.set(false);
+  }
+
+  /**
+   * Đúng thứ tự backend: sắp xếp min_days_before GIẢM DẦN và lấy dòng khớp đầu tiên.
+   * max_days_before = null/undefined nghĩa là không giới hạn trên.
+   */
+  private matchRefundPolicy(policies: CancellationPolicy[], days: number): CancellationPolicy | null {
+    const sorted = [...policies].sort((a, b) => b.min_days_before - a.min_days_before);
+    for (const p of sorted) {
+      if (p.max_days_before !== null && p.max_days_before !== undefined) {
+        if (days >= p.min_days_before && days <= p.max_days_before) return p;
+      } else if (days >= p.min_days_before) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  private loadPolicies(): Promise<CancellationPolicy[]> {
+    if (this.policies) return Promise.resolve(this.policies);
+    return new Promise((resolve) => {
+      this.api.getPolicies().subscribe({
+        next: (policies) => {
+          this.policies = policies || [];
+          resolve(this.policies);
+        },
+        error: () => resolve([]),
+      });
+    });
+  }
+  
+  delayText(reason?: string | null, minutes?: number | null): string {
+    const mins = minutes && minutes > 0 ? minutes : Number((reason || '').match(/trễ\s+(\d+)\s+phút/i)?.[1] || 0);
+    if (mins > 0) return this.lang.t('track.delayMinutes').replace('{n}', String(mins));
+    return reason || '';
   }
 
   executeCancel(): void {
-    const b = this.booking();
+    const b = this.bookingInfo();
     if (!b) return;
+    if (!this.requireLogin()) return;
 
-    const identifier = b.confirmation_number || b.blocking_number || b.pnr_number;
+    const identifier = b.confirmation_number || b.blocking_number || b.pnr_code;
+    if (!identifier) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? this.lang.t('track.unknownTicketToCancel') || ''
+          : 'Cannot identify ticket code to cancel.',
+      );
+      return;
+    }
+
     this.submittingAction.set(true);
-
     this.api
-      .cancelBooking({
-        identifier,
-        reason: this.cancelReason,
-      })
+      .cancelBooking({ identifier })
       .subscribe({
-        next: (res) => {
+        next: (res: any) => {
+          // Response thật: { booking, refund_amount, refund_percentage, cancellation_number, message }
           this.submittingAction.set(false);
-          this.booking.set(res.booking);
           this.showCancelModal.set(false);
-          this.toast.success(
-            `Hủy vé thành công! Đã xử lý hoàn ${res.refund_percentage}% (${new Intl.NumberFormat('vi-VN').format(res.refund_amount)} VND)`,
-          );
+
+          const pct = Number(res?.refund_percentage) || 0;
+          const amount = Number(res?.refund_amount) || 0;
+          const cancellationNo = res?.cancellation_number || '';
+          const isVi = this.lang.isVietnamese();
+          const formatAmt = new Intl.NumberFormat(isVi ? 'vi-VN' : 'en-US').format(amount);
+          const tpl = this.lang.t('track.cancelSuccessFull');
+          const message = tpl
+            ? tpl
+                .replace('{no}', cancellationNo || '—')
+                .replace('{pct}', pct.toString())
+                .replace('{amount}', formatAmt)
+            : `Booking cancelled successfully! Cancellation no: ${cancellationNo || '—'}. Refund ${pct}% (${formatAmt} VND).`;
+
+          this.reloadBooking(message);
         },
         error: (err) => {
           this.submittingAction.set(false);
-          this.toast.error(err.error?.message || 'Hủy vé không thành công.');
+          if (this.handleUnauthorized(err)) return;
+          this.toast.error(
+            err?.error?.message ||
+              (this.lang.isVietnamese() ? 'Hủy vé không thành công.' : 'Ticket cancellation failed.'),
+          );
         },
       });
+  }
+
+  // -------------------------------- helpers --------------------------------
+
+  /**
+   * Mảng flight_coupons của envelope. Shape thật chỉ đảm bảo các field làm giàu
+   * (origin_iata, dest_iata, scheduled_departure, flight_status, ...).
+   */
+  private getFlightCoupons(): LocalFlightCouponEnrichment[] {
+    const raw = this.trackResult()?.flight_coupons;
+    return Array.isArray(raw) ? raw : [];
+  }
+
+  private normalizeLegType(legType?: string): string {
+    const t = (legType || 'OUTBOUND').trim().toUpperCase();
+    return t || 'OUTBOUND';
+  }
+
+  legTypeLabel(legType?: string): string {
+    const isVi = this.lang.isVietnamese();
+    switch (this.normalizeLegType(legType)) {
+      case 'OUTBOUND':
+        return this.lang.t('track.outboundLeg') || '';
+      case 'INBOUND':
+        return this.lang.t('track.inboundLeg') || '';
+      case 'CONNECTING_1':
+        return this.lang.t('track.connectingLeg1') || '';
+      case 'CONNECTING_2':
+        return this.lang.t('track.connectingLeg2') || '';
+      default:
+        return this.normalizeLegType(legType).replace(/_/g, ' ');
+    }
+  }
+
+  bookingTypeLabel(type?: string): string {
+    const isVi = this.lang.isVietnamese();
+    switch ((type || '').toUpperCase()) {
+      case 'ONE_WAY':
+        return this.lang.t('track.oneWay') || '';
+      case 'ROUND_TRIP':
+        return this.lang.t('track.roundTrip') || '';
+      case 'CONNECTING':
+        return this.lang.t('track.connecting') || '';
+      default:
+        return type || '—';
+    }
+  }
+
+  passengerTypeLabel(type?: string): string {
+    const isVi = this.lang.isVietnamese();
+    switch ((type || '').toUpperCase()) {
+      case 'ADULT':
+        return this.lang.t('track.adult') || '';
+      case 'CHILD':
+        return this.lang.t('track.child') || '';
+      case 'SENIOR':
+        return this.lang.t('track.senior') || '';
+      default:
+        return type || '—';
+    }
+  }
+
+  transactionLabel(type?: string): string {
+    const isVi = this.lang.isVietnamese();
+    switch ((type || '').toUpperCase()) {
+      case 'PAYMENT':
+        return this.lang.t('track.ticketPayment') || '';
+      case 'REFUND':
+        return this.lang.t('track.refund') || '';
+      case 'RESCHEDULE_CHARGE':
+        return this.lang.t('track.rescheduleSurcharge') || '';
+      case 'RESCHEDULE_REFUND':
+        return this.lang.t('track.rescheduleRefund') || '';
+      default:
+        return type || '—';
+    }
+  }
+
+  /** Ghép hành khách ↔ phiếu vé theo passenger_name (coupon lưu "first last"). */
+  private findCouponForPassenger(
+    coupons: LocalTicketCoupon[],
+    passenger: LocalPassenger,
+    used: Set<number>,
+  ): LocalTicketCoupon | undefined {
+    const first = (passenger.first_name || '').trim();
+    const last = (passenger.last_name || '').trim();
+    const exact = `${first} ${last}`.trim().toLowerCase();
+
+    let idx = coupons.findIndex(
+      (c, i) => !used.has(i) && (c.passenger_name || '').trim().toLowerCase() === exact,
+    );
+
+    if (idx < 0) {
+      const norm = (s: string) =>
+        (s || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\u0111/gi, 'd')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toUpperCase();
+      idx = coupons.findIndex((c, i) => {
+        if (used.has(i)) return false;
+        const name = norm(c.passenger_name);
+        return (
+          (!!exact && name === norm(exact)) ||
+          (!!first && name === norm(`${last} ${first}`))
+        );
+      });
+    }
+
+    if (idx < 0) {
+      idx = coupons.findIndex((_, i) => !used.has(i));
+    }
+    if (idx < 0) return undefined;
+
+    used.add(idx);
+    return coupons[idx];
   }
 }

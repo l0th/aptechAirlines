@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, Output, SimpleChanges, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../../core/services/auth.service';
@@ -59,7 +59,7 @@ import { IconComponent } from '../icon/icon.component';
               <!-- Login Form -->
               <form (ngSubmit)="handleLogin()" class="space-y-4">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">Tên đăng nhập / Username</label>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabel') }}</label>
                   <div class="relative">
                     <app-icon name="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
                     <input
@@ -67,14 +67,14 @@ import { IconComponent } from '../icon/icon.component';
                       [(ngModel)]="loginUsername"
                       name="username"
                       required
-                      placeholder="superadmin hoặc tên người dùng"
+                      [placeholder]="lang.t('auth.usernamePlaceholder')"
                       class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">Mật khẩu / Password</label>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.passwordLabel') }}</label>
                   <div class="relative">
                     <app-icon name="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
                     <input
@@ -82,35 +82,13 @@ import { IconComponent } from '../icon/icon.component';
                       [(ngModel)]="loginPassword"
                       name="password"
                       required
-                      placeholder="Nhập mật khẩu"
+                      [placeholder]="lang.t('auth.passwordPlaceholder')"
                       class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                 </div>
 
-                <!-- Fast Fill Demo Accounts -->
-                <div class="bg-amber-50/60 p-3 rounded-2xl border border-amber-200/60 text-xs">
-                  <div class="font-semibold text-amber-900 mb-1 flex items-center gap-1.5">
-                    <app-icon name="shieldcheck" class="w-3.5 h-3.5 text-amber-600" />
-                    Tài khoản mẫu kiểm thử:
-                  </div>
-                  <div class="flex flex-wrap gap-2 mt-1.5">
-                    <button
-                      type="button"
-                      (click)="fillDemo('superadmin', 'SuperAdmin@2026')"
-                      class="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg transition-colors font-medium text-[11px]"
-                    >
-                      SUPER_ADMIN
-                    </button>
-                    <button
-                      type="button"
-                      (click)="fillDemo('clerk', 'Clerk@2026')"
-                      class="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg transition-colors font-medium text-[11px]"
-                    >
-                      CLERK
-                    </button>
-                  </div>
-                </div>
+                <!-- Demo credentials removed for security: production bundles must never expose test logins -->
 
                 <button
                   type="submit"
@@ -137,7 +115,7 @@ import { IconComponent } from '../icon/icon.component';
                       [(ngModel)]="regLastName"
                       name="lastName"
                       required
-                      placeholder="Nguyễn"
+                      [placeholder]="lang.t('auth.lastNamePlaceholder')"
                       class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
                     />
                   </div>
@@ -148,14 +126,14 @@ import { IconComponent } from '../icon/icon.component';
                       [(ngModel)]="regFirstName"
                       name="firstName"
                       required
-                      placeholder="Văn An"
+                      [placeholder]="lang.t('auth.firstNamePlaceholder')"
                       class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">Tên đăng nhập</label>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabelOnly') }}</label>
                   <input
                     type="text"
                     [(ngModel)]="regUsername"
@@ -179,13 +157,13 @@ import { IconComponent } from '../icon/icon.component';
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">Mật khẩu</label>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.passwordLabelOnly') }}</label>
                   <input
                     type="password"
                     [(ngModel)]="regPassword"
                     name="password"
                     required
-                    placeholder="Tối thiểu 6 ký tự"
+                    [placeholder]="lang.t('auth.passwordMin')"
                     class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
                   />
                 </div>
@@ -211,13 +189,14 @@ import { IconComponent } from '../icon/icon.component';
     }
   `,
 })
-export class AuthModalComponent {
+export class AuthModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Output() closeEvent = new EventEmitter<void>();
 
   readonly auth = inject(AuthService);
   readonly lang = inject(LanguageService);
   readonly toast = inject(ToastService);
+  private readonly el = inject(ElementRef);
 
   readonly isRegister = signal(false);
   readonly loading = signal(false);
@@ -231,9 +210,32 @@ export class AuthModalComponent {
   regLastName = '';
   regEmail = '';
 
-  fillDemo(u: string, p: string): void {
-    this.loginUsername = u;
-    this.loginPassword = p;
+  // Reset form and focus first input whenever modal is reopened (isOpen becomes true)
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['isOpen']?.currentValue === true && !changes['isOpen']?.previousValue) {
+      this.resetForm();
+      this.focusFirstInput();
+    }
+  }
+
+  // Clear form state to prevent stale credentials or tab selection from persisting
+  private resetForm(): void {
+    this.isRegister.set(false);
+    this.loginUsername = '';
+    this.loginPassword = '';
+    this.regUsername = '';
+    this.regPassword = '';
+    this.regFirstName = '';
+    this.regLastName = '';
+    this.regEmail = '';
+  }
+
+  // Autofocus the first input on modal open for improved UX
+  private focusFirstInput(): void {
+    setTimeout(() => {
+      const input = this.el.nativeElement.querySelector('input') as HTMLInputElement | null;
+      input?.focus();
+    }, 0);
   }
 
   close(): void {
@@ -242,7 +244,7 @@ export class AuthModalComponent {
 
   handleLogin(): void {
     if (!this.loginUsername || !this.loginPassword) {
-      this.toast.warning('Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu');
+      this.toast.warning(this.lang.t('auth.loginEmpty'));
       return;
     }
 
@@ -252,19 +254,19 @@ export class AuthModalComponent {
       .subscribe({
         next: (res) => {
           this.loading.set(false);
-          this.toast.success(`Đăng nhập thành công! Xin chào ${res.user.first_name} ${res.user.last_name}`);
+          this.toast.success(`${this.lang.t('auth.loginSuccess')} ${res.user.first_name} ${res.user.last_name}`);
           this.close();
         },
         error: (err) => {
           this.loading.set(false);
-          this.toast.error(err.error?.message || 'Đăng nhập thất bại. Kiểm tra lại thông tin tài khoản.');
+          this.toast.error(err.error?.message || this.lang.t('auth.loginError'));
         },
       });
   }
 
   handleRegister(): void {
     if (!this.regUsername || !this.regPassword || !this.regFirstName || !this.regLastName || !this.regEmail) {
-      this.toast.warning('Vui lòng điền đầy đủ các thông tin đăng ký');
+      this.toast.warning(this.lang.t('auth.registerEmpty'));
       return;
     }
 
@@ -280,12 +282,12 @@ export class AuthModalComponent {
       .subscribe({
         next: (res) => {
           this.loading.set(false);
-          this.toast.success(`Đăng ký thành công! Chào mừng quý khách ${res.user.first_name}`);
+          this.toast.success(`${this.lang.t('auth.registerSuccess')} ${res.user.first_name}`);
           this.close();
         },
         error: (err) => {
           this.loading.set(false);
-          this.toast.error(err.error?.message || 'Đăng ký thất bại. Tên đăng nhập hoặc email có thể đã tồn tại.');
+          this.toast.error(err.error?.message || 'this.lang.t(\'auth.registerError\')');
         },
       });
   }

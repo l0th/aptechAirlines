@@ -1,4 +1,17 @@
-import { CabinClass } from './flight.model';
+/**
+ * Booking models — mirror the REAL backend `Booking` Mongoose document
+ * (backend/src/bookings/bookings.schema.ts). Keep field names EXACTLY as the
+ * server returns them (snake_case for domain fields, camelCase for timestamps).
+ *
+ * Important backend facts:
+ *  - The reference code is `pnr_code` (there is NO `pnr_number`).
+ *  - `Passenger` has NO `seat_code`: seats are stored per coupon in
+ *    `ticket_coupons[].seat_code` and are mapped back to a passenger through
+ *    `ticket_coupons[].passenger_name` (= `${first_name} ${last_name}`).
+ *  - There is NO embedded `legs` array: the itinerary lives in `ticket_coupons`
+ *    (grouped by `leg_type` + `flight_number`).
+ *  - Dates come back from the API as ISO strings.
+ */
 
 export enum PassengerType {
   ADULT = 'ADULT',
@@ -16,11 +29,40 @@ export enum BookingStatus {
 export enum BookingType {
   ONE_WAY = 'ONE_WAY',
   ROUND_TRIP = 'ROUND_TRIP',
+  /** Multi-leg itinerary through a transit airport (backend supports it). */
   CONNECTING = 'CONNECTING',
 }
 
+/** Leg types written into `ticket_coupons[].leg_type` (free-form string). */
+export enum LegType {
+  OUTBOUND = 'OUTBOUND',
+  INBOUND = 'INBOUND',
+  CONNECTING_1 = 'CONNECTING_1',
+  CONNECTING_2 = 'CONNECTING_2',
+}
+
+export enum CouponStatus {
+  ACTIVE = 'ACTIVE',
+  CANCELLED = 'CANCELLED',
+  RESCHEDULED = 'RESCHEDULED',
+}
+
+/** Passenger sub-document stored on the booking (NO seat_code here). */
 export interface Passenger {
-  _id?: string;
+  first_name: string;
+  last_name: string;
+  passenger_type: PassengerType;
+  id_card_or_passport?: string;
+  nationality?: string;
+  date_of_birth?: string;
+}
+
+/**
+ * Passenger as accepted by `POST /api/bookings` (CreateBookingDto).
+ * `seat_code` only exists on the REQUEST: the backend copies it into every
+ * generated ticket coupon for that passenger (`passenger_name` match).
+ */
+export interface PassengerInput {
   first_name: string;
   last_name: string;
   passenger_type: PassengerType;
@@ -28,49 +70,71 @@ export interface Passenger {
   nationality?: string;
   date_of_birth?: string;
   seat_code?: string;
-  fare_charged?: number;
 }
 
-export interface FlightLeg {
+/** One leg selection sent to `POST /api/bookings`. */
+export interface FlightLegSelection {
+  flight_id: string;
+  inventory_id: string;
+  leg_type?: LegType | string;
+}
+
+export interface TicketCoupon {
+  coupon_number: string;
+  /** `${first_name} ${last_name}` exactly as submitted by the client. */
+  passenger_name: string;
   flight_id: string;
   flight_number: string;
-  origin_iata: string;
-  dest_iata: string;
-  scheduled_departure: string;
-  scheduled_arrival: string;
-  duration_minutes: number;
-  cabin_class: CabinClass;
   inventory_id: string;
-  leg_type?: string;
+  cabin_class: string;
+  is_smoking: boolean;
+  fare_paid: number;
+  /** Assigned seat, e.g. '12A' (empty string when not selected). */
+  seat_code?: string;
+  leg_type: LegType | string;
+  coupon_status: CouponStatus | string;
 }
 
+export interface PaymentTransaction {
+  /** PAYMENT | REFUND | RESCHEDULE_CHARGE | RESCHEDULE_REFUND */
+  transaction_type: string;
+  amount: number;
+  card_masked: string;
+  status: string;
+  created_at: string;
+}
+
+/** Response document of every booking endpoint. */
 export interface Booking {
   _id: string;
-  user_id: string;
+  pnr_code: string;
+  /** ObjectId string, or the populated user document on list endpoints. */
+  user_id: string | { _id: string; first_name?: string; last_name?: string; email?: string };
   user_name?: string;
   booking_type: BookingType;
   status: BookingStatus;
-  pnr_number: string;
+  /** Only for BLOCKED bookings (free hold). */
   blocking_number?: string;
-  blocking_expires_at?: string;
+  /** Only for CONFIRMED / RESCHEDULED bookings. */
   confirmation_number?: string;
-  confirmed_at?: string;
+  /** Only after a cancellation. */
+  cancellation_number?: string;
+  /** Hold deadline = earliest departure − 14 days (BLOCKED bookings). */
+  time_limit_deadline?: string;
+  is_reminder_sent?: boolean;
   total_amount: number;
-  currency: string;
+  total_miles_accrued: number;
   passengers: Passenger[];
-  legs: FlightLeg[];
-  credit_card_mask?: string;
-  created_at: string;
-  cancelled_at?: string;
-  cancel_reason?: string;
-  refund_percentage?: number;
-  refund_amount?: number;
-  delay_or_cancellation_info?: {
-    is_affected: boolean;
-    flight_status: string;
-    delay_reason?: string;
-    message: string;
-  };
+  ticket_coupons: TicketCoupon[];
+  payment_transactions: PaymentTransaction[];
+  early_bird_percent?: number;
+  early_bird_label?: string;
+  early_bird_label_en?: string;
+  ff_tier?: string;
+  ff_discount_percent?: number;
+  pricing_note?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CancellationPolicy {
@@ -79,4 +143,5 @@ export interface CancellationPolicy {
   max_days_before: number | null;
   refund_percentage: number;
   description: string;
+  description_en?: string;
 }

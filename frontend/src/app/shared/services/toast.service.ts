@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { LanguageService } from '../../core/services/language.service';
 
 export interface Toast {
   id: number;
@@ -11,6 +12,7 @@ export interface Toast {
   providedIn: 'root',
 })
 export class ToastService {
+  private readonly lang = inject(LanguageService);
   readonly toasts = signal<Toast[]>([]);
   private counter = 0;
 
@@ -24,20 +26,20 @@ export class ToastService {
     }, 4500);
   }
 
-  success(message: string, title = 'Thành công'): void {
-    this.show(message, 'success', title);
+  success(message: string, title?: string): void {
+    this.show(message, 'success', title ?? (this.lang.isVietnamese() ? 'Thành công' : 'Success'));
   }
 
-  error(message: string, title = 'Lỗi'): void {
-    this.show(message, 'error', title);
+  error(message: string, title?: string): void {
+    this.show(message, 'error', title ?? (this.lang.isVietnamese() ? 'Lỗi' : 'Error'));
   }
 
-  warning(message: string, title = 'Cảnh báo'): void {
-    this.show(message, 'warning', title);
+  warning(message: string, title?: string): void {
+    this.show(message, 'warning', title ?? (this.lang.isVietnamese() ? 'Cảnh báo' : 'Warning'));
   }
 
-  info(message: string, title = 'Thông báo'): void {
-    this.show(message, 'info', title);
+  info(message: string, title?: string): void {
+    this.show(message, 'info', title ?? (this.lang.isVietnamese() ? 'Thông báo' : 'Information'));
   }
 
   remove(id: number): void {

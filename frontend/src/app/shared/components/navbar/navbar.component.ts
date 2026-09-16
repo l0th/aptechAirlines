@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { LanguageService } from '../../../core/services/language.service';
+import { AuthModalService } from '../../../shared/services/auth-modal.service';
 import { IconComponent } from '../icon/icon.component';
 import { AuthModalComponent } from '../auth-modal/auth-modal.component';
 
@@ -51,6 +52,15 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
             </a>
 
             <a
+              routerLink="/flight-lookup"
+              routerLinkActive="text-gold font-semibold bg-navy-light/30"
+              class="px-3.5 py-2 text-sm text-slate-200 hover:text-gold hover:bg-navy-light/40 rounded-full transition-all duration-150 flex items-center gap-1.5"
+            >
+              <app-icon name="plane" class="w-4 h-4 text-gold" />
+              <span>{{ lang.t('nav.flightLookup') }}</span>
+            </a>
+
+            <a
               routerLink="/skymiles"
               routerLinkActive="text-gold font-semibold bg-navy-light/30"
               class="px-3.5 py-2 text-sm text-slate-200 hover:text-gold hover:bg-navy-light/40 rounded-full transition-all duration-150 flex items-center gap-1.5"
@@ -66,7 +76,7 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
             <button
               (click)="lang.toggleLang()"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700 bg-navy-light/30 text-xs font-semibold text-slate-200 hover:text-white hover:border-gold transition-colors"
-              title="Chuyển ngôn ngữ / Switch Language"
+              [title]="lang.t('nav.switchLang')"
             >
               <app-icon name="languages" class="w-4 h-4 text-gold" />
               <span class="uppercase font-bold">{{ lang.currentLang() === 'vi' ? 'VI' : 'EN' }}</span>
@@ -111,7 +121,7 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
             } @else {
               <!-- Login / Register Trigger -->
               <button
-                (click)="isAuthModalOpen.set(true)"
+                (click)="authModal.open()"
                 class="btn-gold !py-2 !px-5 text-sm"
               >
                 <app-icon name="user" class="w-4 h-4" />
@@ -157,6 +167,14 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
               {{ lang.t('nav.myTrips') }}
             </a>
             <a
+              routerLink="/flight-lookup"
+              (click)="mobileMenuOpen.set(false)"
+              class="block px-4 py-2.5 rounded-2xl text-slate-200 hover:bg-navy-light font-medium text-sm flex items-center gap-2"
+            >
+              <app-icon name="plane" class="w-4 h-4 text-gold" />
+              {{ lang.t('nav.flightLookup') }}
+            </a>
+            <a
               routerLink="/skymiles"
               (click)="mobileMenuOpen.set(false)"
               class="block px-4 py-2.5 rounded-2xl text-slate-200 hover:bg-navy-light font-medium text-sm flex items-center gap-2"
@@ -186,7 +204,7 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
             } @else {
               <div class="pt-2">
                 <button
-                  (click)="isAuthModalOpen.set(true); mobileMenuOpen.set(false)"
+                  (click)="authModal.open(); mobileMenuOpen.set(false)"
                   class="btn-gold w-full text-center text-sm"
                 >
                   <app-icon name="user" class="w-4 h-4" />
@@ -201,15 +219,15 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
 
     <!-- Auth Modal -->
     <app-auth-modal
-      [isOpen]="isAuthModalOpen()"
-      (closeEvent)="isAuthModalOpen.set(false)"
+      [isOpen]="authModal.isOpen()"
+      (closeEvent)="authModal.close()"
     />
   `,
 })
 export class NavbarComponent {
   readonly auth = inject(AuthService);
   readonly lang = inject(LanguageService);
+  readonly authModal = inject(AuthModalService);
 
-  readonly isAuthModalOpen = signal(false);
   readonly mobileMenuOpen = signal(false);
 }
