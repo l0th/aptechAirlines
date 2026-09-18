@@ -145,4 +145,10 @@ export class UsersService {
     user.sky_miles = Math.max(0, user.sky_miles - miles);
     return user.save();
   }
+
+  async setSkyMiles(userId: string, exactValue: number): Promise<UserDocument> {
+    const user = await this.findById(userId);
+    user.sky_miles = Math.max(0, exactValue);
+    return user.save();
+  }
 }

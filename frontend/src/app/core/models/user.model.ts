@@ -26,3 +26,16 @@ export interface AuthResponse {
   access_token: string;
   user: User;
 }
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  address: string;
+  phone_number: string;
+  email: string;
+  sex: string;
+  age: number;
+  preferred_credit_card: string;
+}

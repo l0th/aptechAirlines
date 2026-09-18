@@ -9,8 +9,9 @@ import { ToastService } from '../../shared/services/toast.service';
 import { AuthModalService } from '../../shared/services/auth-modal.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
+import { FlightDurationPipe } from '../../shared/pipes/duration.pipe';
 import { BookingStatus, CancellationPolicy } from '../../core/models/booking.model';
-import { Flight, FlightStatus } from '../../core/models/flight.model';
+import { ConnectingRouteOption, Flight, FlightStatus } from '../../core/models/flight.model';
 
 /* ------------------------------------------------------------------ *
  * LOCAL SHAPES — khớp CHÍNH XÁC shape thật của backend.
@@ -79,6 +80,7 @@ interface LocalFlightCouponEnrichment {
   flight_id?: string;
   origin_iata?: string;
   dest_iata?: string;
+  departure_date?: string;
   scheduled_departure?: string;
   scheduled_arrival?: string;
   actual_departure?: string;
@@ -104,6 +106,7 @@ interface TrackedLegView {
   flight_number: string;
   origin_iata: string;
   dest_iata: string;
+  departure_date?: string;
   scheduled_departure?: string;
   scheduled_arrival?: string;
   actual_departure?: string;
@@ -133,7 +136,7 @@ interface TrackedPassengerView {
 @Component({
   selector: 'app-track-booking',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, IconComponent, CurrencyFormatPipe],
+  imports: [CommonModule, FormsModule, RouterModule, IconComponent, CurrencyFormatPipe, FlightDurationPipe],
   template: `
     <div class="min-h-screen bg-slate-50 py-10">
       <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -610,88 +613,288 @@ interface TrackedPassengerView {
       </div>
     }
 
-    <!-- Modal 2: Reschedule Modal (Đổi chuyến bay) -->
+    <!-- Modal 2: Reschedule Modal (Đổi chuyến bay) — 2-step for round-trip -->
     @if (showRescheduleModal() && bookingInfo(); as b) {
       <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
         <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 border border-slate-200">
           <div class="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
             <h3 class="text-base font-bold text-navy flex items-center gap-2">
               <app-icon name="calendar" class="w-5 h-5 text-gold" />
-              <span>{{ lang.isVietnamese() ? 'Đổi chuyến bay (Reschedule)' : 'Reschedule Flight' }}</span>
+              <span>{{ lang.t('track.rescheduleModalTitle') }}</span>
             </h3>
             <button (click)="showRescheduleModal.set(false)" class="text-slate-400 hover:text-slate-600">
               <app-icon name="x" class="w-5 h-5" />
             </button>
           </div>
 
+          <!-- Step indicator for round-trip -->
+          @if (isRoundTrip()) {
+            <div class="flex items-center gap-2 mb-4 text-[11px]">
+              <span class="px-2.5 py-1 rounded-full font-bold"
+                [ngClass]="rescheduleStep() === 1 ? 'bg-navy text-white' : 'bg-slate-100 text-slate-400'">
+                {{ lang.t('track.rescheduleStepOutbound') }}
+              </span>
+              <span class="h-px flex-1 bg-slate-200"></span>
+              <span class="px-2.5 py-1 rounded-full font-bold"
+                [ngClass]="rescheduleStep() === 2 ? 'bg-navy text-white' : 'bg-slate-100 text-slate-400'">
+                {{ lang.t('track.rescheduleStepReturn') }}
+              </span>
+            </div>
+          }
+
           <p class="text-xs text-slate-500 mb-4">
-            @if (lang.isVietnamese()) {
-              {{ lang.t('track.rescheduleNotice') }}
-              <strong>{{ b.confirmation_number }}</strong>.
-            } @else {
-              Select an available alternative flight on the same route for confirmation number
-              <strong>{{ b.confirmation_number }}</strong>.
-            }
+            {{ rescheduleStep() === 1 ? lang.t('track.rescheduleNotice') : lang.t('track.selectReturnNotice') }}
+            <strong>{{ b.confirmation_number }}</strong>.
           </p>
 
-          @if (loadingAlternatives()) {
-            <div class="py-8 text-center text-xs text-slate-500">
-              <app-icon name="refreshcw" class="w-5 h-5 animate-spin mx-auto mb-2 text-gold" />
-              {{ lang.isVietnamese() ? 'Đang tải danh sách chuyến bay thay thế...' : 'Loading alternative flights...' }}
-            </div>
-          } @else if (availableAlternativeFlights().length === 0) {
-            <div class="py-8 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
-              <app-icon name="alerttriangle" class="w-6 h-6 mx-auto mb-2 text-slate-400" />
-              @if (lang.isVietnamese()) {
-                {{ lang.t('track.noRescheduleOptions1') }}
-                <strong>{{ currentCabinClass() || '—' }}</strong>, {{ lang.t('track.seatsAvailable') }}
-                <strong>{{ passengerCount() }}</strong> {{ lang.t('track.noRescheduleOptions2') }}
-              } @else {
-                No suitable alternative flight available (same cabin
-                <strong>{{ currentCabinClass() || '—' }}</strong>, with at least
-                <strong>{{ passengerCount() }}</strong> seats). Please consider cancellation or contact support.
-              }
-            </div>
-          } @else {
-            <div class="space-y-2 max-h-60 overflow-y-auto mb-4">
-              @for (fl of availableAlternativeFlights(); track fl._id) {
-                <button
-                  type="button"
-                  (click)="selectAlternativeFlight(fl)"
-                  [class.border-gold]="selectedNewFlightId() === fl._id"
-                  [class.bg-amber-50]="selectedNewFlightId() === fl._id"
-                  class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all flex items-center justify-between text-xs"
-                >
-                  <div>
-                    <strong class="font-mono font-bold text-navy">{{ fl.flight_number }}</strong>
-                    <span class="text-slate-500 ml-2">{{ fl.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
-                    <div class="text-[11px] text-slate-400 mt-0.5">
-                      {{ lang.isVietnamese() ? 'Hạng' : 'Cabin' }} {{ selectedInventory(fl)?.cabin_class }} •
-                      {{ lang.isVietnamese() ? 'còn' : 'remaining' }} {{ selectedInventory(fl)?.available_seats }} {{ lang.isVietnamese() ? 'ghế' : 'seats' }}
-                    </div>
-                  </div>
-                  <div class="text-right">
-                    <span class="text-amber-600 font-bold font-mono">
-                      {{ selectedInventory(fl)?.base_price | currencyFormat }}
-                    </span>
-                  </div>
+          <!-- Step 1: Outbound flight selection -->
+          @if (rescheduleStep() === 1) {
+            <!-- §3.6.2 New outbound date selection -->
+            @if (loadingBookingWindow()) {
+              <div class="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 flex items-center gap-2">
+                <app-icon name="refreshcw" class="w-4 h-4 animate-spin text-gold" />
+                <span>{{ lang.isVietnamese() ? 'Đang tải chính sách khung ngày của hãng...' : 'Loading airline booking window policy...' }}</span>
+              </div>
+            } @else if (bookingWindowError()) {
+              <div class="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <app-icon name="alerttriangle" class="w-4 h-4 text-rose-600" />
+                  <span>{{ lang.isVietnamese() ? 'Không thể tải chính sách thời hạn đặt vé.' : 'Failed to load booking window policy.' }}</span>
+                </div>
+                <button type="button" (click)="loadBookingWindow()" class="text-xs text-rose-700 font-bold underline ml-2">
+                  {{ lang.isVietnamese() ? 'Thử lại' : 'Retry' }}
                 </button>
+              </div>
+            }
+
+            <div class="mb-4 flex items-center gap-3">
+              <label class="text-xs font-semibold text-slate-600 shrink-0">
+                <app-icon name="calendar" class="w-4 h-4 inline-block mr-1 text-navy" />
+                {{ lang.isVietnamese() ? 'Ngày đi mới' : 'New departure date' }}
+              </label>
+              <input
+                type="date"
+                [value]="rescheduleOutboundDate()"
+                (change)="onOutboundDateChange($any($event.target).value)"
+                [min]="bookingWindowMinDate() || todayDateStr"
+                [max]="bookingWindowMaxDate()"
+                [disabled]="loadingBookingWindow() || !bookingWindowLoaded()"
+                class="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:border-gold focus:ring-1 focus:ring-gold outline-none disabled:bg-slate-100 disabled:text-slate-400"
+              />
+            </div>
+
+            @if (loadingAlternatives()) {
+              <div class="py-8 text-center text-xs text-slate-500">
+                <app-icon name="refreshcw" class="w-5 h-5 animate-spin mx-auto mb-2 text-gold" />
+                {{ lang.t('track.loadingAlternatives') }}
+              </div>
+            } @else if (isConnecting() || (isRoundTrip() && outboundIsConnecting())) {
+              @if (availableConnectingAlternatives().length === 0) {
+                <div class="py-8 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
+                  {{ lang.isVietnamese() ? 'Không có hành trình nối chuyến phù hợp để đổi.' : 'No valid connecting itinerary is available for rescheduling.' }}
+                </div>
+              } @else {
+                <div class="space-y-2 max-h-72 overflow-y-auto mb-4">
+                  @for (route of availableConnectingAlternatives(); track $index) {
+                    <button
+                      type="button"
+                      (click)="selectConnectingAlternative(route)"
+                      [class.border-gold]="selectedConnectingAlternative() === route"
+                      [class.bg-amber-50]="selectedConnectingAlternative() === route"
+                      class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all text-xs"
+                    >
+                      <div class="font-bold text-navy mb-2">{{ route.route_type }} · {{ route.total_duration_minutes | flightDuration }}</div>
+                      <div class="flex flex-wrap gap-2">
+                        @for (leg of route.legs; track leg.flight_id; let index = $index) {
+                          <span class="px-2 py-1 rounded bg-white border border-slate-200">
+                            {{ index + 1 }}. {{ leg.flight_number }} · {{ leg.origin_iata }} → {{ leg.dest_iata }}
+                          </span>
+                        }
+                      </div>
+                    </button>
+                  }
+                </div>
               }
+            } @else if (availableAlternativeFlights().length === 0) {
+              <div class="py-8 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
+                <app-icon name="alerttriangle" class="w-6 h-6 mx-auto mb-2 text-slate-400" />
+                @if (lang.isVietnamese()) {
+                  {{ lang.t('track.noRescheduleOptions1') }}
+                  <strong>{{ currentCabinClass() || '—' }}</strong>, {{ lang.t('track.seatsAvailable') }}
+                  <strong>{{ passengerCount() }}</strong> {{ lang.t('track.noRescheduleOptions2') }}
+                } @else {
+                  No suitable alternative flight available (same cabin
+                  <strong>{{ currentCabinClass() || '—' }}</strong>, with at least
+                  <strong>{{ passengerCount() }}</strong> seats). Please consider cancellation or contact support.
+                }
+              </div>
+            } @else {
+              <div class="space-y-2 max-h-60 overflow-y-auto mb-4">
+                @for (fl of availableAlternativeFlights(); track fl._id) {
+                  <button
+                    type="button"
+                    (click)="selectAlternativeFlight(fl)"
+                    [class.border-gold]="selectedNewFlightId() === fl._id"
+                    [class.bg-amber-50]="selectedNewFlightId() === fl._id"
+                    class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <strong class="font-mono font-bold text-navy">{{ fl.flight_number }}</strong>
+                      <span class="text-slate-500 ml-2">{{ fl.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
+                      <div class="text-[11px] text-slate-400 mt-0.5">
+                        {{ lang.t('track.cabin') }} {{ selectedInventory(fl)?.cabin_class }} •
+                        {{ lang.t('track.remaining') }} {{ selectedInventory(fl)?.available_seats }} {{ lang.t('track.seats') }}
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <span class="text-amber-600 font-bold font-mono">
+                        {{ selectedInventory(fl)?.base_price | currencyFormat }}
+                      </span>
+                    </div>
+                  </button>
+                }
+              </div>
+            }
+          }
+
+          <!-- Step 2: Return flight selection (round-trip only) -->
+          @if (rescheduleStep() === 2) {
+            <!-- Keep current return toggle -->
+            <div class="mb-4 p-3 rounded-xl border text-xs flex items-center gap-3"
+              [ngClass]="keepReturnLeg() ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'">
+              <button type="button" (click)="keepReturnLeg.set(!keepReturnLeg())"
+                class="w-5 h-5 rounded border-2 flex items-center justify-center shrink-0"
+                [ngClass]="keepReturnLeg() ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300'">
+                @if (keepReturnLeg()) { <app-icon name="check" class="w-3 h-3" /> }
+              </button>
+              <span class="font-semibold">
+                {{ lang.t('track.keepCurrentReturn') }}
+              </span>
+            </div>
+
+            @if (!keepReturnLeg()) {
+              <!-- §3.6.2 New return date selection -->
+              <div class="mb-4 flex items-center gap-3">
+                <label class="text-xs font-semibold text-slate-600 shrink-0">
+                  <app-icon name="calendar" class="w-4 h-4 inline-block mr-1 text-navy" />
+                  {{ lang.isVietnamese() ? 'Ngày về mới' : 'New return date' }}
+                </label>
+                <input
+                  type="date"
+                  [value]="rescheduleReturnDate()"
+                  (change)="onReturnDateChange($any($event.target).value)"
+                  [min]="rescheduleOutboundDate() || bookingWindowMinDate() || todayDateStr"
+                  [max]="bookingWindowMaxDate()"
+                  [disabled]="loadingBookingWindow() || !bookingWindowLoaded()"
+                  class="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:border-gold focus:ring-1 focus:ring-gold outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </div>
+
+              @if (loadingReturnAlternatives()) {
+                <div class="py-8 text-center text-xs text-slate-500">
+                  <app-icon name="refreshcw" class="w-5 h-5 animate-spin mx-auto mb-2 text-gold" />
+                  {{ lang.t('track.loadingReturnFlights') }}
+                </div>
+              } @else if (returnIsConnecting()) {
+                <!-- Connecting return direction -->
+                @if (availableReturnConnectingAlternatives().length === 0) {
+                  <div class="py-6 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
+                    {{ lang.t('track.noReturnAlternative') }}
+                  </div>
+                } @else {
+                  <div class="space-y-2 max-h-72 overflow-y-auto mb-4">
+                    @for (route of availableReturnConnectingAlternatives(); track $index) {
+                      <button
+                        type="button"
+                        (click)="selectReturnConnectingAlternative(route)"
+                        [class.border-gold]="selectedReturnConnectingAlternative() === route"
+                        [class.bg-amber-50]="selectedReturnConnectingAlternative() === route"
+                        class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all text-xs"
+                      >
+                        <div class="font-bold text-navy mb-2">{{ route.route_type }} · {{ route.total_duration_minutes | flightDuration }}</div>
+                        <div class="flex flex-wrap gap-2">
+                          @for (leg of route.legs; track leg.flight_id; let index = $index) {
+                            <span class="px-2 py-1 rounded bg-white border border-slate-200">
+                              {{ index + 1 }}. {{ leg.flight_number }} · {{ leg.origin_iata }} → {{ leg.dest_iata }}
+                            </span>
+                          }
+                        </div>
+                      </button>
+                    }
+                  </div>
+                }
+              } @else if (availableReturnAlternativeFlights().length === 0) {
+                <div class="py-6 px-4 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 mb-4">
+                  {{ lang.t('track.noReturnAlternative') }}
+                </div>
+              } @else {
+                <div class="space-y-2 max-h-60 overflow-y-auto mb-4">
+                  @for (fl of availableReturnAlternativeFlights(); track fl._id) {
+                    <button
+                      type="button"
+                      (click)="selectReturnAlternativeFlight(fl)"
+                      [class.border-gold]="selectedNewReturnFlightId() === fl._id"
+                      [class.bg-amber-50]="selectedNewReturnFlightId() === fl._id"
+                      class="w-full p-3 text-left rounded-xl border border-slate-200 hover:border-gold transition-all flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <strong class="font-mono font-bold text-navy">{{ fl.flight_number }}</strong>
+                        <span class="text-slate-500 ml-2">{{ fl.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
+                        <div class="text-[11px] text-slate-400 mt-0.5">
+                          {{ lang.t('track.cabin') }} {{ selectedReturnInventory(fl)?.cabin_class }} ·
+                          {{ lang.t('track.remaining') }} {{ selectedReturnInventory(fl)?.available_seats }} {{ lang.t('track.seats') }}
+                        </div>
+                      </div>
+                      <div class="text-right">
+                        <span class="text-amber-600 font-bold font-mono">
+                          {{ selectedReturnInventory(fl)?.base_price | currencyFormat }}
+                        </span>
+                      </div>
+                    </button>
+                  }
+                </div>
+              }
+            }
+          }
+
+          @if (keepReturnLeg() && keepReturnInvalid()) {
+            <div class="p-3 mb-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700">
+              <app-icon name="alerttriangle" class="w-4 h-4 inline-block mr-1" />
+              {{ lang.t('track.returnInvalidNotice') }}
             </div>
           }
 
           <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            @if (rescheduleStep() === 2) {
+              <button (click)="rescheduleStep.set(1)" class="btn-ghost text-xs">
+                {{ lang.t('track.back') }}
+              </button>
+            }
             <button (click)="showRescheduleModal.set(false)" class="btn-ghost text-xs">{{ lang.t('track.close') }}</button>
-            <button
-              [disabled]="!selectedNewFlightId() || submittingAction() || loadingAlternatives()"
-              (click)="executeReschedule()"
-              class="btn-navy text-xs !py-2.5 !px-5"
-            >
-              @if (submittingAction()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-              }
-              <span>{{ lang.isVietnamese() ? 'Xác nhận đổi chuyến' : 'Confirm Reschedule' }}</span>
-            </button>
+
+            @if (rescheduleStep() === 1 && isRoundTrip()) {
+              <!-- Next step for round-trip -->
+              <button
+                [disabled]="!(outboundIsConnecting() ? selectedConnectingAlternative() : selectedNewFlightId()) || loadingAlternatives()"
+                (click)="goToReturnStep()"
+                class="btn-navy text-xs !py-2.5 !px-5"
+              >
+                <span>{{ lang.t('track.nextReturn') }}</span>
+                <app-icon name="arrowright" class="w-4 h-4" />
+              </button>
+            } @else {
+              <!-- Final confirm (one-way step 1 OR round-trip step 2) -->
+              <button
+                [disabled]="!canConfirmReschedule() || submittingAction() || loadingAlternatives() || keepReturnInvalid()"
+                (click)="executeReschedule()"
+                class="btn-navy text-xs !py-2.5 !px-5"
+              >
+                @if (submittingAction()) {
+                  <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                }
+                <span>{{ lang.t('track.confirmReschedule') }}</span>
+              </button>
+            }
           </div>
         </div>
       </div>
@@ -790,6 +993,9 @@ export class TrackBookingComponent implements OnInit {
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
 
+  /** Today's date as YYYY-MM-DD for date picker min attribute */
+  readonly todayDateStr = new Date().toISOString().slice(0, 10);
+
   searchCode = '';
   readonly loading = signal(false);
   /** true khi đã thực hiện ít nhất 1 lần tra cứu (để hiện empty-state). */
@@ -821,6 +1027,73 @@ export class TrackBookingComponent implements OnInit {
   readonly loadingAlternatives = signal(false);
   readonly selectedNewFlightId = signal('');
   readonly selectedNewInventoryId = signal('');
+  readonly availableConnectingAlternatives = signal<ConnectingRouteOption[]>([]);
+  readonly selectedConnectingAlternative = signal<ConnectingRouteOption | null>(null);
+
+  // Round-trip reschedule (G5)
+  readonly rescheduleStep = signal<1 | 2>(1);
+  readonly selectedNewReturnFlightId = signal('');
+  readonly selectedNewReturnInventoryId = signal('');
+  readonly availableReturnAlternativeFlights = signal<Flight[]>([]);
+  readonly loadingReturnAlternatives = signal(false);
+  readonly keepReturnLeg = signal(true);
+  readonly isRoundTrip = computed(() => (this.bookingInfo()?.booking_type || '').toUpperCase() === 'ROUND_TRIP');
+  readonly isConnecting = computed(() => (this.bookingInfo()?.booking_type || '').toUpperCase() === 'CONNECTING');
+
+  /** Detect outbound direction topology from journeyLegs */
+  readonly outboundIsConnecting = computed(() => {
+    const legs = this.journeyLegs();
+    return legs.some((l) => /^CONNECTING_\d+$/.test(l.leg_type));
+  });
+  /** Detect return direction topology from journeyLegs */
+  readonly returnIsConnecting = computed(() => {
+    const legs = this.journeyLegs();
+    return legs.some((l) => /^INBOUND_\d+$/.test(l.leg_type));
+  });
+
+  // Return connecting alternatives
+  readonly availableReturnConnectingAlternatives = signal<ConnectingRouteOption[]>([]);
+  readonly selectedReturnConnectingAlternative = signal<ConnectingRouteOption | null>(null);
+
+  // §3.6.2 New date selection for reschedule
+  readonly rescheduleOutboundDate = signal('');
+  readonly rescheduleReturnDate = signal('');
+  readonly bookingWindowMinDate = signal('');
+  readonly bookingWindowMaxDate = signal('');
+  readonly loadingBookingWindow = signal(false);
+  readonly bookingWindowLoaded = signal(false);
+  readonly bookingWindowError = signal(false);
+
+  /** Final arrival of the selected new outbound (direct or connecting) */
+  readonly selectedOutboundFinalArrival = computed<Date | null>(() => {
+    if (this.outboundIsConnecting()) {
+      const route = this.selectedConnectingAlternative();
+      if (!route?.legs?.length) return null;
+      const lastLeg = route.legs[route.legs.length - 1];
+      return lastLeg?.arrival ? new Date(lastLeg.arrival) : null;
+    }
+    const flight = this.availableAlternativeFlights()
+      .find((f) => String(f._id) === this.selectedNewFlightId());
+    return flight?.scheduled_arrival ? new Date(flight.scheduled_arrival) : null;
+  });
+
+  /** Can confirm reschedule: booking window valid + outbound selected + (one-way OR keepReturn OR return selected) */
+  readonly canConfirmReschedule = computed(() => {
+    if (!this.bookingWindowLoaded()) return false;
+    if (this.isConnecting()) return !!this.selectedConnectingAlternative();
+    // Mixed ROUND_TRIP: outbound direction selection
+    const outOk = this.outboundIsConnecting()
+      ? !!this.selectedConnectingAlternative()
+      : !!this.selectedNewFlightId();
+    if (!outOk) return false;
+    if (!this.isRoundTrip()) return true;
+    if (this.rescheduleStep() === 1) return true;
+    // Return direction selection
+    if (this.keepReturnLeg()) return true;
+    return this.returnIsConnecting()
+      ? !!this.selectedReturnConnectingAlternative()
+      : !!this.selectedNewReturnFlightId();
+  });
 
   // Refund estimates (tính từ chính sách thật + ngày khởi hành sớm nhất)
   readonly estimatedRefundPercent = signal(0);
@@ -880,6 +1153,7 @@ export class TrackBookingComponent implements OnInit {
         flight_number: first.flight_number,
         origin_iata: info.origin_iata || '',
         dest_iata: info.dest_iata || '',
+        departure_date: info.departure_date || (info.scheduled_departure ? info.scheduled_departure.slice(0, 10) : ''),
         scheduled_departure: info.scheduled_departure,
         scheduled_arrival: info.scheduled_arrival,
         actual_departure: info.actual_departure,
@@ -1185,27 +1459,309 @@ export class TrackBookingComponent implements OnInit {
     this.selectedNewFlightId.set('');
     this.selectedNewInventoryId.set('');
     this.availableAlternativeFlights.set([]);
+    this.availableConnectingAlternatives.set([]);
+    this.selectedConnectingAlternative.set(null);
+    this.rescheduleStep.set(1);
+    this.selectedNewReturnFlightId.set('');
+    this.selectedNewReturnInventoryId.set('');
+    this.availableReturnAlternativeFlights.set([]);
+    this.keepReturnLeg.set(true);
     this.showRescheduleModal.set(true);
-    this.loadingAlternatives.set(true);
 
-    this.api
-      .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
-      .subscribe({
-        next: (flights) => {
+    // §3.6.2 Initialize new date from current outbound departure_date
+    const initDate = outbound.departure_date || (outbound.scheduled_departure ? outbound.scheduled_departure.slice(0, 10) : '');
+    this.rescheduleOutboundDate.set(initDate);
+    this.rescheduleReturnDate.set('');
+
+    const loadOutboundData = () => {
+      this.loadingAlternatives.set(true);
+      // Reset return connecting state
+      this.availableReturnConnectingAlternatives.set([]);
+      this.selectedReturnConnectingAlternative.set(null);
+
+      if (this.isConnecting() || (this.isRoundTrip() && this.outboundIsConnecting())) {
+        const outboundLegs = legs.filter((l) => l.leg_type === 'OUTBOUND' || /^CONNECTING_\d+$/.test(l.leg_type));
+        const firstOut = outboundLegs[0] || outbound;
+        const lastOut = outboundLegs[outboundLegs.length - 1] || outbound;
+        this.api.searchFlights({
+          origin: firstOut.origin_iata,
+          destination: lastOut.dest_iata,
+          departure_date: this.rescheduleOutboundDate(),
+          adults: this.passengerCount(),
+          include_connecting: true,
+        }).subscribe({
+          next: (result) => {
+            this.loadingAlternatives.set(false);
+            this.availableConnectingAlternatives.set(result.connecting_routes || []);
+          },
+          error: (err) => {
+            this.loadingAlternatives.set(false);
+            this.toast.error(err?.error?.message || this.lang.t('track.failedToLoadAlternative'));
+          },
+        });
+        if (this.isConnecting()) return;
+        return;
+      }
+
+      this.api
+        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
+        .subscribe({
+          next: (flights) => {
+            this.loadingAlternatives.set(false);
+            this.availableAlternativeFlights.set(
+              this.filterAlternativeFlightsForDate(flights, outbound, this.rescheduleOutboundDate()),
+            );
+          },
+          error: (err) => {
+            this.loadingAlternatives.set(false);
+            this.availableAlternativeFlights.set([]);
+            this.toast.error(
+              err?.error?.message ||
+                (this.lang.isVietnamese()
+                  ? this.lang.t('track.failedToLoadAlternative') || ''
+                  : 'Failed to load alternative flights.'),
+            );
+          },
+        });
+    };
+
+    if (this.bookingWindowLoaded()) {
+      loadOutboundData();
+    } else {
+      this.loadingAlternatives.set(true);
+      this.loadBookingWindow(() => {
+        loadOutboundData();
+      });
+    }
+  }
+
+  /** Load booking window policy from backend authoritatively */
+  loadBookingWindow(callback?: () => void): void {
+    this.loadingBookingWindow.set(true);
+    this.bookingWindowError.set(false);
+    this.api.getBookingWindow().subscribe({
+      next: (bw) => {
+        this.bookingWindowMinDate.set(bw.min_date || this.todayDateStr);
+        this.bookingWindowMaxDate.set(bw.max_date || '');
+        this.bookingWindowLoaded.set(true);
+        this.loadingBookingWindow.set(false);
+        if (callback) callback();
+      },
+      error: () => {
+        this.bookingWindowLoaded.set(false);
+        this.loadingBookingWindow.set(false);
+        this.bookingWindowError.set(true);
+        this.loadingAlternatives.set(false);
+        this.toast.error(
+          this.lang.isVietnamese()
+            ? 'Không thể tải chính sách thời hạn đặt vé của hãng. Vui lòng thử lại.'
+            : 'Could not load airline booking window policy. Please try again.',
+        );
+      },
+    });
+  }
+
+  /** §3.6.2 Reload outbound alternatives when selected date changes */
+  onOutboundDateChange(newDate: string): void {
+    this.rescheduleOutboundDate.set(newDate);
+    // Clear stale selections
+    this.selectedNewFlightId.set('');
+    this.selectedNewInventoryId.set('');
+    this.selectedConnectingAlternative.set(null);
+    this.availableAlternativeFlights.set([]);
+    this.availableConnectingAlternatives.set([]);
+    if (!newDate) return;
+
+    if (!this.bookingWindowLoaded() || !this.bookingWindowMaxDate()) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Chưa tải được khung thời gian đặt vé hợp lệ.'
+          : 'Booking window policy has not loaded yet.',
+      );
+      return;
+    }
+
+    const minDate = this.bookingWindowMinDate() || this.todayDateStr;
+    const maxDate = this.bookingWindowMaxDate();
+
+    if (newDate < minDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày đi không thể ở trong quá khứ (sớm nhất: ${minDate}).`
+          : `Departure date cannot be in the past (earliest: ${minDate}).`,
+      );
+      return;
+    }
+
+    if (newDate > maxDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày đi vượt quá thời hạn đặt vé tối đa (${maxDate}).`
+          : `Departure date exceeds maximum booking window (${maxDate}).`,
+      );
+      return;
+    }
+
+    // If return date is already selected and now earlier than new outbound date, clear it
+    if (this.rescheduleReturnDate() && this.rescheduleReturnDate() < newDate) {
+      this.rescheduleReturnDate.set('');
+      this.selectedNewReturnFlightId.set('');
+      this.selectedNewReturnInventoryId.set('');
+      this.selectedReturnConnectingAlternative.set(null);
+      this.availableReturnAlternativeFlights.set([]);
+      this.availableReturnConnectingAlternatives.set([]);
+    }
+
+    this.loadingAlternatives.set(true);
+    const legs = this.journeyLegs();
+    const outbound = legs.find((l) => l.leg_type === 'OUTBOUND') || legs[0];
+    if (!outbound) { this.loadingAlternatives.set(false); return; }
+
+    if (this.isConnecting() || (this.isRoundTrip() && this.outboundIsConnecting())) {
+      const outboundLegs = legs.filter((l) => l.leg_type === 'OUTBOUND' || /^CONNECTING_\d+$/.test(l.leg_type));
+      const firstOut = outboundLegs[0] || outbound;
+      const lastOut = outboundLegs[outboundLegs.length - 1] || outbound;
+      this.api.searchFlights({
+        origin: firstOut.origin_iata,
+        destination: lastOut.dest_iata,
+        departure_date: newDate,
+        adults: this.passengerCount(),
+        include_connecting: true,
+      }).subscribe({
+        next: (result) => {
           this.loadingAlternatives.set(false);
-          this.availableAlternativeFlights.set(this.filterAlternativeFlights(flights, outbound));
+          this.availableConnectingAlternatives.set(result.connecting_routes || []);
         },
-        error: (err) => {
+        error: () => {
           this.loadingAlternatives.set(false);
-          this.availableAlternativeFlights.set([]);
-          this.toast.error(
-            err?.error?.message ||
-              (this.lang.isVietnamese()
-                ? this.lang.t('track.failedToLoadAlternative') || ''
-                : 'Failed to load alternative flights.'),
-          );
+          this.availableConnectingAlternatives.set([]);
         },
       });
+    } else {
+      this.api
+        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
+        .subscribe({
+          next: (flights) => {
+            this.loadingAlternatives.set(false);
+            this.availableAlternativeFlights.set(
+              this.filterAlternativeFlightsForDate(flights, outbound, newDate),
+            );
+          },
+          error: () => {
+            this.loadingAlternatives.set(false);
+            this.availableAlternativeFlights.set([]);
+          },
+        });
+    }
+  }
+
+  /** Filter direct alternatives restricted to a specific date using flight.departure_date */
+  private filterAlternativeFlightsForDate(flights: Flight[], current: TrackedLegView, dateStr: string): Flight[] {
+    const base = this.filterAlternativeFlights(flights, current);
+    if (!dateStr) return base;
+    return base.filter((f) => (f.departure_date || (f.scheduled_departure ? f.scheduled_departure.slice(0, 10) : '')) === dateStr);
+  }
+
+  /** §3.6.2 Reload return alternatives when selected return date changes */
+  onReturnDateChange(newDate: string): void {
+    this.rescheduleReturnDate.set(newDate);
+    // Clear stale return selections
+    this.selectedNewReturnFlightId.set('');
+    this.selectedNewReturnInventoryId.set('');
+    this.selectedReturnConnectingAlternative.set(null);
+    this.availableReturnAlternativeFlights.set([]);
+    this.availableReturnConnectingAlternatives.set([]);
+    if (!newDate) return;
+
+    if (!this.bookingWindowLoaded() || !this.bookingWindowMaxDate()) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Chưa tải được khung thời gian đặt vé hợp lệ.'
+          : 'Booking window policy has not loaded yet.',
+      );
+      return;
+    }
+
+    const minDate = this.bookingWindowMinDate() || this.todayDateStr;
+    const maxDate = this.bookingWindowMaxDate();
+    const outDate = this.rescheduleOutboundDate();
+
+    if (newDate < minDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày về không thể ở trong quá khứ (sớm nhất: ${minDate}).`
+          : `Return date cannot be in the past (earliest: ${minDate}).`,
+      );
+      return;
+    }
+
+    if (newDate > maxDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày về vượt quá thời hạn đặt vé tối đa (${maxDate}).`
+          : `Return date exceeds maximum booking window (${maxDate}).`,
+      );
+      return;
+    }
+
+    if (outDate && newDate < outDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày về (${newDate}) không thể trước ngày đi (${outDate}).`
+          : `Return date (${newDate}) cannot be earlier than outbound date (${outDate}).`,
+      );
+      return;
+    }
+
+    this.loadingReturnAlternatives.set(true);
+    const legs = this.journeyLegs();
+    const returnLegs = legs.filter((l) => l.leg_type === 'INBOUND' || /^INBOUND_\d+$/.test(l.leg_type));
+    const firstReturn = returnLegs[0];
+    const lastReturn = returnLegs[returnLegs.length - 1];
+    if (!firstReturn) { this.loadingReturnAlternatives.set(false); return; }
+
+    if (this.returnIsConnecting()) {
+      this.api.searchFlights({
+        origin: firstReturn.origin_iata,
+        destination: lastReturn?.dest_iata || firstReturn.dest_iata,
+        departure_date: newDate,
+        adults: this.passengerCount(),
+        include_connecting: true,
+      }).subscribe({
+        next: (result) => {
+          this.loadingReturnAlternatives.set(false);
+          this.availableReturnConnectingAlternatives.set(
+            this.filterReturnConnectingRoutes(result.connecting_routes || []),
+          );
+        },
+        error: () => {
+          this.loadingReturnAlternatives.set(false);
+          this.availableReturnConnectingAlternatives.set([]);
+        },
+      });
+    } else {
+      this.api
+        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata })
+        .subscribe({
+          next: (flights) => {
+            this.loadingReturnAlternatives.set(false);
+            this.availableReturnAlternativeFlights.set(
+              this.filterReturnAlternativeFlightsForDate(flights, firstReturn, newDate),
+            );
+          },
+          error: () => {
+            this.loadingReturnAlternatives.set(false);
+            this.availableReturnAlternativeFlights.set([]);
+          },
+        });
+    }
+  }
+
+  /** Filter return alternatives restricted to a specific date using flight.departure_date */
+  private filterReturnAlternativeFlightsForDate(flights: Flight[], current: TrackedLegView, dateStr: string): Flight[] {
+    const base = this.filterReturnAlternativeFlights(flights, current);
+    if (!dateStr) return base;
+    return base.filter((f) => (f.departure_date || (f.scheduled_departure ? f.scheduled_departure.slice(0, 10) : '')) === dateStr);
   }
 
   /** Lọc chuyến thay thế: khác chuyến hiện tại, không huỷ, đúng hạng khoang và đủ ghế. */
@@ -1213,10 +1769,12 @@ export class TrackBookingComponent implements OnInit {
     const needed = this.passengerCount();
     const cabin = current.cabin_class;
     const currentFlightId = String(current.flight_id);
+    const now = new Date();
 
     return (flights || [])
       .filter((f) => String(f._id) !== currentFlightId)
       .filter((f) => f.status !== FlightStatus.CANCELLED)
+      .filter((f) => new Date(f.scheduled_departure) > now) // §3: exclude past flights
       .filter((f) => this.pickInventory(f, cabin, needed) !== null);
   }
 
@@ -1243,18 +1801,246 @@ export class TrackBookingComponent implements OnInit {
     this.selectedNewInventoryId.set(inv?._id || '');
   }
 
+  selectConnectingAlternative(route: ConnectingRouteOption): void {
+    const allReservable = route.legs?.length >= 2 && route.legs.every(
+      (leg) => !!this.pickConnectingInventory(leg.inventories),
+    );
+    if (!allReservable) return;
+    this.selectedConnectingAlternative.set(route);
+  }
+
+  private pickConnectingInventory(inventories: any[]) {
+    const cabin = this.currentCabinClass();
+    const needed = this.passengerCount();
+    return (inventories || []).find(
+      (inventory) => (!cabin || inventory.cabin_class === cabin) && inventory.available_seats >= needed,
+    ) || null;
+  }
+
+  /** Cabin class of the return leg (for filtering return alternatives). */
+  private currentReturnCabinClass(): string {
+    const b = this.bookingInfo();
+    if (!b) return '';
+    const inbound = (b.ticket_coupons || []).find(
+      (c) => {
+        const t = this.normalizeLegType(c.leg_type);
+        return t === 'INBOUND' || /^INBOUND_\d+$/.test(t);
+      },
+    );
+    return inbound?.cabin_class || this.currentCabinClass();
+  }
+
+  /** Inventory cho chuyến return thay thế. */
+  selectedReturnInventory(flight: Flight) {
+    return this.pickInventory(flight, this.currentReturnCabinClass(), this.passengerCount());
+  }
+
+  selectReturnAlternativeFlight(flight: Flight): void {
+    const inv = this.selectedReturnInventory(flight);
+    this.selectedNewReturnFlightId.set(flight._id);
+    this.selectedNewReturnInventoryId.set(inv?._id || '');
+  }
+
+  /**
+   * §3.6.2 / Requirement 1: Validate connecting return route against selected outbound final arrival.
+   * Return first leg departure must be valid timestamp and strictly later than outbound arrival.
+   * Layover rules are NOT applied across the destination stay.
+   */
+  isValidReturnConnectingRoute(route: ConnectingRouteOption): boolean {
+    if (!route?.legs || route.legs.length < 2) return false;
+    const firstLeg = route.legs[0];
+    if (!firstLeg?.departure) return false;
+    const depTime = new Date(firstLeg.departure);
+    if (isNaN(depTime.getTime())) return false;
+
+    const outArr = this.selectedOutboundFinalArrival();
+    if (outArr && depTime <= outArr) {
+      return false;
+    }
+    return true;
+  }
+
+  filterReturnConnectingRoutes(routes: ConnectingRouteOption[]): ConnectingRouteOption[] {
+    return (routes || []).filter((r) => this.isValidReturnConnectingRoute(r));
+  }
+
+  selectReturnConnectingAlternative(route: ConnectingRouteOption): void {
+    if (!this.isValidReturnConnectingRoute(route)) return;
+    const allReservable = route.legs?.length >= 2 && route.legs.every(
+      (leg) => !!this.pickConnectingInventory(leg.inventories),
+    );
+    if (!allReservable) return;
+    this.selectedReturnConnectingAlternative.set(route);
+  }
+
+  /** Transition from step 1 (outbound) to step 2 (return) — load return alternatives. */
+  goToReturnStep(): void {
+    const legs = this.journeyLegs();
+    const returnLegs = legs.filter((l) => l.leg_type === 'INBOUND' || /^INBOUND_\d+$/.test(l.leg_type));
+    const firstReturn = returnLegs[0];
+    const lastReturn = returnLegs[returnLegs.length - 1];
+    if (!firstReturn || !firstReturn.origin_iata) {
+      this.keepReturnLeg.set(true);
+      this.rescheduleStep.set(2);
+      return;
+    }
+
+    this.rescheduleStep.set(2);
+    this.keepReturnLeg.set(true);
+    this.selectedNewReturnFlightId.set('');
+    this.selectedNewReturnInventoryId.set('');
+    this.selectedReturnConnectingAlternative.set(null);
+    this.loadingReturnAlternatives.set(true);
+
+    // §3.6.2 Initialize return date from existing return leg departure_date
+    const returnDate = firstReturn.departure_date || (firstReturn.scheduled_departure ? firstReturn.scheduled_departure.slice(0, 10) : '');
+    this.rescheduleReturnDate.set(returnDate);
+
+    if (this.returnIsConnecting()) {
+      // Return direction is connecting — search connecting alternatives in return direction
+      this.api.searchFlights({
+        origin: firstReturn.origin_iata,
+        destination: lastReturn?.dest_iata || firstReturn.dest_iata,
+        departure_date: this.rescheduleReturnDate(),
+        adults: this.passengerCount(),
+        include_connecting: true,
+      }).subscribe({
+        next: (result) => {
+          this.loadingReturnAlternatives.set(false);
+          this.availableReturnConnectingAlternatives.set(
+            this.filterReturnConnectingRoutes(result.connecting_routes || []),
+          );
+        },
+        error: () => {
+          this.loadingReturnAlternatives.set(false);
+          this.availableReturnConnectingAlternatives.set([]);
+        },
+      });
+    } else {
+      // Return direction is direct
+      this.api
+        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata })
+        .subscribe({
+          next: (flights) => {
+            this.loadingReturnAlternatives.set(false);
+            this.availableReturnAlternativeFlights.set(
+              this.filterReturnAlternativeFlightsForDate(flights, firstReturn, this.rescheduleReturnDate()),
+            );
+          },
+          error: () => {
+            this.loadingReturnAlternatives.set(false);
+            this.availableReturnAlternativeFlights.set([]);
+          },
+        });
+    }
+  }
+
+  /** Filter return flight alternatives: same cabin, enough seats, not current flight, not past, after outbound arrival. */
+  private filterReturnAlternativeFlights(flights: Flight[], current: TrackedLegView): Flight[] {
+    const needed = this.passengerCount();
+    const cabin = this.currentReturnCabinClass();
+    const currentFlightId = String(current.flight_id);
+    const now = new Date();
+
+    // Get selected outbound final arrival (handles both direct and connecting)
+    const outboundArr = this.selectedOutboundFinalArrival() || now;
+
+    return (flights || [])
+      .filter((f) => String(f._id) !== currentFlightId)
+      .filter((f) => f.status !== FlightStatus.CANCELLED)
+      .filter((f) => new Date(f.scheduled_departure) > now) // exclude past
+      .filter((f) => new Date(f.scheduled_departure) > outboundArr) // return must depart after outbound ARRIVAL
+      .filter((f) => this.pickInventory(f, cabin, needed) !== null);
+  }
+
+  /** Whether keeping the current return is invalid because it departs before the new outbound arrives */
+  keepReturnInvalid(): boolean {
+    if (!this.isRoundTrip() || !this.keepReturnLeg()) return false;
+    const tracked = this.journeyLegs();
+    // Find actual return legs (INBOUND or INBOUND_N), not just "first non-OUTBOUND"
+    const inbound = tracked.find((l) =>
+      l.leg_type === 'INBOUND' || /^INBOUND_\d+$/.test(l.leg_type),
+    );
+    if (!inbound?.scheduled_departure) return false;
+
+    const outArr = this.selectedOutboundFinalArrival();
+    if (!outArr) return false;
+
+    return new Date(inbound.scheduled_departure) <= outArr;
+  }
+
   executeReschedule(): void {
     const b = this.bookingInfo();
-    if (!b?.confirmation_number || !this.selectedNewFlightId()) return;
+    if (!b?.confirmation_number) return;
     if (!this.requireLogin()) return;
+
+    // Pure CONNECTING booking type
+    if (this.isConnecting()) {
+      const route = this.selectedConnectingAlternative();
+      if (!route?.legs?.length) return;
+      const newLegs = route.legs.map((leg, index) => ({
+        flight_id: leg.flight_id,
+        inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+        leg_type: `CONNECTING_${index + 1}`,
+      }));
+      if (newLegs.some((leg) => !leg.inventory_id)) return;
+      this.submittingAction.set(true);
+      this.submitReschedulePayload({ confirmation_number: b.confirmation_number, new_legs: newLegs });
+      return;
+    }
+
+    // Mixed ROUND_TRIP: build payload based on direction topology
+    if (this.isRoundTrip() && (this.outboundIsConnecting() || this.returnIsConnecting())) {
+      const payload: any = { confirmation_number: b.confirmation_number };
+
+      // Outbound direction
+      if (this.outboundIsConnecting()) {
+        const route = this.selectedConnectingAlternative();
+        if (!route?.legs?.length) return;
+        payload.new_legs = route.legs.map((leg, index) => ({
+          flight_id: leg.flight_id,
+          inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+          leg_type: `CONNECTING_${index + 1}`,
+        }));
+        if (payload.new_legs.some((leg: any) => !leg.inventory_id)) return;
+      } else {
+        if (!this.selectedNewFlightId()) return;
+        payload.new_flight_id = this.selectedNewFlightId();
+        payload.new_inventory_id = this.selectedNewInventoryId();
+      }
+
+      // Return direction (if not keeping)
+      if (!this.keepReturnLeg()) {
+        if (this.returnIsConnecting()) {
+          const retRoute = this.selectedReturnConnectingAlternative();
+          if (!retRoute?.legs?.length) return;
+          payload.new_return_legs = retRoute.legs.map((leg, index) => ({
+            flight_id: leg.flight_id,
+            inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+            leg_type: `INBOUND_${index + 1}`,
+          }));
+          if (payload.new_return_legs.some((leg: any) => !leg.inventory_id)) return;
+        } else {
+          if (this.selectedNewReturnFlightId()) {
+            payload.new_return_flight_id = this.selectedNewReturnFlightId();
+            payload.new_return_inventory_id = this.selectedNewReturnInventoryId();
+          }
+        }
+      }
+
+      this.submittingAction.set(true);
+      this.submitReschedulePayload(payload);
+      return;
+    }
+
+    // Direct outbound (ONE_WAY or direct ROUND_TRIP)
+    if (!this.selectedNewFlightId()) return;
 
     const targetFlightId = this.selectedNewFlightId();
     const targetCabin = this.currentCabinClass();
     const needed = this.passengerCount();
     this.submittingAction.set(true);
 
-    // Nạp lại chuyến bay mục tiêu để lấy inventory_id hiện hành
-    // (id inventory của một số chuyến seed có thể đổi giữa các lần đọc).
     this.api.getFlightById(targetFlightId).subscribe({
       next: (flight) => {
         const inv = this.pickInventory(flight, targetCabin, needed);
@@ -1290,6 +2076,16 @@ export class TrackBookingComponent implements OnInit {
       new_inventory_id: inventoryId,
     };
 
+    // Round-trip: include return leg if user chose a new return flight
+    if (this.isRoundTrip() && !this.keepReturnLeg() && this.selectedNewReturnFlightId()) {
+      payload.new_return_flight_id = this.selectedNewReturnFlightId();
+      payload.new_return_inventory_id = this.selectedNewReturnInventoryId();
+    }
+
+    this.submitReschedulePayload(payload);
+  }
+
+  private submitReschedulePayload(payload: any): void {
     this.api.rescheduleBooking(payload).subscribe({
       next: (res: any) => {
         // Response thật: { booking, price_difference, message }
@@ -1314,8 +2110,7 @@ export class TrackBookingComponent implements OnInit {
         this.submittingAction.set(false);
         if (this.handleUnauthorized(err)) return;
         this.toast.error(
-          err?.error?.message ||
-            (this.lang.isVietnamese() ? 'Đổi chuyến bay thất bại.' : 'Rescheduling flight failed.'),
+          err?.error?.message || this.lang.t('track.rescheduleError'),
         );
       },
     });
@@ -1492,6 +2287,14 @@ export class TrackBookingComponent implements OnInit {
 
   private normalizeLegType(legType?: string): string {
     const t = (legType || 'OUTBOUND').trim().toUpperCase();
+    const connectingMatch = t.match(/^CONNECTING[_\s]*(?:LEG[_\s]*)?(\d+)$/);
+    if (connectingMatch) {
+      return `CONNECTING_${connectingMatch[1]}`;
+    }
+    const inboundMatch = t.match(/^INBOUND[_\s]*(?:LEG[_\s]*)?(\d+)$/);
+    if (inboundMatch) {
+      return `INBOUND_${inboundMatch[1]}`;
+    }
     return t || 'OUTBOUND';
   }
 
@@ -1506,6 +2309,14 @@ export class TrackBookingComponent implements OnInit {
         return this.lang.t('track.connectingLeg1') || '';
       case 'CONNECTING_2':
         return this.lang.t('track.connectingLeg2') || '';
+      case 'CONNECTING_3':
+        return this.lang.t('track.connectingLeg3') || '';
+      case 'INBOUND_1':
+        return isVi ? 'Chặng về 1' : 'Return 1';
+      case 'INBOUND_2':
+        return isVi ? 'Chặng về 2' : 'Return 2';
+      case 'INBOUND_3':
+        return isVi ? 'Chặng về 3' : 'Return 3';
       default:
         return this.normalizeLegType(legType).replace(/_/g, ' ');
     }

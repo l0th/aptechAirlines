@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsInt, IsNotEmpty, IsString, Min, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -28,24 +28,27 @@ export class RegisterDto {
   last_name: string;
 
   @IsEmail()
+  @IsNotEmpty()
   email: string;
 
-  @IsOptional()
   @IsString()
-  address?: string;
+  @IsNotEmpty()
+  address: string;
 
-  @IsOptional()
   @IsString()
-  phone_number?: string;
+  @IsNotEmpty()
+  phone_number: string;
 
-  @IsOptional()
   @IsString()
-  sex?: string;
+  @IsNotEmpty()
+  sex: string;
 
-  @IsOptional()
-  age?: number;
+  @IsInt()
+  @Min(0)
+  age: number;
 
-  @IsOptional()
   @IsString()
-  preferred_credit_card?: string;
+  @IsNotEmpty()
+  preferred_credit_card: string;
 }
+

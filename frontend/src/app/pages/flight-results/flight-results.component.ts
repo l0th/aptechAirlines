@@ -55,12 +55,13 @@ export interface ExtendedFlightSearchResult extends FlightSearchResult {
 }
 
 /** Chuyến nào đang được chọn ghế trên seat map. */
-type SeatMapTarget = 'ONWARD' | 'RETURN' | 'CONNECTING_LEG1' | 'CONNECTING_LEG2';
+type SeatMapTarget = 'ONWARD' | 'RETURN' | `CONNECTING_LEG_${number}` | `RETURN_CONNECTING_LEG_${number}`;
 type FlightDirection = 'ONWARD' | 'RETURN';
 
 /** 1 phương án nối chuyến đã được phân giải inventory + giá cho cả đoàn. */
 interface ConnectingOption {
   route: ConnectingRouteOption;
+  legs: Array<{ flight: ConnectingLeg; inventory: FlightInventory | null; basePrice: number }>;
   leg1: ConnectingLeg;
   leg2: ConnectingLeg;
   leg1Inventory: FlightInventory | null;
@@ -80,9 +81,20 @@ interface BookingContext {
   connecting: {
     leg1: { flight: ConnectingLeg; inventory: FlightInventory };
     leg2: { flight: ConnectingLeg; inventory: FlightInventory };
+    legs: Array<{ flight: ConnectingLeg; inventory: FlightInventory }>;
     transit_airport: string;
-    layover_minutes: number;
+    layover_minutes: number | number[];
     leg2_seats?: Record<number, string>;
+    seats_by_leg?: Record<number, Record<number, string>>;
+  } | null;
+  return_connecting?: {
+    leg1: { flight: ConnectingLeg; inventory: FlightInventory };
+    leg2: { flight: ConnectingLeg; inventory: FlightInventory };
+    legs: Array<{ flight: ConnectingLeg; inventory: FlightInventory }>;
+    transit_airport: string;
+    layover_minutes: number | number[];
+    leg2_seats?: Record<number, string>;
+    seats_by_leg?: Record<number, Record<number, string>>;
   } | null;
   return_flight: FormattedFlightResult | null;
   return_seats: Record<number, string>;
@@ -97,6 +109,26 @@ interface BookingContext {
   totalPassengers: number;
   seats: Record<number, string>;
   total_party_price: number;
+}
+
+/**
+ * Strict calendar date validation (YYYY-MM-DD):
+ * - Checks regex pattern /^\d{4}-\d{2}-\d{2}$/
+ * - Parses year, month, day as integers
+ * - Checks month in 1..12 and day in 1..31
+ * - Verifies real calendar validity (e.g. leap years, 30-day months) using Date.UTC
+ * - Rejects malformed/impossible values like 'abc', '2026-13-01', '2026-02-31', '2026-02-29' (non-leap year).
+ */
+export function isValidCalendarDate(val: any): boolean {
+  if (typeof val !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false;
+  const [yearStr, monthStr, dayStr] = val.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
 @Component({
@@ -190,6 +222,8 @@ interface BookingContext {
                 <input
                   type="date"
                   [(ngModel)]="filterStartDate"
+                  [min]="minBookingDate"
+                  [max]="maxBookingDate"
                   class="bg-navy-light text-white px-2.5 py-1.5 rounded-xl border border-gold/30 focus:outline-none focus:border-gold text-xs"
                 />
               </div>
@@ -198,6 +232,8 @@ interface BookingContext {
                 <input
                   type="date"
                   [(ngModel)]="filterEndDate"
+                  [min]="filterStartDate || minBookingDate"
+                  [max]="maxBookingDate"
                   class="bg-navy-light text-white px-2.5 py-1.5 rounded-xl border border-gold/30 focus:outline-none focus:border-gold text-xs"
                 />
               </div>
@@ -496,8 +532,8 @@ interface BookingContext {
               </div>
             }
 
-            <!-- ============ Connecting Routes Section ("Nối chuyến" - Task 2) ============ -->
-            @if (connectingOptions().length) {
+            <!-- ============ Return Connecting Routes Section ============ -->
+            @if (isRoundTrip && returnConnectingOptions().length) {
               <div class="space-y-6 mb-12">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                   <div class="flex items-center gap-3">
@@ -507,24 +543,24 @@ interface BookingContext {
                     <div>
                       <div class="flex items-center gap-2">
                         <h2 class="text-xl font-bold text-navy">
-                          {{ lang.t('results.connecting') }}
+                          {{ lang.t('results.returnConnecting') }}
                         </h2>
                         <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-300">
                           1 {{ lang.t('results.stopsOne') }}
                         </span>
                       </div>
-                      <p class="text-xs text-slate-500 mt-0.5">{{ lang.t('results.connectingNotice') }}</p>
+                      <p class="text-xs text-slate-500 mt-0.5">{{ lang.t('results.returnConnectingNotice') }}</p>
                     </div>
                   </div>
                   <div class="text-right">
                     <span class="text-xs font-semibold text-slate-600 px-3 py-1 bg-slate-100 rounded-full border border-slate-200">
-                      {{ connectingOptions().length }} {{ lang.t('results.connectingItineraries') }}
+                      {{ returnConnectingOptions().length }} {{ lang.t('results.connectingItineraries') }}
                     </span>
                   </div>
                 </div>
 
                 <div class="space-y-4">
-                  @for (opt of connectingOptions(); track opt.route.leg1.flight_id + opt.route.leg2.flight_id) {
+                  @for (opt of returnConnectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
                     <div class="card-luxury p-5 sm:p-6 border-amber-200/80 bg-gradient-to-br from-white to-amber-50/20">
 
                       <!-- Transit Header -->
@@ -533,9 +569,15 @@ interface BookingContext {
                           <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full">
                             {{ lang.t('results.stopoverAt') }}{{ opt.route.transit_airport }}
                           </span>
+                          @if (getConnectingDepartureDate(opt)) {
+                            <span class="text-xs font-semibold text-navy bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full flex items-center gap-1">
+                              <app-icon name="calendar" class="w-3.5 h-3.5 text-amber-700" />
+                              <span>{{ getConnectingDepartureDate(opt) }}</span>
+                            </span>
+                          }
                           <span class="text-xs text-slate-600 font-medium flex items-center gap-1">
                             <app-icon name="clock" class="w-3.5 h-3.5 text-gold" />
-                            <span>{{ lang.t('results.layoverTime') }}: <strong>{{ opt.route.layover_minutes | flightDuration }}</strong></span>
+                            <span>{{ lang.t('results.layoverTime') }}: <strong>{{ totalLayoverMinutes(opt.route.layover_minutes) | flightDuration }}</strong></span>
                             <span class="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                               {{ lang.t('results.layoverAcrossTz') }}
                             </span>
@@ -545,6 +587,22 @@ interface BookingContext {
                           <span class="text-xs text-slate-400">{{ lang.t('results.totalJourneyTime') }}: </span>
                           <strong class="text-xs text-navy font-bold">{{ opt.route.total_duration_minutes | flightDuration }}</strong>
                         </div>
+                        @if (opt.legs.length > 2) {
+                          <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                            <div class="flex items-center justify-between mb-1.5">
+                              <span class="text-xs font-bold text-slate-700">Leg 3: <span class="font-mono text-navy">{{ opt.legs[2].flight.flight_number }}</span></span>
+                              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">{{ opt.legs[2].inventory?.cabin_class || cabinClass }}</span>
+                            </div>
+                            <div class="flex items-center justify-between text-sm font-semibold text-navy">
+                              <span>{{ opt.legs[2].flight.origin_iata }} · {{ opt.legs[2].flight.scheduled_departure_local ? extractTime(opt.legs[2].flight.scheduled_departure_local) : (opt.legs[2].flight.departure | date: 'HH:mm') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                              <span>{{ opt.legs[2].flight.dest_iata }} · {{ opt.legs[2].flight.scheduled_arrival_local ? extractTime(opt.legs[2].flight.scheduled_arrival_local) : (opt.legs[2].flight.arrival | date: 'HH:mm') }}</span>
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-200/40">
+                              {{ opt.legs[2].inventory?.available_seats ?? 0 }} {{ lang.t('results.seatsLeft') }} · {{ opt.legs[2].basePrice | currencyFormat }}/{{ lang.t('results.guestSuffix') }}
+                            </div>
+                          </div>
+                        }
                       </div>
 
                       <!-- 2 Legs Display -->
@@ -555,6 +613,9 @@ interface BookingContext {
                             <div class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                               <span>{{ lang.t('results.leg1') }}:</span>
                               <span class="font-mono text-navy font-bold">{{ opt.leg1.flight_number }}</span>
+                              @if (opt.leg1.departure_date) {
+                                <span class="text-[11px] font-normal text-slate-500">({{ opt.leg1.departure_date }})</span>
+                              }
                             </div>
                             <div class="flex items-center gap-1.5">
                               <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">
@@ -642,15 +703,208 @@ interface BookingContext {
                           <span class="text-xs text-slate-400">{{ lang.t('results.totalConnectingFareParty') }} {{ totalPassengers }} {{ lang.t('results.totalConnectingFare2') }}):</span>
                           <div class="text-xl font-black text-navy">{{ opt.totalPartyPrice | currencyFormat }}</div>
                           <span class="text-[11px] text-slate-400 block">
-                            {{ lang.t('results.pricePerAdult') }}: {{ opt.leg1BasePrice + opt.leg2BasePrice | currencyFormat }}
+                            {{ lang.t('results.pricePerAdult') }}: {{ connectingAdultPrice(opt) | currencyFormat }}
                           </span>
                         </div>
 
                         <button
                           type="button"
-                          [disabled]="!opt.leg1Inventory || !opt.leg2Inventory"
+                          [disabled]="!connectingOptionReady(opt)"
+                          (click)="selectReturnConnectingRoute(opt)"
+                          [ngClass]="!connectingOptionReady(opt) ? 'opacity-50 cursor-not-allowed' : ''"
+                          class="btn-gold !py-2.5 !px-5 text-xs sm:text-sm font-bold shrink-0"
+                        >
+                          <app-icon name="checkcircle2" class="w-4 h-4" />
+                          <span>{{ lang.t('results.selectJourney') }}</span>
+                        </button>
+                      </div>
+
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- ============ Connecting Routes Section ("Nối chuyến" - Task 2) ============ -->
+            @if (connectingOptions().length) {
+              <div class="space-y-6 mb-12">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-amber-50 text-gold flex items-center justify-center border border-gold/30 shrink-0">
+                      <app-icon name="compass" class="w-5 h-5 text-gold" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h2 class="text-xl font-bold text-navy">
+                          {{ lang.t('results.connecting') }}
+                        </h2>
+                        <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          1 {{ lang.t('results.stopsOne') }}
+                        </span>
+                      </div>
+                      <p class="text-xs text-slate-500 mt-0.5">{{ lang.t('results.connectingNotice') }}</p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs font-semibold text-slate-600 px-3 py-1 bg-slate-100 rounded-full border border-slate-200">
+                      {{ connectingOptions().length }} {{ lang.t('results.connectingItineraries') }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  @for (opt of connectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
+                    <div class="card-luxury p-5 sm:p-6 border-amber-200/80 bg-gradient-to-br from-white to-amber-50/20">
+
+                      <!-- Transit Header -->
+                      <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full">
+                            {{ lang.t('results.stopoverAt') }}{{ opt.route.transit_airport }}
+                          </span>
+                          @if (getConnectingDepartureDate(opt)) {
+                            <span class="text-xs font-semibold text-navy bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full flex items-center gap-1">
+                              <app-icon name="calendar" class="w-3.5 h-3.5 text-amber-700" />
+                              <span>{{ getConnectingDepartureDate(opt) }}</span>
+                            </span>
+                          }
+                          <span class="text-xs text-slate-600 font-medium flex items-center gap-1">
+                            <app-icon name="clock" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('results.layoverTime') }}: <strong>{{ totalLayoverMinutes(opt.route.layover_minutes) | flightDuration }}</strong></span>
+                            <span class="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                              {{ lang.t('results.layoverAcrossTz') }}
+                            </span>
+                          </span>
+                        </div>
+                        <div class="text-right">
+                          <span class="text-xs text-slate-400">{{ lang.t('results.totalJourneyTime') }}: </span>
+                          <strong class="text-xs text-navy font-bold">{{ opt.route.total_duration_minutes | flightDuration }}</strong>
+                        </div>
+                        @if (opt.legs.length > 2) {
+                          <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                            <div class="flex items-center justify-between mb-1.5">
+                              <span class="text-xs font-bold text-slate-700">Leg 3: <span class="font-mono text-navy">{{ opt.legs[2].flight.flight_number }}</span></span>
+                              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">{{ opt.legs[2].inventory?.cabin_class || cabinClass }}</span>
+                            </div>
+                            <div class="flex items-center justify-between text-sm font-semibold text-navy">
+                              <span>{{ opt.legs[2].flight.origin_iata }} · {{ opt.legs[2].flight.scheduled_departure_local ? extractTime(opt.legs[2].flight.scheduled_departure_local) : (opt.legs[2].flight.departure | date: 'HH:mm') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                              <span>{{ opt.legs[2].flight.dest_iata }} · {{ opt.legs[2].flight.scheduled_arrival_local ? extractTime(opt.legs[2].flight.scheduled_arrival_local) : (opt.legs[2].flight.arrival | date: 'HH:mm') }}</span>
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-200/40">
+                              {{ opt.legs[2].inventory?.available_seats ?? 0 }} {{ lang.t('results.seatsLeft') }} · {{ opt.legs[2].basePrice | currencyFormat }}/{{ lang.t('results.guestSuffix') }}
+                            </div>
+                          </div>
+                        }
+                      </div>
+
+                      <!-- 2 Legs Display -->
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Leg 1 -->
+                        <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                          <div class="flex items-center justify-between mb-1.5">
+                            <div class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <span>{{ lang.t('results.leg1') }}:</span>
+                              <span class="font-mono text-navy font-bold">{{ opt.leg1.flight_number }}</span>
+                              @if (opt.leg1.departure_date) {
+                                <span class="text-[11px] font-normal text-slate-500">({{ opt.leg1.departure_date }})</span>
+                              }
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">
+                                {{ opt.leg1Inventory?.cabin_class || cabinClass }}
+                              </span>
+                              @if (opt.leg1Inventory?.early_bird_percent !== undefined && opt.leg1Inventory?.early_bird_percent !== null) {
+                                <span
+                                  class="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                                  [ngClass]="getEarlyBirdBadgeClass(opt.leg1Inventory?.early_bird_percent)"
+                                >
+                                  {{ getEarlyBirdBadgeText(opt.leg1Inventory) }}
+                                </span>
+                              }
+                            </div>
+                          </div>
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <span class="text-base font-bold text-navy">{{ opt.leg1.scheduled_departure_local ? extractTime(opt.leg1.scheduled_departure_local) : (opt.leg1.departure | date: 'HH:mm') }}</span>
+                              <span class="text-xs text-slate-600 block font-semibold">{{ opt.leg1.origin_iata }}</span>
+                              <span class="text-[10px] text-slate-400 block font-medium">{{ formatAirportTimeZone(opt.leg1.origin_iata, null, opt.leg1.origin_time_zone, opt.leg1.departure) }}</span>
+                            </div>
+                            <div class="flex flex-col items-center">
+                              <span class="text-[10px] text-slate-400 italic mb-0.5">{{ lang.t('results.localTimeBadge') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                            </div>
+                            <div class="text-right">
+                              <span class="text-base font-bold text-navy">{{ opt.leg1.scheduled_arrival_local ? extractTime(opt.leg1.scheduled_arrival_local) : (opt.leg1.arrival | date: 'HH:mm') }}</span>
+                              <span class="text-xs text-slate-600 block font-semibold">{{ opt.leg1.dest_iata }}</span>
+                              <span class="text-[10px] text-slate-400 block font-medium">{{ formatAirportTimeZone(opt.leg1.dest_iata, null, opt.leg1.dest_time_zone, opt.leg1.arrival) }}</span>
+                            </div>
+                          </div>
+                          <div class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-200/40">
+                            {{ opt.leg1Inventory?.available_seats ?? 0 }} {{ lang.t('results.seatsLeft') }} ·
+                            {{ opt.leg1BasePrice | currencyFormat }}/{{ lang.t('results.guestSuffix') }}
+                          </div>
+                        </div>
+
+                        <!-- Leg 2 -->
+                        <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/60">
+                          <div class="flex items-center justify-between mb-1.5">
+                            <div class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                              <span>{{ lang.t('results.leg2') }}:</span>
+                              <span class="font-mono text-navy font-bold">{{ opt.leg2.flight_number }}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 uppercase">
+                                {{ opt.leg2Inventory?.cabin_class || cabinClass }}
+                              </span>
+                              @if (opt.leg2Inventory?.early_bird_percent !== undefined && opt.leg2Inventory?.early_bird_percent !== null) {
+                                <span
+                                  class="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                                  [ngClass]="getEarlyBirdBadgeClass(opt.leg2Inventory?.early_bird_percent)"
+                                >
+                                  {{ getEarlyBirdBadgeText(opt.leg2Inventory) }}
+                                </span>
+                              }
+                            </div>
+                          </div>
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <span class="text-base font-bold text-navy">{{ opt.leg2.scheduled_departure_local ? extractTime(opt.leg2.scheduled_departure_local) : (opt.leg2.departure | date: 'HH:mm') }}</span>
+                              <span class="text-xs text-slate-600 block font-semibold">{{ opt.leg2.origin_iata }}</span>
+                              <span class="text-[10px] text-slate-400 block font-medium">{{ formatAirportTimeZone(opt.leg2.origin_iata, null, opt.leg2.origin_time_zone, opt.leg2.departure) }}</span>
+                            </div>
+                            <div class="flex flex-col items-center">
+                              <span class="text-[10px] text-slate-400 italic mb-0.5">{{ lang.t('results.localTimeBadge') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                            </div>
+                            <div class="text-right">
+                              <span class="text-base font-bold text-navy">{{ opt.leg2.scheduled_arrival_local ? extractTime(opt.leg2.scheduled_arrival_local) : (opt.leg2.arrival | date: 'HH:mm') }}</span>
+                              <span class="text-xs text-slate-600 block font-semibold">{{ opt.leg2.dest_iata }}</span>
+                              <span class="text-[10px] text-slate-400 block font-medium">{{ formatAirportTimeZone(opt.leg2.dest_iata, null, opt.leg2.dest_time_zone, opt.leg2.arrival) }}</span>
+                            </div>
+                          </div>
+                          <div class="text-[11px] text-slate-400 mt-1.5 pt-1.5 border-t border-slate-200/40">
+                            {{ opt.leg2Inventory?.available_seats ?? 0 }} {{ lang.t('results.seatsLeft') }} ·
+                            {{ opt.leg2BasePrice | currencyFormat }}/{{ lang.t('results.guestSuffix') }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Price & Selection Action -->
+                      <div class="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <span class="text-xs text-slate-400">{{ lang.t('results.totalConnectingFareParty') }} {{ totalPassengers }} {{ lang.t('results.totalConnectingFare2') }}):</span>
+                          <div class="text-xl font-black text-navy">{{ opt.totalPartyPrice | currencyFormat }}</div>
+                          <span class="text-[11px] text-slate-400 block">
+                            {{ lang.t('results.pricePerAdult') }}: {{ connectingAdultPrice(opt) | currencyFormat }}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          [disabled]="!connectingOptionReady(opt)"
                           (click)="selectConnectingRoute(opt)"
-                          [ngClass]="(!opt.leg1Inventory || !opt.leg2Inventory) ? 'opacity-50 cursor-not-allowed' : ''"
+                          [ngClass]="!connectingOptionReady(opt) ? 'opacity-50 cursor-not-allowed' : ''"
                           class="btn-gold !py-2.5 !px-5 text-xs sm:text-sm font-bold shrink-0"
                         >
                           <app-icon name="checkcircle2" class="w-4 h-4" />
@@ -1091,6 +1345,8 @@ export class FlightResultsComponent implements OnInit {
   // Task 2: Compact date-range control inputs
   filterStartDate = '';
   filterEndDate = '';
+  minBookingDate = new Date().toISOString().split('T')[0];
+  maxBookingDate = '';
 
   // Task 3: Smoking filter
   isSmokingFilter: 'ALL' | 'SMOKING' | 'NON_SMOKING' = 'ALL';
@@ -1235,6 +1491,7 @@ export class FlightResultsComponent implements OnInit {
 
   // Task 5: Connecting itinerary leg 2 seats
   readonly connectingLeg2Seats = signal<Record<number, string>>({});
+  readonly connectingSeatsByLeg = signal<Record<number, Record<number, string>>>({});
 
   readonly isSeatMapOpen = signal(false);
   readonly seatMapTarget = signal<SeatMapTarget>('ONWARD');
@@ -1245,6 +1502,8 @@ export class FlightResultsComponent implements OnInit {
   readonly selectedFlight = signal<FormattedFlightResult | null>(null);
   readonly selectedReturnFlight = signal<FormattedFlightResult | null>(null);
   readonly selectedConnecting = signal<ConnectingOption | null>(null);
+  readonly selectedReturnConnecting = signal<ConnectingOption | null>(null);
+  readonly returnConnectingSeatsByLeg = signal<Record<number, Record<number, string>>>({});
 
   readonly assignedSeats = signal<Record<number, string>>({});
   readonly returnSeats = signal<Record<number, string>>({});
@@ -1255,11 +1514,16 @@ export class FlightResultsComponent implements OnInit {
       case 'RETURN':
         return this.returnSeats();
       case 'ONWARD':
-      case 'CONNECTING_LEG1':
         return this.assignedSeats();
-      case 'CONNECTING_LEG2':
-        return this.connectingLeg2Seats();
       default:
+        if (this.seatMapTarget().startsWith('CONNECTING_LEG_')) {
+          const index = Number(this.seatMapTarget().slice('CONNECTING_LEG_'.length)) - 1;
+          return this.connectingSeatsByLeg()[index] || {};
+        }
+        if (this.seatMapTarget().startsWith('RETURN_CONNECTING_LEG_')) {
+          const index = Number(this.seatMapTarget().slice('RETURN_CONNECTING_LEG_'.length)) - 1;
+          return this.returnConnectingSeatsByLeg()[index] || {};
+        }
         return {};
     }
   });
@@ -1301,21 +1565,58 @@ export class FlightResultsComponent implements OnInit {
   readonly connectingOptions = computed<ConnectingOption[]>(() => {
     const routes = this.results()?.connecting_routes ?? [];
     return routes.map((route) => {
-      const leg1Inventory = this.pickInventory(route.leg1.inventories);
-      const leg2Inventory = this.pickInventory(route.leg2.inventories);
+      const routeLegs = route.legs?.length ? route.legs : [route.leg1, route.leg2];
+      const legs = routeLegs.map((flight) => {
+        const inventory = this.pickInventory(flight.inventories);
+        return { flight, inventory, basePrice: inventory?.base_price ?? 0 };
+      });
+      const leg1Inventory = legs[0]?.inventory ?? null;
+      const leg2Inventory = legs[1]?.inventory ?? null;
       const leg1BasePrice = leg1Inventory?.base_price ?? 0;
       const leg2BasePrice = leg2Inventory?.base_price ?? 0;
       return {
         route,
+        legs,
         leg1: route.leg1,
         leg2: route.leg2,
         leg1Inventory,
         leg2Inventory,
         leg1BasePrice,
         leg2BasePrice,
-        totalPartyPrice:
-          (leg1Inventory ? this.partyPriceFor(leg1BasePrice) : 0) +
-          (leg2Inventory ? this.partyPriceFor(leg2BasePrice) : 0),
+        totalPartyPrice: legs.reduce(
+          (total, leg) => total + (leg.inventory ? this.partyPriceFor(leg.basePrice) : 0),
+          0,
+        ),
+      };
+    });
+  });
+
+  /** Phương án nối chuyến chiều về đã phân giải inventory + giá cho cả đoàn. */
+  readonly returnConnectingOptions = computed<ConnectingOption[]>(() => {
+    const routes = this.results()?.return_connecting_routes ?? [];
+    return routes.map((route) => {
+      const routeLegs = route.legs?.length ? route.legs : [route.leg1, route.leg2];
+      const legs = routeLegs.map((flight) => {
+        const inventory = this.pickInventory(flight.inventories);
+        return { flight, inventory, basePrice: inventory?.base_price ?? 0 };
+      });
+      const leg1Inventory = legs[0]?.inventory ?? null;
+      const leg2Inventory = legs[1]?.inventory ?? null;
+      const leg1BasePrice = leg1Inventory?.base_price ?? 0;
+      const leg2BasePrice = leg2Inventory?.base_price ?? 0;
+      return {
+        route,
+        legs,
+        leg1: route.leg1,
+        leg2: route.leg2,
+        leg1Inventory,
+        leg2Inventory,
+        leg1BasePrice,
+        leg2BasePrice,
+        totalPartyPrice: legs.reduce(
+          (total, leg) => total + (leg.inventory ? this.partyPriceFor(leg.basePrice) : 0),
+          0,
+        ),
       };
     });
   });
@@ -1324,6 +1625,7 @@ export class FlightResultsComponent implements OnInit {
     // Task 4: Tải danh sách chính sách hủy vé một lần duy nhất
     this.loadPolicies();
     this.loadAirports();
+    this.loadBookingWindow();
 
     this.route.queryParams.subscribe((params) => {
       this.origin = (params['origin'] || 'HAN').toString().toUpperCase();
@@ -1377,9 +1679,11 @@ export class FlightResultsComponent implements OnInit {
     this.selectedFlight.set(null);
     this.selectedReturnFlight.set(null);
     this.selectedConnecting.set(null);
+    this.selectedReturnConnecting.set(null);
     this.assignedSeats.set({});
     this.returnSeats.set({});
     this.connectingLeg2Seats.set({});
+    this.returnConnectingSeatsByLeg.set({});
 
     this.api
       .searchFlights({
@@ -1393,6 +1697,7 @@ export class FlightResultsComponent implements OnInit {
         adults: this.adults,
         children: this.children,
         seniors: this.seniors,
+        include_connecting: true,
       })
       .subscribe({
         next: (res) => {
@@ -1461,14 +1766,93 @@ export class FlightResultsComponent implements OnInit {
 
 
 
+  loadBookingWindow(): void {
+    this.api.getBookingWindow().subscribe({
+      next: (res) => {
+        if (res?.min_date) {
+          this.minBookingDate = res.min_date;
+        }
+        if (res?.max_date) {
+          this.maxBookingDate = res.max_date;
+        }
+      },
+      error: () => {
+        const d = new Date();
+        this.minBookingDate = d.toISOString().split('T')[0];
+        const maxD = new Date(d);
+        maxD.setDate(maxD.getDate() + 330);
+        this.maxBookingDate = maxD.toISOString().split('T')[0];
+      },
+    });
+  }
+
   // ===================== Task 2: Date Range Search =====================
   applyDateRange(): void {
     const start = this.filterStartDate || this.departureDate;
+    if (!start || !isValidCalendarDate(start)) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? (!start ? 'Vui lòng chọn ngày khởi hành' : 'Ngày khởi hành không hợp lệ')
+          : (!start ? 'Please select a departure date' : 'Invalid departure date'),
+      );
+      return;
+    }
+    if (this.filterEndDate && !isValidCalendarDate(this.filterEndDate)) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Ngày kết thúc không hợp lệ'
+          : 'Invalid end date',
+      );
+      return;
+    }
+    if (this.returnDate && !isValidCalendarDate(this.returnDate)) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Ngày về không hợp lệ'
+          : 'Invalid return date',
+      );
+      return;
+    }
+
     const end = this.filterEndDate || start;
+    const minDate = this.minBookingDate || new Date().toISOString().split('T')[0];
+    if (start < minDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày khởi hành không được trước ${minDate}`
+          : `Start date cannot be earlier than ${minDate}`,
+      );
+      return;
+    }
+    if (this.maxBookingDate && start > this.maxBookingDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày khởi hành vượt quá thời hạn mở bán (${this.maxBookingDate})`
+          : `Start date exceeds booking window (${this.maxBookingDate})`,
+      );
+      return;
+    }
     if (end < start) {
       this.toast.error(this.lang.t('results.toastInvalidDate'));
       return;
     }
+    if (this.maxBookingDate && end > this.maxBookingDate) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? `Ngày kết thúc vượt quá thời hạn mở bán (${this.maxBookingDate})`
+          : `End date exceeds booking window (${this.maxBookingDate})`,
+      );
+      return;
+    }
+    if (this.isRoundTrip && this.returnDate && this.returnDate < end) {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Ngày về không được trước ngày đi muộn nhất trong khoảng tìm kiếm'
+          : 'Return date cannot be earlier than the latest departure date in the range',
+      );
+      return;
+    }
+
     this.directPage.set(1);
     this.router.navigate([], {
       relativeTo: this.route,
@@ -1487,6 +1871,10 @@ export class FlightResultsComponent implements OnInit {
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return dateStr;
+  }
+
+  getConnectingDepartureDate(opt: ConnectingOption): string {
+    return opt?.route?.departure_date || opt?.leg1?.departure_date || (opt?.leg1?.departure ? opt.leg1.departure.split('T')[0] : '');
   }
 
   // ===================== Task 3: Smoking Filter =====================
@@ -1573,21 +1961,59 @@ export class FlightResultsComponent implements OnInit {
    * rồi mở seat map của chặng 1.
    */
   selectConnectingRoute(option: ConnectingOption): void {
-    const { leg1Inventory, leg2Inventory } = option;
-    if (!leg1Inventory || !leg2Inventory) {
+    if (option.legs.length < 2 || option.legs.some((leg) => !leg.inventory)) {
       this.toast.error(this.lang.t('results.toastConnectingClassError'));
       return;
     }
 
     this.selectedConnecting.set(option);
-    this.seatMapTarget.set('CONNECTING_LEG1');
+    this.seatMapTarget.set('CONNECTING_LEG_1');
     this.assignedSeats.set({});
     this.connectingLeg2Seats.set({});
+    this.connectingSeatsByLeg.set({});
     this.openSeatMapFor(
-      option.leg1.flight_id,
-      option.leg1.flight_number,
-      `${option.leg1.origin_iata} - ${option.leg1.dest_iata}`,
+      option.legs[0].flight.flight_id,
+      option.legs[0].flight.flight_number,
+      `${option.legs[0].flight.origin_iata} - ${option.legs[0].flight.dest_iata}`,
     );
+  }
+
+  selectReturnConnectingRoute(option: ConnectingOption): void {
+    if (option.legs.length < 2 || option.legs.some((leg) => !leg.inventory)) {
+      this.toast.error(this.lang.t('results.toastConnectingClassError'));
+      return;
+    }
+
+    if (!this.selectedFlight() && !this.selectedConnecting()) {
+      this.toast.info(
+        this.lang.isVietnamese()
+          ? 'Vui lòng chọn chuyến bay đi trước khi chọn chuyến bay về.'
+          : 'Please select an outbound flight before choosing your return flight.',
+      );
+      return;
+    }
+
+    this.selectedReturnFlight.set(null);
+    this.selectedReturnConnecting.set(option);
+    this.returnConnectingSeatsByLeg.set({});
+    this.seatMapTarget.set('RETURN_CONNECTING_LEG_1');
+    this.openSeatMapFor(
+      option.legs[0].flight.flight_id,
+      option.legs[0].flight.flight_number,
+      `${option.legs[0].flight.origin_iata} - ${option.legs[0].flight.dest_iata}`,
+    );
+  }
+
+  connectingOptionReady(option: ConnectingOption): boolean {
+    return option.legs.length >= 2 && option.legs.every((leg) => !!leg.inventory);
+  }
+
+  connectingAdultPrice(option: ConnectingOption): number {
+    return option.legs.reduce((total, leg) => total + leg.basePrice, 0);
+  }
+
+  totalLayoverMinutes(value: number | number[]): number {
+    return Array.isArray(value) ? value.reduce((total, minutes) => total + minutes, 0) : value;
   }
 
   /**
@@ -1597,54 +2023,86 @@ export class FlightResultsComponent implements OnInit {
   handleSeatsConfirmed(seats: Record<number, string>): void {
     const target = this.seatMapTarget();
 
-    // Task 5: Sau khi xác nhận chặng 1, chuyển tiếp mở sơ đồ ghế cho chặng 2
-    if (target === 'CONNECTING_LEG1') {
+    if (target.startsWith('CONNECTING_LEG_')) {
       const option = this.selectedConnecting();
-      if (!option || !option.leg1Inventory || !option.leg2Inventory) {
+      const legIndex = Number(target.slice('CONNECTING_LEG_'.length)) - 1;
+      if (!option || !Number.isInteger(legIndex) || !option.legs[legIndex]?.inventory) {
         this.toast.error(this.lang.t('results.toastConnectingNotReady'));
         return;
       }
-      this.assignedSeats.set(seats);
-      this.toast.info(
-        this.lang.t('results.connectingLeg1SavedWithNumber').replace('{flight}', option.leg1.flight_number).replace('{flight2}', option.leg2.flight_number),
-      );
-      // Đợi modal chặng 1 hoàn tất đóng, mở tiếp modal cho chặng 2 ở tick tiếp theo
-      setTimeout(() => {
-        this.seatMapTarget.set('CONNECTING_LEG2');
-        this.openSeatMapFor(
-          option.leg2.flight_id,
-          option.leg2.flight_number,
-          `${option.leg2.origin_iata} - ${option.leg2.dest_iata}`,
-        );
-      }, 50);
-      return;
-    }
+      const seatsByLeg = { ...this.connectingSeatsByLeg(), [legIndex]: seats };
+      this.connectingSeatsByLeg.set(seatsByLeg);
+      if (legIndex === 0) this.assignedSeats.set(seats);
+      if (legIndex === 1) this.connectingLeg2Seats.set(seats);
+      const nextIndex = legIndex + 1;
+      if (nextIndex < option.legs.length) {
+        const next = option.legs[nextIndex].flight;
+        setTimeout(() => {
+          this.seatMapTarget.set(`CONNECTING_LEG_${nextIndex + 1}`);
+          this.openSeatMapFor(next.flight_id, next.flight_number, `${next.origin_iata} - ${next.dest_iata}`);
+        }, 50);
+        return;
+      }
 
-    // Task 5: Sau khi xác nhận chặng 2, lưu leg2_seats vào booking_context.connecting.leg2_seats và chuyển tiếp sang /booking
-    if (target === 'CONNECTING_LEG2') {
-      const option = this.selectedConnecting();
-      if (!option || !option.leg1Inventory || !option.leg2Inventory) {
-        this.toast.error(this.lang.t('results.toastConnectingNotReady'));
+      const resolvedLegs = option.legs.map((leg) => ({ flight: leg.flight, inventory: leg.inventory! }));
+
+      if (this.isRoundTrip && !this.selectedReturnFlight() && !this.selectedReturnConnecting()) {
+        this.toast.info(
+          this.lang.isVietnamese()
+            ? 'Đã lưu ghế chuyến đi. Vui lòng chọn chuyến bay về.'
+            : 'Outbound seats saved. Please select your return flight.',
+        );
         return;
       }
-      this.connectingLeg2Seats.set(seats);
-      const leg1Seats = this.assignedSeats();
-      const leg2Seats = seats;
+
+      if (this.isRoundTrip && this.selectedReturnFlight()) {
+        const ret = this.selectedReturnFlight()!;
+        const totalPartyPrice = option.totalPartyPrice + (ret.total_party_price ?? 0);
+        this.writeBookingContext({
+          mode: 'CONNECTING',
+          flight: null,
+          connecting: {
+            leg1: { flight: option.leg1, inventory: option.leg1Inventory! },
+            leg2: { flight: option.leg2, inventory: option.leg2Inventory! },
+            legs: resolvedLegs,
+            transit_airport: option.route.transit_airport,
+            layover_minutes: option.route.layover_minutes,
+            leg2_seats: seatsByLeg[1],
+            seats_by_leg: seatsByLeg,
+          },
+          return_flight: ret,
+          return_seats: this.returnSeats(),
+          origin: this.origin,
+          destination: this.destination,
+          departure_date: this.departureDate,
+          adults: this.adults,
+          children: this.children,
+          seniors: this.seniors,
+          totalPassengers: this.totalPassengers,
+          seats: seatsByLeg[0],
+          total_party_price: totalPartyPrice,
+        });
+        this.toast.success(this.lang.t('results.toastBothSaved'));
+        this.router.navigate(['/booking']);
+        return;
+      }
 
       this.writeBookingContext({
         mode: 'CONNECTING',
         flight: null,
         connecting: {
-          leg1: { flight: option.leg1, inventory: option.leg1Inventory },
-          leg2: { flight: option.leg2, inventory: option.leg2Inventory },
+          leg1: { flight: option.leg1, inventory: option.leg1Inventory! },
+          leg2: { flight: option.leg2, inventory: option.leg2Inventory! },
+          legs: resolvedLegs,
           transit_airport: option.route.transit_airport,
           layover_minutes: option.route.layover_minutes,
-          leg2_seats: leg2Seats,
+          leg2_seats: seatsByLeg[1],
+          seats_by_leg: seatsByLeg,
         },
         return_flight: null,
         return_seats: {},
-        connecting_seats: leg2Seats,
-        leg2_seats: leg2Seats,
+        connecting_seats: seatsByLeg[1],
+        leg2_seats: seatsByLeg[1],
         origin: this.origin,
         destination: this.destination,
         departure_date: this.departureDate,
@@ -1652,7 +2110,7 @@ export class FlightResultsComponent implements OnInit {
         children: this.children,
         seniors: this.seniors,
         totalPassengers: this.totalPassengers,
-        seats: leg1Seats,
+        seats: seatsByLeg[0],
         total_party_price: option.totalPartyPrice,
       });
 
@@ -1661,17 +2119,147 @@ export class FlightResultsComponent implements OnInit {
       return;
     }
 
+    if (target.startsWith('RETURN_CONNECTING_LEG_')) {
+      const option = this.selectedReturnConnecting();
+      const legIndex = Number(target.slice('RETURN_CONNECTING_LEG_'.length)) - 1;
+      if (!option || !Number.isInteger(legIndex) || !option.legs[legIndex]?.inventory) {
+        this.toast.error(this.lang.t('results.toastConnectingNotReady'));
+        return;
+      }
+      const seatsByLeg = { ...this.returnConnectingSeatsByLeg(), [legIndex]: seats };
+      this.returnConnectingSeatsByLeg.set(seatsByLeg);
+      const nextIndex = legIndex + 1;
+      if (nextIndex < option.legs.length) {
+        const next = option.legs[nextIndex].flight;
+        setTimeout(() => {
+          this.seatMapTarget.set(`RETURN_CONNECTING_LEG_${nextIndex + 1}`);
+          this.openSeatMapFor(next.flight_id, next.flight_number, `${next.origin_iata} - ${next.dest_iata}`);
+        }, 50);
+        return;
+      }
+
+      const resolvedReturnLegs = option.legs.map((leg) => ({ flight: leg.flight, inventory: leg.inventory! }));
+      const onward = this.selectedFlight();
+      const onwardConnecting = this.selectedConnecting();
+
+      if (onward) {
+        const totalPartyPrice = (onward.total_party_price ?? 0) + option.totalPartyPrice;
+        this.writeBookingContext({
+          mode: 'DIRECT',
+          flight: onward,
+          connecting: null,
+          return_flight: null,
+          return_connecting: {
+            leg1: { flight: option.leg1, inventory: option.leg1Inventory! },
+            leg2: { flight: option.leg2, inventory: option.leg2Inventory! },
+            legs: resolvedReturnLegs,
+            transit_airport: option.route.transit_airport,
+            layover_minutes: option.route.layover_minutes,
+            leg2_seats: seatsByLeg[1],
+            seats_by_leg: seatsByLeg,
+          },
+          return_seats: seatsByLeg[0] || {},
+          origin: this.origin,
+          destination: this.destination,
+          departure_date: this.departureDate,
+          adults: this.adults,
+          children: this.children,
+          seniors: this.seniors,
+          totalPassengers: this.totalPassengers,
+          seats: this.assignedSeats(),
+          total_party_price: totalPartyPrice,
+        });
+        this.toast.success(this.lang.t('results.toastBothSaved'));
+        this.router.navigate(['/booking']);
+        return;
+      } else if (onwardConnecting) {
+        const onwardLegs = onwardConnecting.legs.map((l) => ({ flight: l.flight, inventory: l.inventory! }));
+        const totalPartyPrice = onwardConnecting.totalPartyPrice + option.totalPartyPrice;
+        this.writeBookingContext({
+          mode: 'CONNECTING',
+          flight: null,
+          connecting: {
+            leg1: { flight: onwardConnecting.leg1, inventory: onwardConnecting.leg1Inventory! },
+            leg2: { flight: onwardConnecting.leg2, inventory: onwardConnecting.leg2Inventory! },
+            legs: onwardLegs,
+            transit_airport: onwardConnecting.route.transit_airport,
+            layover_minutes: onwardConnecting.route.layover_minutes,
+            leg2_seats: this.connectingSeatsByLeg()[1],
+            seats_by_leg: this.connectingSeatsByLeg(),
+          },
+          return_flight: null,
+          return_connecting: {
+            leg1: { flight: option.leg1, inventory: option.leg1Inventory! },
+            leg2: { flight: option.leg2, inventory: option.leg2Inventory! },
+            legs: resolvedReturnLegs,
+            transit_airport: option.route.transit_airport,
+            layover_minutes: option.route.layover_minutes,
+            leg2_seats: seatsByLeg[1],
+            seats_by_leg: seatsByLeg,
+          },
+          return_seats: seatsByLeg[0] || {},
+          origin: this.origin,
+          destination: this.destination,
+          departure_date: this.departureDate,
+          adults: this.adults,
+          children: this.children,
+          seniors: this.seniors,
+          totalPassengers: this.totalPassengers,
+          seats: this.connectingSeatsByLeg()[0] || {},
+          total_party_price: totalPartyPrice,
+        });
+        this.toast.success(this.lang.t('results.toastBothSaved'));
+        this.router.navigate(['/booking']);
+        return;
+      }
+    }
+
     if (target === 'RETURN') {
       this.returnSeats.set(seats);
       const onward = this.selectedFlight();
-      if (!onward) {
+      const onwardConnecting = this.selectedConnecting();
+      if (!onward && !onwardConnecting) {
         this.toast.info(this.lang.t('results.toastReturnSaved'));
         return;
       }
-      this.toast.success(this.lang.t('results.toastBothSaved'));
-      this.writeDirectContext(onward, this.selectedReturnFlight());
-      this.router.navigate(['/booking']);
-      return;
+      if (onward) {
+        this.toast.success(this.lang.t('results.toastBothSaved'));
+        this.writeDirectContext(onward, this.selectedReturnFlight());
+        this.router.navigate(['/booking']);
+        return;
+      }
+      if (onwardConnecting) {
+        const onwardLegs = onwardConnecting.legs.map((l) => ({ flight: l.flight, inventory: l.inventory! }));
+        const ret = this.selectedReturnFlight()!;
+        const totalPartyPrice = onwardConnecting.totalPartyPrice + (ret.total_party_price ?? 0);
+        this.writeBookingContext({
+          mode: 'CONNECTING',
+          flight: null,
+          connecting: {
+            leg1: { flight: onwardConnecting.leg1, inventory: onwardConnecting.leg1Inventory! },
+            leg2: { flight: onwardConnecting.leg2, inventory: onwardConnecting.leg2Inventory! },
+            legs: onwardLegs,
+            transit_airport: onwardConnecting.route.transit_airport,
+            layover_minutes: onwardConnecting.route.layover_minutes,
+            leg2_seats: this.connectingSeatsByLeg()[1],
+            seats_by_leg: this.connectingSeatsByLeg(),
+          },
+          return_flight: ret,
+          return_seats: this.returnSeats(),
+          origin: this.origin,
+          destination: this.destination,
+          departure_date: this.departureDate,
+          adults: this.adults,
+          children: this.children,
+          seniors: this.seniors,
+          totalPassengers: this.totalPassengers,
+          seats: this.connectingSeatsByLeg()[0] || {},
+          total_party_price: totalPartyPrice,
+        });
+        this.toast.success(this.lang.t('results.toastBothSaved'));
+        this.router.navigate(['/booking']);
+        return;
+      }
     }
 
     // target === 'ONWARD'
@@ -1682,8 +2270,42 @@ export class FlightResultsComponent implements OnInit {
       return;
     }
 
-    if (this.isRoundTrip && !this.selectedReturnFlight()) {
+    if (this.isRoundTrip && !this.selectedReturnFlight() && !this.selectedReturnConnecting()) {
       this.toast.info(this.lang.t('results.toastOutboundSaved'));
+      return;
+    }
+
+    if (this.isRoundTrip && this.selectedReturnConnecting()) {
+      const option = this.selectedReturnConnecting()!;
+      const resolvedReturnLegs = option.legs.map((leg) => ({ flight: leg.flight, inventory: leg.inventory! }));
+      const totalPartyPrice = (onward.total_party_price ?? 0) + option.totalPartyPrice;
+      this.writeBookingContext({
+        mode: 'DIRECT',
+        flight: onward,
+        connecting: null,
+        return_flight: null,
+        return_connecting: {
+          leg1: { flight: option.leg1, inventory: option.leg1Inventory! },
+          leg2: { flight: option.leg2, inventory: option.leg2Inventory! },
+          legs: resolvedReturnLegs,
+          transit_airport: option.route.transit_airport,
+          layover_minutes: option.route.layover_minutes,
+          leg2_seats: this.returnConnectingSeatsByLeg()[1],
+          seats_by_leg: this.returnConnectingSeatsByLeg(),
+        },
+        return_seats: this.returnConnectingSeatsByLeg()[0] || {},
+        origin: this.origin,
+        destination: this.destination,
+        departure_date: this.departureDate,
+        adults: this.adults,
+        children: this.children,
+        seniors: this.seniors,
+        totalPassengers: this.totalPassengers,
+        seats: this.assignedSeats(),
+        total_party_price: totalPartyPrice,
+      });
+      this.toast.success(this.lang.t('results.toastBothSaved'));
+      this.router.navigate(['/booking']);
       return;
     }
 

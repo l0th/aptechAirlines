@@ -330,9 +330,13 @@ export class BookingSuccessComponent implements OnInit {
 
   private static readonly LEG_ORDER: string[] = [
     LegType.OUTBOUND,
-    LegType.INBOUND,
     LegType.CONNECTING_1,
     LegType.CONNECTING_2,
+    LegType.CONNECTING_3,
+    LegType.INBOUND,
+    LegType.INBOUND_1,
+    LegType.INBOUND_2,
+    LegType.INBOUND_3,
   ];
 
   ngOnInit(): void {
@@ -410,7 +414,7 @@ export class BookingSuccessComponent implements OnInit {
     const groups = new Map<string, ItineraryLeg>();
 
     for (const coupon of coupons) {
-      const legType = (coupon.leg_type || LegType.OUTBOUND) as string;
+      const legType = this.normalizeLegType((coupon.leg_type || LegType.OUTBOUND) as string);
       const flightNumber = coupon.flight_number || 'N/A';
       const key = `${legType}|${flightNumber}`;
 
@@ -459,8 +463,17 @@ export class BookingSuccessComponent implements OnInit {
     return index === -1 ? BookingSuccessComponent.LEG_ORDER.length : index;
   }
 
+  /** Normalize legacy CONNECTING_LEG_X variants to CONNECTING_X. */
+  private normalizeLegType(legType: string): string {
+    const t = (legType || 'OUTBOUND').trim().toUpperCase();
+    const match = t.match(/^CONNECTING[_\s]*(?:LEG[_\s]*)?(\d+)$/);
+    if (match) return `CONNECTING_${match[1]}`;
+    return t || 'OUTBOUND';
+  }
+
   private legTypeLabel(legType: string): string {
-    switch (legType) {
+    const normalized = this.normalizeLegType(legType);
+    switch (normalized) {
       case LegType.OUTBOUND:
         return this.lang.isVietnamese() ? 'Chặng đi' : 'Outbound';
       case LegType.INBOUND:
@@ -469,8 +482,16 @@ export class BookingSuccessComponent implements OnInit {
         return this.lang.isVietnamese() ? 'Nối chuyến 1' : 'Connecting 1';
       case LegType.CONNECTING_2:
         return this.lang.isVietnamese() ? 'Nối chuyến 2' : 'Connecting 2';
+      case LegType.CONNECTING_3:
+        return this.lang.isVietnamese() ? 'Nối chuyến 3' : 'Connecting 3';
+      case LegType.INBOUND_1:
+        return this.lang.isVietnamese() ? 'Chặng về 1' : 'Return 1';
+      case LegType.INBOUND_2:
+        return this.lang.isVietnamese() ? 'Chặng về 2' : 'Return 2';
+      case LegType.INBOUND_3:
+        return this.lang.isVietnamese() ? 'Chặng về 3' : 'Return 3';
       default:
-        return legType;
+        return normalized;
     }
   }
 }

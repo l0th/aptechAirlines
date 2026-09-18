@@ -32,15 +32,16 @@ export class PoliciesService {
 
   // Calculate applicable refund percentage based on how many days before departure
   async calculateRefundPercentage(daysBeforeDeparture: number): Promise<number> {
+    const normalizedDays = Math.floor(Math.max(0, daysBeforeDeparture));
     const policies = await this.findAll();
     for (const policy of policies) {
       if (policy.max_days_before !== null && policy.max_days_before !== undefined) {
-        if (daysBeforeDeparture >= policy.min_days_before && daysBeforeDeparture <= policy.max_days_before) {
+        if (normalizedDays >= policy.min_days_before && normalizedDays <= policy.max_days_before) {
           return policy.refund_percentage;
         }
       } else {
         // No upper bound (e.g. >= min_days_before)
-        if (daysBeforeDeparture >= policy.min_days_before) {
+        if (normalizedDays >= policy.min_days_before) {
           return policy.refund_percentage;
         }
       }

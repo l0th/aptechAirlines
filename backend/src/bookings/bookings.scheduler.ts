@@ -114,12 +114,7 @@ export class BookingsScheduler {
     let cancelled = 0;
     for (const booking of expired) {
       try {
-        booking.status = BookingStatus.CANCELLED;
-        booking.cancellation_number = this.generateCode('CAN');
-        await booking.save();
-
-        // Release the held seats (same logic as cancelTicket)
-        await this.bookingsService.releaseSeatsForBooking(booking);
+        await this.bookingsService.cancelExpiredBlockStrict(booking);
 
         cancelled++;
         this.logger.log(

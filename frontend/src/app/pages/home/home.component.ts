@@ -517,7 +517,7 @@ import { CabinClass } from '../../core/models/flight.model';
               <input
                 type="date"
                 [(ngModel)]="departureDate"
-                [min]="todayStr"
+                [min]="minBookingDate || todayStr"
                 [max]="maxBookingDate"
                 class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
               />
@@ -537,7 +537,7 @@ import { CabinClass } from '../../core/models/flight.model';
                 <input
                   type="date"
                   [(ngModel)]="returnDate"
-                  [min]="departureDate || todayStr"
+                  [min]="departureDate || minBookingDate || todayStr"
                   [max]="maxBookingDate"
                   class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl px-3.5 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
                 />
@@ -801,6 +801,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   seniors = 0;
 
   todayStr = new Date().toISOString().split('T')[0];
+  minBookingDate = new Date().toISOString().split('T')[0];
   maxAdvanceDays = 330;
   maxBookingDate = this.computeFallbackMaxDate();
 
@@ -1276,6 +1277,9 @@ export class HomeComponent implements OnInit, OnDestroy {
   loadBookingWindow(): void {
     this.api.getBookingWindow().subscribe({
       next: (res) => {
+        if (res?.min_date) {
+          this.minBookingDate = res.min_date;
+        }
         if (res?.max_date) {
           this.maxBookingDate = res.max_date;
         }
@@ -1284,6 +1288,7 @@ export class HomeComponent implements OnInit, OnDestroy {
         }
       },
       error: () => {
+        this.minBookingDate = this.todayStr;
         this.maxBookingDate = this.computeFallbackMaxDate();
       },
     });
@@ -1324,6 +1329,15 @@ export class HomeComponent implements OnInit, OnDestroy {
       this.toast.warning(this.lang.t('home.validation.date'));
       return;
     }
+    const minDate = this.minBookingDate || this.todayStr;
+    if (minDate && this.departureDate < minDate) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? `Ngày khởi hành không được trước ngày ${minDate}`
+          : `Departure date cannot be earlier than ${minDate}`,
+      );
+      return;
+    }
     if (this.maxBookingDate && this.departureDate > this.maxBookingDate) {
       this.toast.warning(
         this.lang.isVietnamese()
@@ -1331,6 +1345,33 @@ export class HomeComponent implements OnInit, OnDestroy {
           : `Departure date exceeds booking window (${this.maxBookingDate})`,
       );
       return;
+    }
+
+    if (this.isRoundTrip()) {
+      if (!this.returnDate) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Vui lòng chọn ngày về cho chuyến bay khứ hồi'
+            : 'Please select a return date for round trip',
+        );
+        return;
+      }
+      if (this.returnDate < this.departureDate) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Ngày về không được trước ngày khởi hành'
+            : 'Return date cannot be earlier than departure date',
+        );
+        return;
+      }
+      if (this.maxBookingDate && this.returnDate > this.maxBookingDate) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? `Ngày về vượt quá thời hạn mở bán (${this.maxBookingDate})`
+            : `Return date exceeds booking window (${this.maxBookingDate})`,
+        );
+        return;
+      }
     }
 
     const queryParams: any = {

@@ -13,9 +13,9 @@ import { IconComponent } from '../icon/icon.component';
   template: `
     @if (isOpen) {
       <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 overflow-hidden relative">
+        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 overflow-hidden relative max-h-[90vh] flex flex-col">
           <!-- Header Bar -->
-          <div class="bg-navy p-6 text-white text-center relative">
+          <div class="bg-navy p-6 text-white text-center relative shrink-0">
             <button
               (click)="close()"
               class="absolute top-5 right-5 text-slate-400 hover:text-white transition-colors"
@@ -54,7 +54,7 @@ import { IconComponent } from '../icon/icon.component';
           </div>
 
           <!-- Form Content -->
-          <div class="p-6">
+          <div class="p-6 max-h-[85vh] overflow-y-auto">
             @if (!isRegister()) {
               <!-- Login Form -->
               <form (ngSubmit)="handleLogin()" class="space-y-4">
@@ -132,28 +132,29 @@ import { IconComponent } from '../icon/icon.component';
                   </div>
                 </div>
 
-                <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabelOnly') }}</label>
-                  <input
-                    type="text"
-                    [(ngModel)]="regUsername"
-                    name="username"
-                    required
-                    placeholder="nguyenvanan"
-                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                  />
-                </div>
-
-                <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">Email</label>
-                  <input
-                    type="email"
-                    [(ngModel)]="regEmail"
-                    name="email"
-                    required
-                    placeholder="an.nguyen@example.com"
-                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                  />
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabelOnly') }}</label>
+                    <input
+                      type="text"
+                      [(ngModel)]="regUsername"
+                      name="username"
+                      required
+                      placeholder="nguyenvanan"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Email</label>
+                    <input
+                      type="email"
+                      [(ngModel)]="regEmail"
+                      name="email"
+                      required
+                      placeholder="an.nguyen@example.com"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -164,6 +165,72 @@ import { IconComponent } from '../icon/icon.component';
                     name="password"
                     required
                     [placeholder]="lang.t('auth.passwordMin')"
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                  />
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.phone') }}</label>
+                    <input
+                      type="tel"
+                      [(ngModel)]="regPhone"
+                      name="phone"
+                      required
+                      placeholder="0912345678"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.sex') }}</label>
+                    <select
+                      [(ngModel)]="regSex"
+                      name="sex"
+                      required
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    >
+                      <option value="MALE">{{ lang.t('profile.male') }}</option>
+                      <option value="FEMALE">{{ lang.t('profile.female') }}</option>
+                      <option value="OTHER">{{ lang.t('profile.other') }}</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.age') }}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      [(ngModel)]="regAge"
+                      name="age"
+                      required
+                      placeholder="25"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.creditCard') }}</label>
+                    <input
+                      type="text"
+                      [(ngModel)]="regCard"
+                      name="creditCard"
+                      required
+                      placeholder="1234 5678 9012 3456"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.address') }}</label>
+                  <input
+                    type="text"
+                    [(ngModel)]="regAddress"
+                    name="address"
+                    required
+                    [placeholder]="lang.t('profile.addressPlaceholder')"
                     class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
                   />
                 </div>
@@ -209,6 +276,11 @@ export class AuthModalComponent implements OnChanges {
   regFirstName = '';
   regLastName = '';
   regEmail = '';
+  regAddress = '';
+  regPhone = '';
+  regSex = 'MALE';
+  regAge: number | null = null;
+  regCard = '';
 
   // Reset form and focus first input whenever modal is reopened (isOpen becomes true)
   ngOnChanges(changes: SimpleChanges): void {
@@ -228,6 +300,11 @@ export class AuthModalComponent implements OnChanges {
     this.regFirstName = '';
     this.regLastName = '';
     this.regEmail = '';
+    this.regAddress = '';
+    this.regPhone = '';
+    this.regSex = 'MALE';
+    this.regAge = null;
+    this.regCard = '';
   }
 
   // Autofocus the first input on modal open for improved UX
@@ -265,7 +342,21 @@ export class AuthModalComponent implements OnChanges {
   }
 
   handleRegister(): void {
-    if (!this.regUsername || !this.regPassword || !this.regFirstName || !this.regLastName || !this.regEmail) {
+    if (
+      !this.regUsername?.trim() ||
+      !this.regPassword ||
+      !this.regFirstName?.trim() ||
+      !this.regLastName?.trim() ||
+      !this.regEmail?.trim() ||
+      !this.regAddress?.trim() ||
+      !this.regPhone?.trim() ||
+      !this.regSex?.trim() ||
+      this.regAge === null ||
+      this.regAge === undefined ||
+      isNaN(Number(this.regAge)) ||
+      Number(this.regAge) < 0 ||
+      !this.regCard?.trim()
+    ) {
       this.toast.warning(this.lang.t('auth.registerEmpty'));
       return;
     }
@@ -273,11 +364,16 @@ export class AuthModalComponent implements OnChanges {
     this.loading.set(true);
     this.auth
       .register({
-        username: this.regUsername,
+        username: this.regUsername.trim(),
         password: this.regPassword,
-        first_name: this.regFirstName,
-        last_name: this.regLastName,
-        email: this.regEmail,
+        first_name: this.regFirstName.trim(),
+        last_name: this.regLastName.trim(),
+        address: this.regAddress.trim(),
+        phone_number: this.regPhone.trim(),
+        email: this.regEmail.trim(),
+        sex: this.regSex.trim(),
+        age: Number(this.regAge),
+        preferred_credit_card: this.regCard.trim(),
       })
       .subscribe({
         next: (res) => {
@@ -287,7 +383,7 @@ export class AuthModalComponent implements OnChanges {
         },
         error: (err) => {
           this.loading.set(false);
-          this.toast.error(err.error?.message || 'this.lang.t(\'auth.registerError\')');
+          this.toast.error(err.error?.message || this.lang.t('auth.registerError'));
         },
       });
   }

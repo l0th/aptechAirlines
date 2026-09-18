@@ -16,9 +16,10 @@ import {
 import {
   Booking,
   BookingStatus,
+  CancelBookingResponse,
   CancellationPolicy,
 } from '../models/booking.model';
-import { AuthResponse, User, UserRole } from '../models/user.model';
+import { AuthResponse, RegisterPayload, User, UserRole } from '../models/user.model';
 
 export type AirLabsSyncMode = 'route' | 'departure' | 'arrival' | 'airline' | 'flight';
 
@@ -100,7 +101,7 @@ export class ApiService {
     return this.http.post<AuthResponse>(`${this.baseUrl}/auth/login`, credentials);
   }
 
-  register(userData: Partial<User> & { password: string }): Observable<AuthResponse> {
+  register(userData: RegisterPayload): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.baseUrl}/auth/register`, userData);
   }
 
@@ -120,6 +121,7 @@ export class ApiService {
     adults?: number;
     children?: number;
     seniors?: number;
+    include_connecting?: boolean;
   }): Observable<FlightSearchResult> {
     let httpParams = new HttpParams();
     Object.entries(params).forEach(([key, val]) => {
@@ -384,20 +386,19 @@ export class ApiService {
 
   rescheduleBooking(data: {
     confirmation_number: string;
-    new_flight_id: string;
-    new_inventory_id: string;
+    new_flight_id?: string;
+    new_inventory_id?: string;
+    new_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
+    new_return_flight_id?: string;
+    new_return_inventory_id?: string;
+    new_return_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
     credit_card_number?: string;
   }): Observable<Booking> {
     return this.http.post<Booking>(`${this.baseUrl}/bookings/reschedule`, data);
   }
 
-  cancelBooking(data: { identifier: string; reason?: string }): Observable<{
-    message: string;
-    booking: Booking;
-    refund_percentage: number;
-    refund_amount: number;
-  }> {
-    return this.http.post<any>(`${this.baseUrl}/bookings/cancel`, data);
+  cancelBooking(data: { identifier: string; reason?: string }): Observable<CancelBookingResponse> {
+    return this.http.post<CancelBookingResponse>(`${this.baseUrl}/bookings/cancel`, data);
   }
 
   trackBooking(code: string): Observable<Booking> {

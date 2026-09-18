@@ -55,3 +55,21 @@ export function maxAdvanceBookingDays(): number {
     }
     return 330;
 }
+
+// e) getBookingWindowLimits()
+export interface BookingWindowLimits {
+    max_advance_days: number;
+    min_date: string; // YYYY-MM-DD
+    max_date: string; // YYYY-MM-DD
+}
+
+export function getBookingWindowLimits(refDate: Date = new Date()): BookingWindowLimits {
+    const maxDays = maxAdvanceBookingDays();
+    const maxDate = new Date(refDate.getTime() + maxDays * 86400000);
+    return {
+        max_advance_days: maxDays,
+        min_date: refDate.toISOString().split('T')[0],
+        max_date: maxDate.toISOString().split('T')[0],
+    };
+}
+

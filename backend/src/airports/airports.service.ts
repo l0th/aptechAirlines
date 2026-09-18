@@ -49,16 +49,22 @@ export class AirportsService {
   }> {
     if (unserviced.length > 0) {
       const firstUnserviced = unserviced[0];
-      if (firstUnserviced.nearest_airport_code) {
+      const distance = firstUnserviced.distance_to_nearest_km;
+      const hasValidDistance = typeof distance === 'number' && Number.isFinite(distance);
+
+      if (firstUnserviced.nearest_airport_code && hasValidDistance && firstUnserviced.city_name) {
         const nearest = await this.airportModel
-          .findOne({ iata_code: firstUnserviced.nearest_airport_code })
+          .findOne({
+            iata_code: firstUnserviced.nearest_airport_code.toUpperCase(),
+            is_serviced_directly: true,
+          })
           .exec();
-        if (nearest) {
+        if (nearest && nearest.is_serviced_directly === true) {
           return {
             exactMatches: [],
             nearestSuggestion: {
               airport: nearest,
-              distance_km: firstUnserviced.distance_to_nearest_km,
+              distance_km: distance,
               for_city: firstUnserviced.city_name,
             },
             unservicedMatches: unserviced,

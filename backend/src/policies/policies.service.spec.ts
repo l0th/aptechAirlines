@@ -38,23 +38,28 @@ describe('PoliciesService', () => {
   });
 
   describe('calculateRefundPercentage', () => {
-    it('>=30 days -> 90', async () => {
+    it('>=30 days -> 90 (including fractional values like 30.x)', async () => {
       expect(await service.calculateRefundPercentage(35)).toBe(90);
       expect(await service.calculateRefundPercentage(30)).toBe(90);
+      expect(await service.calculateRefundPercentage(30.1)).toBe(90);
+      expect(await service.calculateRefundPercentage(30.5)).toBe(90);
     });
 
-    it('15..29 -> 75', async () => {
+    it('15..29 -> 75 (including fractional values like 29.5)', async () => {
       expect(await service.calculateRefundPercentage(29)).toBe(75);
+      expect(await service.calculateRefundPercentage(29.5)).toBe(75);
       expect(await service.calculateRefundPercentage(15)).toBe(75);
       expect(await service.calculateRefundPercentage(20)).toBe(75);
     });
 
-    it('7..14 -> 50', async () => {
+    it('7..14 -> 50 (including fractional values like 14.5)', async () => {
       expect(await service.calculateRefundPercentage(14)).toBe(50);
+      expect(await service.calculateRefundPercentage(14.5)).toBe(50);
       expect(await service.calculateRefundPercentage(7)).toBe(50);
     });
 
-    it('0..6 -> 0', async () => {
+    it('0..6 -> 0 (including fractional values like 6.5)', async () => {
+      expect(await service.calculateRefundPercentage(6.5)).toBe(0);
       expect(await service.calculateRefundPercentage(6)).toBe(0);
       expect(await service.calculateRefundPercentage(0)).toBe(0);
     });

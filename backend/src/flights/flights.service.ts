@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -12,13 +13,33 @@ import {
   SearchFlightDto,
   UpdateFlightDto,
   UpdateFlightStatusDto,
+  isValidCalendarDateString,
 } from './flights.dto';
 import { AirportsService } from '../airports/airports.service';
 import { Booking, BookingDocument, BookingStatus } from '../bookings/bookings.schema';
 import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes } from '../common/timezone.util';
-import { earlyBirdQuote, maxAdvanceBookingDays } from '../common/pricing.util';
+import { earlyBirdQuote, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
 
 import { ReferenceService } from '../reference/reference.service';
+import { RouteGraphService } from '../reference/route-graph.service';
+import { RouteScheduleValidatorService } from '../reference/route-schedule-validator.service';
+
+/**
+ * Enumerates all calendar dates (YYYY-MM-DD) inclusively from startDate through endDate.
+ */
+export function enumerateDateRange(startDate: string, endDate?: string): string[] {
+  if (!endDate || endDate <= startDate) {
+    return [startDate];
+  }
+  const dates: string[] = [];
+  const cur = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  while (cur <= end) {
+    dates.push(cur.toISOString().split('T')[0]);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return dates;
+}
 
 @Injectable()
 export class FlightsService {
@@ -29,6 +50,8 @@ export class FlightsService {
     @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
     private readonly airportsService: AirportsService,
     private readonly referenceService: ReferenceService,
+    @Optional() private readonly routeGraphService?: RouteGraphService,
+    @Optional() private readonly routeScheduleValidatorService?: RouteScheduleValidatorService,
   ) {}
 
   async findAll(status?: FlightStatus, origin?: string, dest?: string): Promise<Flight[]> {
@@ -346,6 +369,7 @@ export class FlightsService {
     onward_flights: any[];
     return_flights?: any[];
     connecting_routes?: any[];
+    return_connecting_routes?: any[];
     route_network_suggestions?: any[];
   }> {
     const adults = Number(dto.adults) || 1;
@@ -353,18 +377,44 @@ export class FlightsService {
     const seniors = Number(dto.seniors) || 0;
     const totalPassengers = adults + children + seniors;
 
-    if (dto.return_date && dto.return_date < dto.departure_date) {
-      throw new BadRequestException('Return date cannot be earlier than departure date');
+    const { min_date: minDateStr, max_date: maxDateStr, max_advance_days: maxDays } = getBookingWindowLimits();
+
+    if (!isValidCalendarDateString(dto.departure_date)) {
+      throw new BadRequestException('Ngày khởi hành không đúng định dạng YYYY-MM-DD hoặc không hợp lệ.');
+    }
+    if (dto.departure_date < minDateStr) {
+      throw new BadRequestException(`Ngày khởi hành không được trước ngày hiện tại (${minDateStr}).`);
+    }
+    if (dto.departure_date > maxDateStr) {
+      throw new BadRequestException(`Ngày bay vượt quá giới hạn đặt vé trước ${maxDays} ngày.`);
     }
 
-    const maxDays = maxAdvanceBookingDays();
-    const maxDateStr = new Date(Date.now() + maxDays * 86400000).toISOString().split('T')[0];
-    if (
-      dto.departure_date > maxDateStr ||
-      (dto.departure_date_end && dto.departure_date_end > maxDateStr) ||
-      (dto.return_date && dto.return_date > maxDateStr)
-    ) {
-      throw new BadRequestException(`Ngày bay vượt quá giới hạn đặt vé trước ${maxDays} ngày.`);
+    if (dto.departure_date_end) {
+      if (!isValidCalendarDateString(dto.departure_date_end)) {
+        throw new BadRequestException('Ngày kết thúc khoảng tìm kiếm không đúng định dạng YYYY-MM-DD hoặc không hợp lệ.');
+      }
+      if (dto.departure_date_end < dto.departure_date) {
+        throw new BadRequestException('Ngày kết thúc khoảng tìm kiếm không được trước ngày khởi hành.');
+      }
+      if (dto.departure_date_end > maxDateStr) {
+        throw new BadRequestException(`Ngày bay vượt quá giới hạn đặt vé trước ${maxDays} ngày.`);
+      }
+    }
+
+    if (dto.return_date) {
+      if (!isValidCalendarDateString(dto.return_date)) {
+        throw new BadRequestException('Ngày về không đúng định dạng YYYY-MM-DD hoặc không hợp lệ.');
+      }
+      if (dto.return_date < minDateStr) {
+        throw new BadRequestException(`Ngày về không được trước ngày hiện tại (${minDateStr}).`);
+      }
+      if (dto.return_date > maxDateStr) {
+        throw new BadRequestException(`Ngày bay vượt quá giới hạn đặt vé trước ${maxDays} ngày.`);
+      }
+      const latestOutboundDate = dto.departure_date_end || dto.departure_date;
+      if (dto.return_date < latestOutboundDate) {
+        throw new BadRequestException('Return date cannot be earlier than departure date');
+      }
     }
 
     const originScope = await this.referenceService.expandLocation(dto.origin);
@@ -389,23 +439,35 @@ export class FlightsService {
     let connectingRoutes: any[] = [];
     let routeNetworkSuggestions: any[] = [];
     
-    if (onwardDirect.length === 0) {
-      connectingRoutes = await this.findConnectingRoutes(
-        originScope.iata_codes,
-        destScope.iata_codes,
-        dto.departure_date,
-        totalPassengers,
-        adults,
-        children,
-        seniors,
-      );
+    if (onwardDirect.length === 0 || dto.include_connecting) {
+      connectingRoutes = await (dto.departure_date_end
+        ? this.findConnectingRoutes(
+            originScope.iata_codes,
+            destScope.iata_codes,
+            dto.departure_date,
+            totalPassengers,
+            adults,
+            children,
+            seniors,
+            dto.departure_date_end,
+          )
+        : this.findConnectingRoutes(
+            originScope.iata_codes,
+            destScope.iata_codes,
+            dto.departure_date,
+            totalPassengers,
+            adults,
+            children,
+            seniors,
+          ));
       
-      if (connectingRoutes.length === 0) {
+      if (connectingRoutes.length === 0 && onwardDirect.length === 0) {
          routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(originScope.iata_codes, destScope.iata_codes);
       }
     }
 
     let returnFlights: any[] | undefined = undefined;
+    let returnConnectingRoutes: any[] | undefined = undefined;
     if (dto.return_date) {
       returnFlights = await this.findDirectFlights(
         destScope.iata_codes,
@@ -419,6 +481,17 @@ export class FlightsService {
         children,
         seniors,
       );
+      if (returnFlights.length === 0 || dto.include_connecting) {
+        returnConnectingRoutes = await this.findConnectingRoutes(
+          destScope.iata_codes,
+          originScope.iata_codes,
+          dto.return_date,
+          totalPassengers,
+          adults,
+          children,
+          seniors,
+        );
+      }
     }
 
     const dateFilter = dto.departure_date_end 
@@ -446,8 +519,18 @@ export class FlightsService {
     }
 
     return {
-      origin_info: { query: dto.origin, resolved_iata: legacyOriginIata, using_nearest_airport: false },
-      dest_info: { query: dto.destination, resolved_iata: legacyDestIata, using_nearest_airport: false },
+      origin_info: {
+        query: dto.origin,
+        resolved_iata: legacyOriginIata,
+        using_nearest_airport: !!originScope.using_nearest_airport,
+        ...(originScope.nearest_suggestion ? { nearest_suggestion: originScope.nearest_suggestion } : {}),
+      },
+      dest_info: {
+        query: dto.destination,
+        resolved_iata: legacyDestIata,
+        using_nearest_airport: !!destScope.using_nearest_airport,
+        ...(destScope.nearest_suggestion ? { nearest_suggestion: destScope.nearest_suggestion } : {}),
+      },
       origin_scope: { 
         kind: originScope.matched_kind, 
         label: originScope.label, 
@@ -465,6 +548,7 @@ export class FlightsService {
       onward_flights: onwardDirect,
       return_flights: returnFlights,
       connecting_routes: connectingRoutes,
+      return_connecting_routes: returnConnectingRoutes,
       route_network_suggestions: routeNetworkSuggestions,
     };
   }
@@ -596,19 +680,13 @@ export class FlightsService {
     adults: number,
     children: number,
     seniors: number,
+    departureDateEnd?: string,
   ): Promise<any[]> {
     if (originIatas.length === 0 || destIatas.length === 0) return [];
 
-    const leg1Flights = await this.flightModel
-      .find({
-        origin_iata: { $in: originIatas },
-        departure_date: departureDate,
-        status: { $ne: FlightStatus.CANCELLED },
-      })
-      .exec();
-
     const connectingOptions: any[] = [];
     const now = Date.now();
+    const seenCombos = new Set<string>();
     
     const tzMap: Record<string, string> = {};
     const getTz = async (iata: string) => {
@@ -631,19 +709,20 @@ export class FlightsService {
     const processLeg = async (leg: any) => {
       const oTz = await getTz(leg.origin_iata);
       const dTz = await getTz(leg.dest_iata);
-      const daysUntilDeparture = Math.max(0, (leg.scheduled_departure.getTime() - now) / 86400000);
+      const daysUntilDeparture = leg.scheduled_departure ? Math.max(0, (new Date(leg.scheduled_departure).getTime() - now) / 86400000) : 0;
       const earlyBird = earlyBirdQuote(daysUntilDeparture);
       
       const mappedInventories = leg.inventories
         .filter((i: any) => i.available_seats >= totalPassengers)
         .map((inv: any) => {
+            const rawInv = typeof inv.toObject === 'function' ? inv.toObject() : inv;
             const discountedBase = Math.round(inv.base_price * earlyBird.multiplier);
             const childPrice = Math.round(discountedBase * 0.75);
             const seniorPrice = Math.round(discountedBase * 0.85);
             const totalPartyPrice = adults * discountedBase + children * childPrice + seniors * seniorPrice;
             
             return {
-                ...inv.toObject(),
+                ...rawInv,
                 base_price_per_adult: discountedBase,
                 total_party_price: totalPartyPrice,
                 early_bird_percent: earlyBird.percent,
@@ -658,6 +737,7 @@ export class FlightsService {
         flight_number: leg.flight_number,
         origin_iata: leg.origin_iata,
         dest_iata: leg.dest_iata,
+        departure_date: leg.departure_date,
         departure: leg.scheduled_departure,
         arrival: leg.scheduled_arrival,
         origin_time_zone: oTz,
@@ -668,37 +748,154 @@ export class FlightsService {
       };
     };
 
+    // 1. Authoritative Phase B/C when RouteGraphService and RouteScheduleValidatorService are available
+    if (this.routeGraphService && this.routeScheduleValidatorService) {
+      try {
+        const graphRes = await this.routeGraphService.findPaths(originIatas, destIatas, { maxStops: 2 });
+        const targetDates = enumerateDateRange(departureDate, departureDateEnd);
+
+        for (const targetDate of targetDates) {
+          const validated = this.routeScheduleValidatorService.validatePaths(graphRes, targetDate);
+
+          for (const itin of validated.itineraries) {
+            let allAvailable = true;
+
+            const candidatesByLeg: FlightDocument[][] = [];
+            for (const legDef of itin.legs) {
+              const identity = (legDef.flight_iata || legDef.flight_number || '').replace(/\s+/g, '').toUpperCase();
+              if (!identity || legDef.chronology_basis === 'LOCAL') {
+                allAvailable = false;
+                break;
+              }
+              const candidates = await this.flightModel.find({
+                origin_iata: legDef.dep_iata,
+                dest_iata: legDef.arr_iata,
+                status: { $ne: FlightStatus.CANCELLED },
+              }).exec();
+              const confidentMatches = candidates.filter((flight: FlightDocument) => {
+                const flightIdentity = flight.flight_number.replace(/\s+/g, '').toUpperCase();
+                const scheduleDelta = Math.abs(
+                  new Date(flight.scheduled_departure).getTime() - legDef.dep_datetime.getTime(),
+                );
+                return flightIdentity === identity && scheduleDelta <= 60000;
+              });
+              if (confidentMatches.length === 0) {
+                allAvailable = false;
+                break;
+              }
+              const reservable: FlightDocument[] = [];
+              for (const flight of confidentMatches) {
+                const processed = await processLeg(flight);
+                if (processed.inventories?.length > 0) reservable.push(flight);
+              }
+              if (reservable.length === 0) {
+                allAvailable = false;
+                break;
+              }
+              candidatesByLeg.push(reservable);
+            }
+
+            if (allAvailable) {
+              const combinations = candidatesByLeg.reduce<FlightDocument[][]>(
+                (acc, candidates) => acc.flatMap((prefix) => candidates.map((candidate) => [...prefix, candidate])),
+                [[]],
+              );
+              for (const combination of combinations) {
+                const mappedLegs = await Promise.all(combination.map(processLeg));
+                if (mappedLegs.length >= 2) {
+                  let valid = true;
+                  for (let i = 0; i < mappedLegs.length - 1; i++) {
+                    const arrTime = new Date(mappedLegs[i].arrival).getTime();
+                    const nextDepTime = new Date(mappedLegs[i + 1].departure).getTime();
+                    const layover = Math.round((nextDepTime - arrTime) / 60000);
+                    if (layover < 45 || layover > 720) {
+                      valid = false;
+                      break;
+                    }
+                  }
+
+                  if (valid) {
+                    const comboKey = mappedLegs.map((l: any) => l.flight_id.toString()).join('>');
+                    if (!seenCombos.has(comboKey)) {
+                      seenCombos.add(comboKey);
+                      connectingOptions.push({
+                        route_type: itin.route_type,
+                        departure_date: mappedLegs[0]?.departure_date || targetDate,
+                        transit_airport: itin.stops[0],
+                        transit_airports: itin.stops,
+                        total_duration_minutes: itin.total_duration_minutes,
+                        layover_minutes: itin.layover_minutes.length === 1 ? itin.layover_minutes[0] : itin.layover_minutes,
+                        leg1: mappedLegs[0],
+                        leg2: mappedLegs[1],
+                        legs: mappedLegs,
+                        coverage: validated.coverage,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Error resolving route graph connecting routes: ${err.message}`);
+      }
+      return connectingOptions;
+    }
+
+    // 2. Legacy fallback loop ONLY when graph services are genuinely unavailable
+    const leg1DateFilter = departureDateEnd
+      ? { $gte: departureDate, $lte: departureDateEnd }
+      : departureDate;
+
+    const leg1Flights = await this.flightModel
+      .find({
+        origin_iata: { $in: originIatas },
+        departure_date: leg1DateFilter,
+        status: { $ne: FlightStatus.CANCELLED },
+      })
+      .exec();
+
     for (const leg1 of leg1Flights) {
       const transitIata = leg1.dest_iata;
       if (destIatas.includes(transitIata)) continue;
+
+      const leg1ArrTime = new Date(leg1.scheduled_arrival);
+      const minDepTime = new Date(leg1ArrTime.getTime() + 45 * 60000);
+      const maxDepTime = new Date(leg1ArrTime.getTime() + 720 * 60000);
 
       const leg2Flights = await this.flightModel
         .find({
           origin_iata: transitIata,
           dest_iata: { $in: destIatas },
-          departure_date: departureDate,
-          scheduled_departure: { $gt: leg1.scheduled_arrival }, // Must depart after leg 1 arrives
+          scheduled_departure: { $gte: minDepTime, $lte: maxDepTime },
           status: { $ne: FlightStatus.CANCELLED },
         })
         .exec();
 
       for (const leg2 of leg2Flights) {
         const layoverMinutes = Math.round(
-          (new Date(leg2.scheduled_departure).getTime() - new Date(leg1.scheduled_arrival).getTime()) / 60000,
+          (new Date(leg2.scheduled_departure).getTime() - leg1ArrTime.getTime()) / 60000,
         );
 
         if (layoverMinutes >= 45 && layoverMinutes <= 720) {
-          const processedLeg1 = await processLeg(leg1);
-          const processedLeg2 = await processLeg(leg2);
-          
-          connectingOptions.push({
-            route_type: 'CONNECTING',
-            transit_airport: transitIata,
-            total_duration_minutes: leg1.duration_minutes + layoverMinutes + leg2.duration_minutes,
-            layover_minutes: layoverMinutes,
-            leg1: processedLeg1,
-            leg2: processedLeg2,
-          });
+          const comboKey = `${leg1._id.toString()}>${leg2._id.toString()}`;
+          if (!seenCombos.has(comboKey)) {
+            seenCombos.add(comboKey);
+            const processedLeg1 = await processLeg(leg1);
+            const processedLeg2 = await processLeg(leg2);
+            
+            connectingOptions.push({
+              route_type: 'CONNECTING',
+              departure_date: processedLeg1.departure_date,
+              transit_airport: transitIata,
+              total_duration_minutes: leg1.duration_minutes + layoverMinutes + leg2.duration_minutes,
+              layover_minutes: layoverMinutes,
+              leg1: processedLeg1,
+              leg2: processedLeg2,
+              legs: [processedLeg1, processedLeg2],
+            });
+          }
         }
       }
     }

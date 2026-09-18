@@ -39,6 +39,10 @@ export enum LegType {
   INBOUND = 'INBOUND',
   CONNECTING_1 = 'CONNECTING_1',
   CONNECTING_2 = 'CONNECTING_2',
+  CONNECTING_3 = 'CONNECTING_3',
+  INBOUND_1 = 'INBOUND_1',
+  INBOUND_2 = 'INBOUND_2',
+  INBOUND_3 = 'INBOUND_3',
 }
 
 export enum CouponStatus {
@@ -99,6 +103,7 @@ export interface PaymentTransaction {
   /** PAYMENT | REFUND | RESCHEDULE_CHARGE | RESCHEDULE_REFUND */
   transaction_type: string;
   amount: number;
+  currency?: string;
   card_masked: string;
   status: string;
   created_at: string;
@@ -144,4 +149,14 @@ export interface CancellationPolicy {
   refund_percentage: number;
   description: string;
   description_en?: string;
+}
+
+export interface CancelBookingResponse {
+  booking: Booking;
+  refund_amount: number;
+  refund_percentage: number;
+  cancellation_number: string;
+  currency: string;
+  refund_card_masked?: string;
+  message: string;
 }

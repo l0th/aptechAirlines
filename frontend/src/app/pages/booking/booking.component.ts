@@ -97,8 +97,18 @@ interface BookingContext {
   connecting?: {
     leg1?: ContextConnectingLeg;
     leg2?: ContextConnectingLeg;
+    legs?: ContextConnectingLeg[];
     transit_airport?: string;
-    layover_minutes?: number;
+    layover_minutes?: number | number[];
+    seats_by_leg?: Record<number, Record<number, string>>;
+  } | null;
+  return_connecting?: {
+    leg1?: ContextConnectingLeg;
+    leg2?: ContextConnectingLeg;
+    legs?: ContextConnectingLeg[];
+    transit_airport?: string;
+    layover_minutes?: number | number[];
+    seats_by_leg?: Record<number, Record<number, string>>;
   } | null;
   origin?: string;
   destination?: string;
@@ -537,6 +547,42 @@ interface BookingContext {
                     <span class="text-slate-500">{{ lang.isVietnamese() ? 'Khởi hành về:' : 'Return departure:' }}</span>
                     <span class="text-slate-800">{{ ret.scheduled_departure | date: 'dd/MM/yyyy HH:mm' }}</span>
                   </div>
+                } @else if (context?.return_connecting; as retConn) {
+                  <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-2">
+                    <div class="font-bold text-navy">{{ lang.isVietnamese() ? 'Chuyến bay về nối chuyến:' : 'Return connecting flight:' }}</div>
+                    
+                    <!-- Leg 1 -->
+                    <div class="border-b border-slate-200/60 pb-1.5 space-y-0.5">
+                      <div class="text-[11px] text-slate-700 flex items-center justify-between">
+                        <div>
+                          {{ lang.isVietnamese() ? 'Chặng về 1: ' : 'Return Leg 1: ' }}<strong class="font-mono text-navy">{{ retConn.leg1?.flight?.flight_number }}</strong>
+                        </div>
+                        <span class="text-slate-400">({{ retConn.leg1?.flight?.origin_iata }} → {{ retConn.leg1?.flight?.dest_iata }})</span>
+                      </div>
+                      <div class="text-[11px] text-slate-500 flex items-center justify-between">
+                        <span>{{ lang.isVietnamese() ? 'Khởi hành: ' : 'Dep: ' }}<strong class="text-slate-700">{{ formatLegLocalTime(retConn.leg1?.flight?.scheduled_departure_local || retConn.leg1?.flight?.departure) }}</strong> ({{ formatAirportGmt(retConn.leg1?.flight?.origin_iata, retConn.leg1?.flight?.origin_time_zone) }})</span>
+                        <span>{{ lang.isVietnamese() ? 'Đến: ' : 'Arr: ' }}<strong class="text-slate-700">{{ formatLegLocalTime(retConn.leg1?.flight?.scheduled_arrival_local || retConn.leg1?.flight?.arrival) }}</strong> ({{ formatAirportGmt(retConn.leg1?.flight?.dest_iata, retConn.leg1?.flight?.dest_time_zone) }})</span>
+                      </div>
+                    </div>
+
+                    <!-- Leg 2 -->
+                    <div class="space-y-0.5">
+                      <div class="text-[11px] text-slate-700 flex items-center justify-between">
+                        <div>
+                          {{ lang.isVietnamese() ? 'Chặng về 2: ' : 'Return Leg 2: ' }}<strong class="font-mono text-navy">{{ retConn.leg2?.flight?.flight_number }}</strong>
+                        </div>
+                        <span class="text-slate-400">({{ retConn.leg2?.flight?.origin_iata }} → {{ retConn.leg2?.flight?.dest_iata }})</span>
+                      </div>
+                      <div class="text-[11px] text-slate-500 flex items-center justify-between">
+                        <span>{{ lang.isVietnamese() ? 'Khởi hành: ' : 'Dep: ' }}<strong class="text-slate-700">{{ formatLegLocalTime(retConn.leg2?.flight?.scheduled_departure_local || retConn.leg2?.flight?.departure) }}</strong> ({{ formatAirportGmt(retConn.leg2?.flight?.origin_iata, retConn.leg2?.flight?.origin_time_zone) }})</span>
+                        <span>{{ lang.isVietnamese() ? 'Đến: ' : 'Arr: ' }}<strong class="text-slate-700">{{ formatLegLocalTime(retConn.leg2?.flight?.scheduled_arrival_local || retConn.leg2?.flight?.arrival) }}</strong> ({{ formatAirportGmt(retConn.leg2?.flight?.dest_iata, retConn.leg2?.flight?.dest_time_zone) }})</span>
+                      </div>
+                    </div>
+
+                    <div class="text-[10px] text-amber-600 font-semibold pt-1 border-t border-slate-200/60">
+                      {{ lang.isVietnamese() ? 'Điểm dừng: ' : 'Transit airport: ' }}{{ retConn.transit_airport }}
+                    </div>
+                  </div>
                 }
 
                 <div class="flex items-center justify-between">
@@ -909,17 +955,26 @@ export class BookingComponent implements OnInit {
     // Backend computes the rule on the EARLIEST departure of all legs.
     const scheduleCandidates: Array<string | undefined> = [];
     if (ctx.mode === 'CONNECTING' || ctx.connecting) {
-      scheduleCandidates.push(
-        ctx.connecting?.leg1?.flight?.departure,
-        ctx.connecting?.leg1?.flight?.scheduled_departure,
-        ctx.connecting?.leg2?.flight?.departure,
-        ctx.connecting?.leg2?.flight?.scheduled_departure,
-      );
+      const connLegs = ctx.connecting?.legs?.length
+        ? ctx.connecting.legs
+        : [ctx.connecting?.leg1, ctx.connecting?.leg2].filter(Boolean) as ContextConnectingLeg[];
+      for (const leg of connLegs) {
+        scheduleCandidates.push(leg.flight?.departure, leg.flight?.scheduled_departure);
+      }
     } else {
       scheduleCandidates.push(
         ctx.flight?.scheduled_departure,
         ctx.return_flight?.scheduled_departure,
       );
+    }
+
+    if (ctx.return_connecting) {
+      const retConnLegs = ctx.return_connecting.legs?.length
+        ? ctx.return_connecting.legs
+        : [ctx.return_connecting.leg1, ctx.return_connecting.leg2].filter(Boolean) as ContextConnectingLeg[];
+      for (const leg of retConnLegs) {
+        scheduleCandidates.push(leg.flight?.departure, leg.flight?.scheduled_departure);
+      }
     }
 
     const toTime = (v?: string): number | null => {
@@ -1058,50 +1113,66 @@ export class BookingComponent implements OnInit {
     const legs: FlightLegSelection[] = [];
 
     if (ctx.mode === 'CONNECTING' || ctx.connecting) {
-      const leg1 = ctx.connecting?.leg1;
-      const leg2 = ctx.connecting?.leg2;
-
-      const leg1FlightId = leg1?.flight?.flight_id || '';
-      const leg1InventoryId = leg1?.inventory?._id || '';
-      if (leg1FlightId && leg1InventoryId) {
+      const connectingLegs = ctx.connecting?.legs?.length
+        ? ctx.connecting.legs
+        : [ctx.connecting?.leg1, ctx.connecting?.leg2].filter(Boolean) as ContextConnectingLeg[];
+      connectingLegs.forEach((leg, index) => {
+        const flightId = leg.flight?.flight_id || '';
+        const inventoryId = leg.inventory?._id || '';
+        if (flightId && inventoryId) {
+          legs.push({
+            flight_id: flightId,
+            inventory_id: inventoryId,
+            leg_type: `CONNECTING_${index + 1}`,
+          });
+        }
+      });
+    } else {
+      const outboundFlightId = ctx.flight?.flight_id || '';
+      const outboundInventoryId = ctx.flight?.inventory_id || '';
+      if (outboundFlightId && outboundInventoryId) {
         legs.push({
-          flight_id: leg1FlightId,
-          inventory_id: leg1InventoryId,
-          leg_type: LegType.CONNECTING_1,
+          flight_id: outboundFlightId,
+          inventory_id: outboundInventoryId,
+          leg_type: LegType.OUTBOUND,
         });
       }
+    }
 
-      const leg2FlightId = leg2?.flight?.flight_id || '';
-      const leg2InventoryId = leg2?.inventory?._id || '';
-      if (leg2FlightId && leg2InventoryId) {
+    if (ctx.return_connecting?.legs?.length) {
+      ctx.return_connecting.legs.forEach((leg, index) => {
+        const flightId = leg.flight?.flight_id || '';
+        const inventoryId = leg.inventory?._id || '';
+        if (flightId && inventoryId) {
+          legs.push({
+            flight_id: flightId,
+            inventory_id: inventoryId,
+            leg_type: `INBOUND_${index + 1}`,
+          });
+        }
+      });
+    } else if (ctx.return_connecting?.leg1 && ctx.return_connecting?.leg2) {
+      [ctx.return_connecting.leg1, ctx.return_connecting.leg2].forEach((leg, index) => {
+        const flightId = leg.flight?.flight_id || '';
+        const inventoryId = leg.inventory?._id || '';
+        if (flightId && inventoryId) {
+          legs.push({
+            flight_id: flightId,
+            inventory_id: inventoryId,
+            leg_type: `INBOUND_${index + 1}`,
+          });
+        }
+      });
+    } else {
+      const returnFlightId = ctx.return_flight?.flight_id || '';
+      const returnInventoryId = ctx.return_flight?.inventory_id || '';
+      if (returnFlightId && returnInventoryId) {
         legs.push({
-          flight_id: leg2FlightId,
-          inventory_id: leg2InventoryId,
-          leg_type: LegType.CONNECTING_2,
+          flight_id: returnFlightId,
+          inventory_id: returnInventoryId,
+          leg_type: LegType.INBOUND,
         });
       }
-
-      return legs;
-    }
-
-    const outboundFlightId = ctx.flight?.flight_id || '';
-    const outboundInventoryId = ctx.flight?.inventory_id || '';
-    if (outboundFlightId && outboundInventoryId) {
-      legs.push({
-        flight_id: outboundFlightId,
-        inventory_id: outboundInventoryId,
-        leg_type: LegType.OUTBOUND,
-      });
-    }
-
-    const returnFlightId = ctx.return_flight?.flight_id || '';
-    const returnInventoryId = ctx.return_flight?.inventory_id || '';
-    if (returnFlightId && returnInventoryId) {
-      legs.push({
-        flight_id: returnFlightId,
-        inventory_id: returnInventoryId,
-        leg_type: LegType.INBOUND,
-      });
     }
 
     return legs;
@@ -1110,8 +1181,8 @@ export class BookingComponent implements OnInit {
   private resolveBookingType(): BookingType {
     const ctx = this.context;
     if (!ctx) return BookingType.ONE_WAY;
+    if (ctx.return_flight?.flight_id || ctx.return_connecting) return BookingType.ROUND_TRIP;
     if (ctx.mode === 'CONNECTING' || ctx.connecting) return BookingType.CONNECTING;
-    if (ctx.return_flight?.flight_id) return BookingType.ROUND_TRIP;
     return BookingType.ONE_WAY;
   }
 
@@ -1124,8 +1195,9 @@ export class BookingComponent implements OnInit {
    */
   private buildPassengerPayload(): BookingPassengerPayload[] {
     const ctx = this.context;
-    const isConnecting = ctx?.mode === 'CONNECTING' || !!ctx?.connecting;
-    const isRoundTrip = !isConnecting && !!(ctx?.return_flight?.flight_id || ctx?.return_flight);
+    const bookingType = this.resolveBookingType();
+    const hasOutboundConnecting = !!(ctx?.connecting);
+    const isRoundTrip = bookingType === BookingType.ROUND_TRIP;
 
     return this.passengers.map((p, i) => {
       const payload: BookingPassengerPayload = {
@@ -1150,14 +1222,6 @@ export class BookingComponent implements OnInit {
       // Return leg seat: from passenger model or context.return_seats[i] (handles missing return_seats safely)
       const returnSeat = (p.return_seat_code || ctx?.return_seats?.[i] || '').trim().toUpperCase();
 
-      // Optional connecting leg 2 seat when available from context
-      const leg2Seat = (
-        (ctx as any)?.connecting_seats?.[i] ||
-        (ctx as any)?.leg2_seats?.[i] ||
-        (ctx as any)?.connecting?.leg2_seats?.[i] ||
-        ''
-      ).trim().toUpperCase();
-
       // Backward compatibility: single seat_code for the first leg
       if (firstLegSeat) {
         payload.seat_code = firstLegSeat;
@@ -1165,15 +1229,34 @@ export class BookingComponent implements OnInit {
 
       // Per-leg seat mapping with valid leg types: omit keys with empty values
       const seatCodes: Record<string, string> = {};
-      if (isConnecting) {
-        if (firstLegSeat) seatCodes[LegType.CONNECTING_1] = firstLegSeat;
-        if (leg2Seat) seatCodes[LegType.CONNECTING_2] = leg2Seat;
-      } else if (isRoundTrip) {
-        if (firstLegSeat) seatCodes[LegType.OUTBOUND] = firstLegSeat;
-        if (returnSeat) seatCodes[LegType.INBOUND] = returnSeat;
+      if (hasOutboundConnecting) {
+        const seatsByLeg = ctx?.connecting?.seats_by_leg || {};
+        const connectingLegs = ctx?.connecting?.legs?.length
+          ? ctx.connecting.legs
+          : [ctx?.connecting?.leg1, ctx?.connecting?.leg2].filter(Boolean);
+        connectingLegs.forEach((_leg, index) => {
+          const legacySeat = index === 1
+            ? ((ctx as any)?.connecting_seats?.[i] || (ctx as any)?.leg2_seats?.[i] || '')
+            : '';
+          const seat = (seatsByLeg[index]?.[i] || (index === 0 ? firstLegSeat : legacySeat)).trim().toUpperCase();
+          if (seat) seatCodes[`CONNECTING_${index + 1}`] = seat;
+        });
       } else {
-        // ONE_WAY direct
+        // DIRECT outbound
         if (firstLegSeat) seatCodes[LegType.OUTBOUND] = firstLegSeat;
+      }
+
+      if (ctx?.return_connecting) {
+        const retSeatsByLeg = ctx.return_connecting.seats_by_leg || {};
+        const returnConnLegs = ctx.return_connecting.legs?.length
+          ? ctx.return_connecting.legs
+          : [ctx.return_connecting.leg1, ctx.return_connecting.leg2].filter(Boolean);
+        returnConnLegs.forEach((_leg, index) => {
+          const seat = (retSeatsByLeg[index]?.[i] || '').trim().toUpperCase();
+          if (seat) seatCodes[`INBOUND_${index + 1}`] = seat;
+        });
+      } else if (isRoundTrip && returnSeat) {
+        seatCodes[LegType.INBOUND] = returnSeat;
       }
 
       if (Object.keys(seatCodes).length > 0) {

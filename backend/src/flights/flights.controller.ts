@@ -78,15 +78,8 @@ export class FlightsController {
 
   @Get('booking-window')
   async getBookingWindow() {
-    const { maxAdvanceBookingDays } = await import('../common/pricing.util');
-    const maxDays = maxAdvanceBookingDays();
-    const now = new Date();
-    const maxDate = new Date(now.getTime() + maxDays * 86400000);
-    return {
-      max_advance_days: maxDays,
-      min_date: now.toISOString().split('T')[0],
-      max_date: maxDate.toISOString().split('T')[0],
-    };
+    const { getBookingWindowLimits } = await import('../common/pricing.util');
+    return getBookingWindowLimits();
   }
 
   @Get(':id')

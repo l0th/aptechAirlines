@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { tap } from 'rxjs/operators';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { AuthResponse, User, UserRole } from '../models/user.model';
+import { AuthResponse, RegisterPayload, User, UserRole } from '../models/user.model';
 
 @Injectable({
   providedIn: 'root',
@@ -43,7 +43,7 @@ export class AuthService {
     );
   }
 
-  register(userData: Partial<User> & { password: string }): Observable<AuthResponse> {
+  register(userData: RegisterPayload): Observable<AuthResponse> {
     return this.api.register(userData).pipe(
       tap((res) => {
         this.setSession(res.access_token, res.user);

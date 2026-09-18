@@ -104,6 +104,7 @@ export interface ConnectingLeg {
   flight_number: string;
   origin_iata: string;
   dest_iata: string;
+  departure_date?: string;
   departure: string;
   arrival: string;
   inventories: FlightInventory[];
@@ -129,12 +130,15 @@ export interface BookingWindowResponse {
  * (backend/src/flights/flights.service.ts - findConnectingRoutes).
  */
 export interface ConnectingRouteOption {
-  route_type: 'CONNECTING';
+  departure_date?: string;
+  route_type: 'CONNECTING' | 'ONE_STOP' | 'TWO_STOP';
   transit_airport: string;
+  transit_airports?: string[];
   total_duration_minutes: number;
-  layover_minutes: number;
+  layover_minutes: number | number[];
   leg1: ConnectingLeg;
   leg2: ConnectingLeg;
+  legs: ConnectingLeg[];
 }
 
 export interface FlightSearchResult {
@@ -162,6 +166,7 @@ export interface FlightSearchResult {
   onward_flights: FormattedFlightResult[];
   return_flights?: FormattedFlightResult[];
   connecting_routes: ConnectingRouteOption[];
+  return_connecting_routes?: ConnectingRouteOption[];
 }
 
 export interface SeatItem {

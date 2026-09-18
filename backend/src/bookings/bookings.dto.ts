@@ -97,15 +97,16 @@ export class RescheduleTicketDto {
   @IsNotEmpty()
   confirmation_number: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  new_flight_id: string;
+  new_flight_id?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  new_inventory_id: string;
+  new_inventory_id?: string;
 
-  // Optional: reschedule the INBOUND leg of a ROUND_TRIP booking as well (Req 3.6.2.2)
   @IsOptional()
   @IsString()
   new_return_flight_id?: string;
@@ -113,6 +114,20 @@ export class RescheduleTicketDto {
   @IsOptional()
   @IsString()
   new_return_inventory_id?: string;
+
+  // Full itinerary for CONNECTING reschedule, or outbound-direction legs for mixed ROUND_TRIP.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FlightLegSelectionDto)
+  new_legs?: FlightLegSelectionDto[];
+
+  // Return-direction legs for ROUND_TRIP with connecting return.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FlightLegSelectionDto)
+  new_return_legs?: FlightLegSelectionDto[];
 
   @IsOptional()
   @IsString()

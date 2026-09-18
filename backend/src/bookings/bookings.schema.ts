@@ -91,6 +91,9 @@ export class PaymentTransaction {
   @Prop({ required: true })
   card_masked: string;
 
+  @Prop({ default: 'VND' })
+  currency?: string;
+
   @Prop({ default: 'SUCCESS' })
   status: string;
 

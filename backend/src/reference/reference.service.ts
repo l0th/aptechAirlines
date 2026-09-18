@@ -1,13 +1,39 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Country, CountryDocument, City, CityDocument, RouteRef, RouteRefDocument } from './reference.schema';
+import { Country, CountryDocument, City, CityDocument, RouteRef, RouteRefDocument, RouteSyncState, RouteSyncStateDocument } from './reference.schema';
 import { Airport, AirportDocument } from '../airports/airports.schema';
 import { AirportsService } from '../airports/airports.service';
 
 const VI_NAMES: Record<string, string> = {
   VN: 'Việt Nam', SG: 'Singapore', TH: 'Thái Lan', MY: 'Malaysia', JP: 'Nhật Bản', KR: 'Hàn Quốc', HK: 'Hồng Kông', CN: 'Trung Quốc', TW: 'Đài Loan', PH: 'Philippines', ID: 'Indonesia', IN: 'Ấn Độ', AE: 'Các Tiểu vương quốc Ả Rập Thống nhất', QA: 'Qatar', GB: 'Vương quốc Anh', FR: 'Pháp', DE: 'Đức', AU: 'Úc', US: 'Hoa Kỳ', KH: 'Campuchia', LA: 'Lào', MM: 'Myanmar', BN: 'Brunei', NZ: 'New Zealand', CA: 'Canada'
 };
+
+// Deterministic identity generator function.
+// Why no fake midnight 00:00 or invented dates are used:
+// NOTIME, NODAYS preserve honesty for coarse route edges without complete schedules.
+export function computeSourceKey(item: any): string {
+  const carrier = (item.airline_iata || item.airline_icao || 'UNK').trim().toUpperCase();
+  const flight = (item.flight_iata || (item.flight_number ? `${item.airline_iata || ''}${item.flight_number}` : 'NOFLT')).trim().toUpperCase();
+  const dep = (item.dep_iata || 'UNK').trim().toUpperCase();
+  const arr = (item.arr_iata || 'UNK').trim().toUpperCase();
+  const time = item.dep_time_utc ? `T:${item.dep_time_utc.trim()}` : (item.dep_time ? `L:${item.dep_time.trim()}` : 'NOTIME');
+  const days = Array.isArray(item.days) && item.days.length > 0 ? `D:${[...item.days].map((d: string) => d.trim().toLowerCase()).sort().join(',')}` : 'NODAYS';
+  const cs = item.cs_flight_iata ? `_CS:${item.cs_flight_iata.trim().toUpperCase()}` : '';
+  return `AIRLABS_${carrier}_${flight}_${dep}_${arr}_${time}_${days}${cs}`;
+}
+
+export interface ExpandedLocation {
+  iata_codes: string[];
+  matched_kind: 'airport' | 'city' | 'country' | 'iata_list' | 'none';
+  label: string;
+  using_nearest_airport: boolean;
+  nearest_suggestion?: {
+    airport: Airport | any;
+    distance_km: number;
+    for_city: string;
+  };
+}
 
 @Injectable()
 export class ReferenceService {
@@ -16,6 +42,7 @@ export class ReferenceService {
     @InjectModel(City.name) private cityModel: Model<CityDocument>,
     @InjectModel(RouteRef.name) private routeRefModel: Model<RouteRefDocument>,
     @InjectModel(Airport.name) private airportModel: Model<AirportDocument>,
+    @InjectModel(RouteSyncState.name) private routeSyncStateModel: Model<RouteSyncStateDocument>,
     private readonly airportsService: AirportsService,
   ) {}
 
@@ -93,52 +120,376 @@ export class ReferenceService {
   }
 
   // Lấy mạng đường bay thực tế xuất phát từ 1 sân bay (phân trang tối đa 5 trang để thu thập đầy đủ)
-  async syncRoutesForAirport(depIata: string, limit = 200, offset = 0) {
+  async syncRoutesForAirport(depIata: string, limit = 200, explicitOffset?: number) {
     const apiKey = this.getApiKey();
     const cleanDep = depIata?.trim().toUpperCase();
-    if (!cleanDep) return { dep_iata: depIata, updated: 0, pages: 0 };
+    if (!cleanDep) return { dep_iata: depIata, updated: 0, records_seen: 0, pages: 0, truncated: false, complete: false };
 
-    let currentOffset = offset;
-    let pageCount = 0;
+    // 1. Determine generation and starting offset
+    const existingSyncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
+
+    let generation: string;
+    let currentOffset: number;
+    let generationStartedAtZero: boolean;
+    let totalSeen = 0;
     let totalUpdated = 0;
 
-    // Giới hạn 5 trang để không làm tràn hạn ngạch request tới AirLabs API
-    while (pageCount < 5) {
-      pageCount++;
-      const res = await fetch(`https://airlabs.co/api/v9/routes?dep_iata=${cleanDep}&limit=${limit}&offset=${currentOffset}&api_key=${apiKey}`);
-      if (!res.ok) throw new BadRequestException(`Lỗi khi gọi AirLabs API: HTTP mã ${res.status}`);
-      const data = await res.json();
-      if (!data.response || data.response.length === 0) break;
-
-      const items: any[] = data.response;
-      for (const item of items) {
-        if (!item.airline_iata || !item.dep_iata || !item.arr_iata) continue;
-        try {
-          await this.routeRefModel.findOneAndUpdate(
-            { airline_iata: item.airline_iata, dep_iata: item.dep_iata, arr_iata: item.arr_iata },
-            {
-              airline_iata: item.airline_iata,
-              airline_icao: item.airline_icao,
-              dep_iata: item.dep_iata,
-              arr_iata: item.arr_iata,
-              aircraft_icao: item.aircraft_icao,
-            },
-            { upsert: true, new: true },
-          ).exec();
-          totalUpdated++;
-        } catch (e) {
-          // Bỏ qua nếu có trùng lặp bản ghi
+    if (explicitOffset !== undefined) {
+      if (explicitOffset > 0) {
+        // Check if this explicit offset matches an in-progress/truncated generation to resume
+        if (
+          existingSyncState &&
+          !existingSyncState.complete &&
+          existingSyncState.truncated &&
+          existingSyncState.next_offset === explicitOffset &&
+          existingSyncState.sync_generation
+        ) {
+          generation = existingSyncState.sync_generation;
+          currentOffset = explicitOffset;
+          generationStartedAtZero = existingSyncState.generation_started_at_offset_zero ?? false;
+          totalSeen = existingSyncState.records_seen ?? 0;
+          totalUpdated = existingSyncState.records_upserted ?? 0;
+        } else {
+          // Arbitrary offset call: NOT a full snapshot from 0
+          generation = `adhoc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          currentOffset = explicitOffset;
+          generationStartedAtZero = false;
         }
+      } else {
+        // explicitOffset === 0 -> fresh full scan
+        generation = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        currentOffset = 0;
+        generationStartedAtZero = true;
       }
-
-      // Dừng nếu số bản ghi trả về nhỏ hơn limit trang
-      if (items.length < limit) {
-        break;
+    } else {
+      // explicitOffset is undefined: check if we should resume a truncated sync
+      if (
+        existingSyncState &&
+        !existingSyncState.complete &&
+        existingSyncState.truncated &&
+        typeof existingSyncState.next_offset === 'number' &&
+        existingSyncState.sync_generation
+      ) {
+        generation = existingSyncState.sync_generation;
+        currentOffset = existingSyncState.next_offset;
+        generationStartedAtZero = existingSyncState.generation_started_at_offset_zero ?? false;
+        totalSeen = existingSyncState.records_seen ?? 0;
+        totalUpdated = existingSyncState.records_upserted ?? 0;
+      } else {
+        // Start fresh from 0
+        generation = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        currentOffset = 0;
+        generationStartedAtZero = true;
       }
-      currentOffset += items.length;
     }
 
-    return { dep_iata: cleanDep, updated: totalUpdated, pages: pageCount };
+    // 2. Mark refresh incomplete BEFORE partial mutation
+    await this.routeSyncStateModel.findOneAndUpdate(
+      { dep_iata: cleanDep },
+      {
+        dep_iata: cleanDep,
+        source: 'airlabs',
+        sync_generation: generation,
+        generation_started_at_offset_zero: generationStartedAtZero,
+        next_offset: currentOffset,
+        last_synced_at: new Date(),
+        complete: false,
+        truncated: false,
+        records_seen: totalSeen,
+        records_upserted: totalUpdated,
+        last_error: undefined,
+      },
+      { upsert: true, new: true },
+    ).exec();
+
+    let pageCount = 0;
+    let truncated = false;
+    let authoritativeEnd = false;
+    let pageStartOffset = currentOffset;
+
+    try {
+      // Giới hạn 5 trang để không làm tràn hạn ngạch request tới AirLabs API
+      while (pageCount < 5) {
+        pageCount++;
+        pageStartOffset = currentOffset;
+
+        const res = await fetch(`https://airlabs.co/api/v9/routes?dep_iata=${cleanDep}&limit=${limit}&offset=${currentOffset}&api_key=${apiKey}`);
+        
+        if (res.status === 429) {
+          throw new BadRequestException('AirLabs API Rate Limit (429): Quota exceeded or too many requests.');
+        }
+        if (!res.ok) {
+          throw new BadRequestException(`Lỗi khi gọi AirLabs API: HTTP mã ${res.status}`);
+        }
+        
+        const data = await res.json();
+        const items: any[] = Array.isArray(data.response) ? data.response : [];
+
+        const providerHasMore = data.request?.has_more;
+        let continuePagination = false;
+
+        if (typeof providerHasMore === 'boolean') {
+          if (providerHasMore === false) {
+            authoritativeEnd = true;
+            continuePagination = false;
+          } else {
+            authoritativeEnd = false;
+            continuePagination = true;
+          }
+        } else {
+          // request.has_more is missing/undefined/non-boolean
+          authoritativeEnd = false;
+          // Conservative fallback only to decide whether another fetch is worth attempting
+          continuePagination = items.length >= limit;
+        }
+
+        for (const item of items) {
+          totalSeen++;
+          if (!item.airline_iata || !item.dep_iata || !item.arr_iata) continue;
+          
+          const source_key = computeSourceKey(item);
+          const has_schedule = !!(item.dep_time || item.dep_time_utc) && Array.isArray(item.days) && item.days.length > 0;
+          
+          try {
+            await this.routeRefModel.findOneAndUpdate(
+              { source_key },
+              {
+                source_key,
+                sync_generation: generation,
+                airline_iata: item.airline_iata.trim().toUpperCase(),
+                airline_icao: item.airline_icao?.trim().toUpperCase(),
+                flight_number: item.flight_number?.toString().trim(),
+                flight_iata: item.flight_iata?.trim().toUpperCase(),
+                flight_icao: item.flight_icao?.trim().toUpperCase(),
+                cs_airline_iata: item.cs_airline_iata?.trim().toUpperCase(),
+                cs_flight_iata: item.cs_flight_iata?.trim().toUpperCase(),
+                cs_flight_number: item.cs_flight_number?.toString().trim(),
+                dep_iata: item.dep_iata.trim().toUpperCase(),
+                dep_icao: item.dep_icao?.trim().toUpperCase(),
+                dep_time: item.dep_time?.trim(),
+                dep_time_utc: item.dep_time_utc?.trim(),
+                dep_terminals: Array.isArray(item.dep_terminals) ? item.dep_terminals : undefined,
+                arr_iata: item.arr_iata.trim().toUpperCase(),
+                arr_icao: item.arr_icao?.trim().toUpperCase(),
+                arr_time: item.arr_time?.trim(),
+                arr_time_utc: item.arr_time_utc?.trim(),
+                arr_terminals: Array.isArray(item.arr_terminals) ? item.arr_terminals : undefined,
+                duration: typeof item.duration === 'number' ? item.duration : undefined,
+                days: Array.isArray(item.days) ? item.days.map((d: string) => d.trim().toLowerCase()) : undefined,
+                aircraft_icao: item.aircraft_icao?.trim().toUpperCase(),
+                has_schedule,
+                source: 'airlabs',
+                synced_at: new Date(),
+                airlabs_updated: item.updated,
+              },
+              { upsert: true, new: true },
+            ).exec();
+            totalUpdated++;
+          } catch (e: any) {
+            if (e.code === 11000) {
+              // Only treat as idempotent collision if the duplicate key error is explicitly on source_key
+              const isSourceKeyConflict =
+                (e.keyPattern && Object.keys(e.keyPattern).length === 1 && e.keyPattern.source_key !== undefined) ||
+                (typeof e.message === 'string' &&
+                  (e.message.includes('index: source_key_') || e.message.includes('dup key: { source_key:')));
+
+              if (isSourceKeyConflict) {
+                // Idempotent race: another concurrent sync upserted the same deterministic source_key.
+                // Retry update without upsert to ensure the record contains the latest fields.
+                await this.routeRefModel.findOneAndUpdate(
+                  { source_key },
+                  {
+                    $set: {
+                      airline_iata: item.airline_iata.trim().toUpperCase(),
+                      airline_icao: item.airline_icao?.trim().toUpperCase(),
+                      flight_number: item.flight_number?.toString().trim(),
+                      flight_iata: item.flight_iata?.trim().toUpperCase(),
+                      flight_icao: item.flight_icao?.trim().toUpperCase(),
+                      cs_airline_iata: item.cs_airline_iata?.trim().toUpperCase(),
+                      cs_flight_iata: item.cs_flight_iata?.trim().toUpperCase(),
+                      cs_flight_number: item.cs_flight_number?.toString().trim(),
+                      dep_iata: item.dep_iata.trim().toUpperCase(),
+                      dep_icao: item.dep_icao?.trim().toUpperCase(),
+                      dep_time: item.dep_time?.trim(),
+                      dep_time_utc: item.dep_time_utc?.trim(),
+                      dep_terminals: Array.isArray(item.dep_terminals) ? item.dep_terminals : undefined,
+                      arr_iata: item.arr_iata.trim().toUpperCase(),
+                      arr_icao: item.arr_icao?.trim().toUpperCase(),
+                      arr_time: item.arr_time?.trim(),
+                      arr_time_utc: item.arr_time_utc?.trim(),
+                      arr_terminals: Array.isArray(item.arr_terminals) ? item.arr_terminals : undefined,
+                      duration: typeof item.duration === 'number' ? item.duration : undefined,
+                      days: Array.isArray(item.days) ? item.days.map((d: string) => d.trim().toLowerCase()) : undefined,
+                      aircraft_icao: item.aircraft_icao?.trim().toUpperCase(),
+                      has_schedule,
+                      source: 'airlabs',
+                      synced_at: new Date(),
+                      airlabs_updated: item.updated,
+                    },
+                  },
+                  { new: true },
+                ).exec();
+                totalUpdated++;
+              } else {
+                // Duplicate key collision on an unexpected index (e.g. obsolete unique index).
+                // Must remain observable!
+                throw e;
+              }
+            } else {
+              throw e;
+            }
+          }
+        }
+
+        currentOffset += items.length;
+
+        if (authoritativeEnd || items.length === 0 || !continuePagination) {
+          break;
+        }
+
+        if (pageCount >= 5 && continuePagination) {
+          truncated = true;
+          break;
+        }
+      }
+    } catch (err: any) {
+      // Record failure state without marking complete
+      // Persist offset at the beginning of the failed page so no records are skipped on retry
+      await this.routeSyncStateModel.findOneAndUpdate(
+        { dep_iata: cleanDep },
+        {
+          dep_iata: cleanDep,
+          source: 'airlabs',
+          sync_generation: generation,
+          generation_started_at_offset_zero: generationStartedAtZero,
+          next_offset: pageStartOffset,
+          last_synced_at: new Date(),
+          complete: false,
+          truncated: true,
+          records_seen: totalSeen,
+          records_upserted: totalUpdated,
+          last_error: err.message,
+        },
+        { upsert: true, new: true },
+      ).exec();
+
+      throw err;
+    }
+
+    const isComplete = !truncated && authoritativeEnd && generationStartedAtZero;
+
+    // Prune obsolete AirLabs routes only on complete, successful, non-truncated sync of a full generation starting at 0
+    if (isComplete && pageCount > 0) {
+      await this.routeRefModel.deleteMany({
+        source: 'airlabs',
+        dep_iata: cleanDep,
+        sync_generation: { $ne: generation },
+      }).exec();
+    }
+
+    // Persist finalized sync state
+    await this.routeSyncStateModel.findOneAndUpdate(
+      { dep_iata: cleanDep },
+      {
+        dep_iata: cleanDep,
+        source: 'airlabs',
+        sync_generation: generation,
+        generation_started_at_offset_zero: generationStartedAtZero,
+        next_offset: isComplete ? 0 : currentOffset,
+        last_synced_at: new Date(),
+        complete: isComplete,
+        truncated,
+        records_seen: totalSeen,
+        records_upserted: totalUpdated,
+        last_error: undefined,
+      },
+      { upsert: true, new: true },
+    ).exec();
+
+    return {
+      dep_iata: cleanDep,
+      updated: totalUpdated,
+      records_seen: totalSeen,
+      pages: pageCount,
+      truncated,
+      complete: isComplete,
+      sync_generation: generation,
+      next_offset: isComplete ? 0 : currentOffset,
+    };
+  }
+
+  async ensureRoutesForAirport(depIata: string, maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+    const cleanDep = depIata?.trim().toUpperCase();
+    if (!cleanDep) return { from_cache: true, stale: false, synced_at: null, complete: false, truncated: false, count: 0, routes: [] };
+
+    const routes = await this.routeRefModel.find({ dep_iata: cleanDep }).exec();
+    const syncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
+    const latestSyncedAt = syncState?.last_synced_at || routes.reduce((latest: Date | null, r: any) => !latest || (r.synced_at && new Date(r.synced_at) > latest) ? new Date(r.synced_at) : latest, null);
+
+    const isFresh = Boolean(latestSyncedAt && (Date.now() - new Date(latestSyncedAt).getTime()) < maxAgeMs);
+    const isComplete = Boolean(syncState?.complete && !syncState?.truncated);
+
+    // Case 1: Fresh AND complete cache exists
+    if (routes.length > 0 && isFresh && isComplete) {
+      return {
+        from_cache: true,
+        stale: false,
+        synced_at: latestSyncedAt,
+        complete: true,
+        truncated: false,
+        count: routes.length,
+        routes,
+      };
+    }
+
+    // Case 2: Cache completely missing
+    if (routes.length === 0) {
+      try {
+        await this.syncRoutesForAirport(cleanDep);
+      } catch (err: any) {
+        throw new BadRequestException(`Không thể tải dữ liệu tuyến bay cho sân bay ${cleanDep} từ AirLabs: ${err.message}`);
+      }
+      const freshRoutes = await this.routeRefModel.find({ dep_iata: cleanDep }).exec();
+      const freshSyncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
+      return {
+        from_cache: false,
+        stale: false,
+        synced_at: freshSyncState?.last_synced_at || new Date(),
+        complete: freshSyncState?.complete ?? false,
+        truncated: freshSyncState?.truncated ?? false,
+        count: freshRoutes.length,
+        routes: freshRoutes,
+      };
+    }
+
+    // Case 3: Cache exists but is stale OR incomplete/truncated -> attempt refresh / resume
+    try {
+      await this.syncRoutesForAirport(cleanDep);
+      const refreshedRoutes = await this.routeRefModel.find({ dep_iata: cleanDep }).exec();
+      const refreshedSyncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
+      return {
+        from_cache: false,
+        stale: false,
+        synced_at: refreshedSyncState?.last_synced_at || new Date(),
+        complete: refreshedSyncState?.complete ?? false,
+        truncated: refreshedSyncState?.truncated ?? false,
+        count: refreshedRoutes.length,
+        routes: refreshedRoutes,
+      };
+    } catch (err: any) {
+      // Re-read latest syncState to get any updated last_error / incomplete status
+      const updatedSyncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
+      return {
+        from_cache: true,
+        stale: true,
+        synced_at: updatedSyncState?.last_synced_at || latestSyncedAt,
+        complete: updatedSyncState?.complete ?? false,
+        truncated: updatedSyncState?.truncated ?? true,
+        count: routes.length,
+        routes,
+        refresh_error: err.message,
+      };
+    }
   }
 
   async syncRoutesForAllOurAirports() {
@@ -257,14 +608,16 @@ export class ReferenceService {
     };
   }
 
-  // Mở rộng location thành tập hợp mã IATA
-  async expandLocation(token: string): Promise<{ iata_codes: string[], matched_kind: 'airport'|'city'|'country'|'iata_list'|'none', label: string }> {
-    const cleanToken = token.trim();
-    if (!cleanToken) return { iata_codes: [], matched_kind: 'none', label: '' };
+  // Mở rộng location thành tập hợp mã IATA kèm thông tin gợi ý sân bay lân cận
+  async expandLocation(token: string): Promise<ExpandedLocation> {
+    const cleanToken = token ? token.trim() : '';
+    if (!cleanToken) {
+      return { iata_codes: [], matched_kind: 'none', label: '', using_nearest_airport: false };
+    }
 
     if (cleanToken.includes(',')) {
       const list = cleanToken.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
-      return { iata_codes: list, matched_kind: 'iata_list', label: list.join(', ') };
+      return { iata_codes: list, matched_kind: 'iata_list', label: list.join(', '), using_nearest_airport: false };
     }
 
     const upperToken = cleanToken.toUpperCase();
@@ -273,10 +626,44 @@ export class ReferenceService {
     const exactAirport = await this.airportModel.findOne({ iata_code: upperToken }).exec();
     if (exactAirport) {
       if (exactAirport.is_serviced_directly) {
-        return { iata_codes: [exactAirport.iata_code], matched_kind: 'airport', label: exactAirport.airport_name };
-      } else if (exactAirport.nearest_airport_code) {
-        return { iata_codes: [exactAirport.nearest_airport_code], matched_kind: 'airport', label: `Gần ${exactAirport.city_name}` };
+        return {
+          iata_codes: [exactAirport.iata_code],
+          matched_kind: 'airport',
+          label: exactAirport.airport_name,
+          using_nearest_airport: false,
+        };
+      } else {
+        const distance = exactAirport.distance_to_nearest_km;
+        const hasValidDistance = typeof distance === 'number' && Number.isFinite(distance);
+
+        if (exactAirport.nearest_airport_code && hasValidDistance && exactAirport.city_name) {
+          const nearest = await this.airportModel
+            .findOne({
+              iata_code: exactAirport.nearest_airport_code.toUpperCase(),
+              is_serviced_directly: true,
+            })
+            .exec();
+          if (nearest && nearest.is_serviced_directly === true) {
+            return {
+              iata_codes: [nearest.iata_code],
+              matched_kind: 'airport',
+              label: `Gần ${exactAirport.city_name}`,
+              using_nearest_airport: true,
+              nearest_suggestion: {
+                airport: nearest,
+                distance_km: distance,
+                for_city: exactAirport.city_name,
+              },
+            };
+          }
+        }
       }
+      return {
+        iata_codes: [],
+        matched_kind: 'none',
+        label: 'Không tìm thấy',
+        using_nearest_airport: false,
+      };
     }
 
     const exactCountry = await this.countryModel.findOne({
@@ -285,7 +672,14 @@ export class ReferenceService {
     if (exactCountry) {
       const apts = await this.airportModel.find({ country_code: exactCountry.code, is_serviced_directly: true }).exec();
       const codes = apts.map(a => a.iata_code);
-      return { iata_codes: codes, matched_kind: 'country', label: `Mọi sân bay ${exactCountry.name_vi || exactCountry.name}` };
+      if (codes.length > 0) {
+        return {
+          iata_codes: codes,
+          matched_kind: 'country',
+          label: `Mọi sân bay ${exactCountry.name_vi || exactCountry.name}`,
+          using_nearest_airport: false,
+        };
+      }
     }
 
     const exactCity = await this.cityModel.findOne({
@@ -297,26 +691,53 @@ export class ReferenceService {
         $or: [{ city_code: exactCity.city_code }, { city_name: regex }]
       }).exec();
       const codes = apts.map(a => a.iata_code);
-      return { iata_codes: codes, matched_kind: 'city', label: `Mọi sân bay ${exactCity.name_vi || exactCity.name}` };
+      if (codes.length > 0) {
+        return {
+          iata_codes: codes,
+          matched_kind: 'city',
+          label: `Mọi sân bay ${exactCity.name_vi || exactCity.name}`,
+          using_nearest_airport: false,
+        };
+      }
     }
 
     const resolved = await this.airportsService.resolveCity(cleanToken);
     let iata_codes: string[] = [];
     let label = '';
-    
-    if (resolved.nearestSuggestion) {
-      iata_codes.push(resolved.nearestSuggestion.airport.iata_code);
-      label = `Gần ${resolved.nearestSuggestion.for_city}`;
+    let using_nearest_airport = false;
+    let nearest_suggestion: { airport: Airport | any; distance_km: number; for_city: string } | undefined = undefined;
+
+    const nearestSug = resolved.nearestSuggestion;
+    const hasValidSugDistance = typeof nearestSug?.distance_km === 'number' && Number.isFinite(nearestSug.distance_km);
+
+    if (
+      nearestSug &&
+      nearestSug.airport?.iata_code &&
+      nearestSug.airport?.is_serviced_directly === true &&
+      hasValidSugDistance &&
+      nearestSug.for_city
+    ) {
+      iata_codes.push(nearestSug.airport.iata_code);
+      label = `Gần ${nearestSug.for_city}`;
+      using_nearest_airport = true;
+      nearest_suggestion = nearestSug;
     } else if (resolved.exactMatches && resolved.exactMatches.length > 0) {
       iata_codes = resolved.exactMatches.map(a => a.iata_code);
       label = resolved.exactMatches[0].city_name;
+      using_nearest_airport = false;
     }
 
     if (iata_codes.length > 0) {
-      return { iata_codes, matched_kind: 'airport', label };
+      return {
+        iata_codes,
+        matched_kind: 'airport',
+        label,
+        using_nearest_airport,
+        ...(nearest_suggestion ? { nearest_suggestion } : {}),
+      };
     }
 
-    return { iata_codes: [], matched_kind: 'none', label: 'Không tìm thấy' };
+    return { iata_codes: [], matched_kind: 'none', label: 'Không tìm thấy', using_nearest_airport: false };
   }
 
   async findRouteNetworkConnections(originIatas: string[], destIatas: string[]): Promise<any[]> {
