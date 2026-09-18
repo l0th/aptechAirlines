@@ -51,9 +51,9 @@ export class FlightsService {
     @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
     private readonly airportsService: AirportsService,
     private readonly referenceService: ReferenceService,
+    private readonly usersService: UsersService,
     @Optional() private readonly routeGraphService?: RouteGraphService,
     @Optional() private readonly routeScheduleValidatorService?: RouteScheduleValidatorService,
-    @Optional() private readonly usersService?: UsersService,
   ) {}
 
   async findAll(status?: FlightStatus, origin?: string, dest?: string): Promise<Flight[]> {
@@ -250,22 +250,28 @@ export class FlightsService {
    *
    * Invariants:
    * 1. BLOCKED bookings:
-   *    - cancel booking (status = CANCELLED, assign cancellation_number)
-   *    - release held seats back to inventory
+   *    - release all reserved seats
+   *    - mark coupons CANCELLED
+   *    - assign cancellation number
+   *    - save booking as CANCELLED
    *    - DO NOT create a REFUND payment transaction (ticket was unpaid)
    *    - SkyMiles remain untouched
-   *    - coupons marked coupon_status = 'CANCELLED'
    * 2. CONFIRMED bookings:
-   *    - cancel booking (status = CANCELLED, assign cancellation_number)
-   *    - release seats back to inventory
-   *    - create a full REFUND payment transaction (booking.total_amount)
-   *    - reverse SkyMiles previously awarded (deductSkyMiles)
-   *    - set booking.total_miles_accrued = 0
-   *    - coupons marked coupon_status = 'CANCELLED'
+   *    - reverse accrued SkyMiles (via usersService.deductSkyMiles)
+   *    - release all reserved seats
+   *    - add full refund transaction (booking.total_amount)
+   *    - set total_miles_accrued = 0
+   *    - mark coupons CANCELLED
+   *    - assign cancellation number
+   *    - save booking as CANCELLED
    * 3. Deduplicate seat release per (flight_id, inventory_id) pair.
-   * 4. Idempotent: Ignore already CANCELLED bookings to avoid double-processing.
+   * 4. Per-booking compensation / rollback:
+   *    - If any mandatory operation fails for a booking, restore any deducted SkyMiles,
+   *      restore any released seats, revert in-memory booking fields to snapshot,
+   *      do NOT save as CANCELLED, and continue processing other bookings in the batch.
+   *    - cancelledCount only increments for bookings that successfully and completely finalize.
    *
-   * @returns the number of bookings that were cancelled.
+   * @returns the number of bookings that were successfully cancelled.
    */
   async cancelBookingsForFlight(flight: FlightDocument): Promise<number> {
     const affectedBookings = await this.bookingModel
@@ -275,7 +281,7 @@ export class FlightsService {
       })
       .exec();
 
-    if (affectedBookings.length === 0) {
+    if (!affectedBookings || affectedBookings.length === 0) {
       return 0;
     }
 
@@ -286,91 +292,140 @@ export class FlightsService {
         continue;
       }
 
-      const passengerCount = booking.passengers?.length || 1;
       const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
+      const passengerCount = booking.passengers?.length || 1;
 
-      // 1. Payment transactions: full refund ONLY for actually paid (CONFIRMED) bookings
-      if (wasConfirmed && booking.total_amount > 0) {
-        const originalPayment = booking.payment_transactions?.find(
-          (t: any) => t.transaction_type === 'PAYMENT' && t.status === 'SUCCESS',
-        );
-        const cardMasked = originalPayment?.card_masked || 'AUTO-REFUND-FLIGHT-CANCELLED';
+      // 1. Snapshot original booking state for rollback
+      const snapshot = {
+        status: booking.status,
+        cancellation_number: booking.cancellation_number,
+        total_miles_accrued: booking.total_miles_accrued,
+        payment_transactions: (booking.payment_transactions || []).map((t: any) => ({
+          ...(t.toObject ? t.toObject() : t),
+        })),
+        ticket_coupons: (booking.ticket_coupons || []).map((c: any) => ({
+          ...(c.toObject ? c.toObject() : c),
+        })),
+      };
 
-        booking.payment_transactions.push({
-          transaction_type: 'REFUND',
-          amount: booking.total_amount,
-          card_masked: cardMasked,
-          currency: 'VND',
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
-      }
+      let skyMilesDeducted = false;
+      let milesDeductedAmount = 0;
+      let originalUserSkyMiles: number | null = null;
+      const releasedLegs: Array<{ flightId: string; inventoryId: string }> = [];
 
-      // 2. SkyMiles: reverse previously awarded miles for CONFIRMED bookings
-      if (wasConfirmed && booking.total_miles_accrued > 0) {
-        const milesToDeduct = booking.total_miles_accrued;
-        if (this.usersService) {
+      try {
+        // Step 1: For CONFIRMED bookings with accrued miles, reverse SkyMiles
+        if (wasConfirmed && booking.total_miles_accrued > 0) {
+          milesDeductedAmount = booking.total_miles_accrued;
           try {
-            await this.usersService.deductSkyMiles(booking.user_id.toString(), milesToDeduct);
-          } catch (err: any) {
-            this.logger.warn(
-              `Could not deduct SkyMiles via usersService for booking ${booking.pnr_code}: ${err?.message}`,
-            );
-          }
-        } else {
-          // Fallback direct database update when usersService is not injected
-          try {
-            const userCol = this.bookingModel.db.collection('users');
-            const uid =
-              typeof booking.user_id === 'string'
-                ? new Types.ObjectId(booking.user_id)
-                : (booking.user_id as any);
-            const uDoc = await userCol.findOne({ _id: uid });
-            if (uDoc) {
-              const updatedMiles = Math.max(0, (uDoc.sky_miles || 0) - milesToDeduct);
-              await userCol.updateOne({ _id: uid }, { $set: { sky_miles: updatedMiles } });
+            const user = await this.usersService.findById(booking.user_id.toString());
+            if (user && typeof user.sky_miles === 'number') {
+              originalUserSkyMiles = user.sky_miles;
             }
-          } catch (err: any) {
-            this.logger.warn(
-              `Could not reverse SkyMiles directly for booking ${booking.pnr_code}: ${err?.message}`,
+          } catch {
+            // If user lookup fails, compensation will fall back to addSkyMiles
+          }
+
+          await this.usersService.deductSkyMiles(booking.user_id.toString(), milesDeductedAmount);
+          skyMilesDeducted = true;
+        }
+
+        // Step 2: Release all reserved seats (deduplicated per flight_id + inventory_id)
+        const legMap = new Map<string, { flightId: string; inventoryId: string }>();
+        for (const coupon of booking.ticket_coupons || []) {
+          if (!coupon.flight_id || !coupon.inventory_id) continue;
+          const flightId = coupon.flight_id.toString();
+          const inventoryId = coupon.inventory_id.toString();
+          legMap.set(`${flightId}_${inventoryId}`, { flightId, inventoryId });
+        }
+        const distinctLegs = Array.from(legMap.values());
+
+        for (const leg of distinctLegs) {
+          await this.updateAvailableSeats(leg.flightId, leg.inventoryId, +passengerCount);
+          releasedLegs.push(leg);
+        }
+
+        // Step 3: For CONFIRMED bookings, add full REFUND transaction & reset miles
+        if (wasConfirmed) {
+          if (booking.total_amount > 0) {
+            const originalPayment = booking.payment_transactions?.find(
+              (t: any) => t.transaction_type === 'PAYMENT' && t.status === 'SUCCESS',
+            );
+            const cardMasked = originalPayment?.card_masked || 'AUTO-REFUND-FLIGHT-CANCELLED';
+
+            booking.payment_transactions.push({
+              transaction_type: 'REFUND',
+              amount: booking.total_amount,
+              card_masked: cardMasked,
+              currency: 'VND',
+              status: 'SUCCESS',
+              created_at: new Date(),
+            });
+          }
+          booking.total_miles_accrued = 0;
+        }
+
+        // Step 4: Mark all coupons as CANCELLED
+        if (booking.ticket_coupons && Array.isArray(booking.ticket_coupons)) {
+          booking.ticket_coupons.forEach((coupon: any) => {
+            coupon.coupon_status = 'CANCELLED';
+          });
+        }
+
+        // Step 5: Mark booking as CANCELLED, assign cancellation number, and save
+        booking.status = BookingStatus.CANCELLED;
+        booking.cancellation_number = this.generateCode('CAN');
+        await booking.save();
+
+        cancelledCount++;
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to cancel booking ${booking.pnr_code || booking._id} during emergency flight cancellation: ${err?.message || err}. Initiating compensation rollback.`,
+        );
+
+        // Compensation 1: Restore released seats in reverse order
+        for (const leg of [...releasedLegs].reverse()) {
+          try {
+            await this.updateAvailableSeats(leg.flightId, leg.inventoryId, -passengerCount);
+          } catch (compSeatErr: any) {
+            this.logger.error(
+              `Compensation failure: could not restore seats for flight ${leg.flightId}, inventory ${leg.inventoryId}: ${compSeatErr?.message || compSeatErr}`,
             );
           }
         }
-        booking.total_miles_accrued = 0;
-      }
 
-      // 3. Update all coupons to CANCELLED (do not leave ACTIVE coupons inside a CANCELLED booking)
-      if (booking.ticket_coupons && Array.isArray(booking.ticket_coupons)) {
-        booking.ticket_coupons.forEach((coupon: any) => {
-          coupon.coupon_status = 'CANCELLED';
-        });
-      }
-
-      // 4. Release seats back to inventory, deduplicated per (flight_id, inventory_id) pair
-      const releasedPairs = new Set<string>();
-      for (const coupon of booking.ticket_coupons) {
-        const pairKey = `${coupon.flight_id.toString()}_${coupon.inventory_id}`;
-        if (releasedPairs.has(pairKey)) continue;
-        releasedPairs.add(pairKey);
-        try {
-          await this.updateAvailableSeats(
-            coupon.flight_id.toString(),
-            coupon.inventory_id,
-            +passengerCount,
-          );
-        } catch (err: any) {
-          // The flight may already be deleted; do not block the cancellation
-          this.logger.warn(
-            `Could not release seats for booking ${booking.pnr_code} (${pairKey}): ${err?.message}`,
-          );
+        // Compensation 2: Restore deducted SkyMiles
+        if (skyMilesDeducted) {
+          try {
+            if (originalUserSkyMiles !== null && typeof this.usersService.setSkyMiles === 'function') {
+              await this.usersService.setSkyMiles(booking.user_id.toString(), originalUserSkyMiles);
+            } else if (typeof this.usersService.addSkyMiles === 'function') {
+              await this.usersService.addSkyMiles(booking.user_id.toString(), milesDeductedAmount);
+            } else if (typeof this.usersService.setSkyMiles === 'function') {
+              await this.usersService.setSkyMiles(booking.user_id.toString(), milesDeductedAmount);
+            }
+          } catch (compMilesErr: any) {
+            this.logger.error(
+              `Compensation failure: could not restore SkyMiles for user ${booking.user_id}: ${compMilesErr?.message || compMilesErr}`,
+            );
+          }
         }
-      }
 
-      // 5. Mark booking status as CANCELLED and assign cancellation number
-      booking.status = BookingStatus.CANCELLED;
-      booking.cancellation_number = this.generateCode('CAN');
-      await booking.save();
-      cancelledCount++;
+        // Compensation 3: Revert in-memory booking fields to snapshot
+        booking.status = snapshot.status;
+        booking.cancellation_number = snapshot.cancellation_number;
+        booking.total_miles_accrued = snapshot.total_miles_accrued;
+        booking.payment_transactions = snapshot.payment_transactions as any;
+        if (booking.ticket_coupons && Array.isArray(booking.ticket_coupons)) {
+          booking.ticket_coupons.forEach((coupon: any, idx: number) => {
+            if (snapshot.ticket_coupons[idx]) {
+              coupon.coupon_status = snapshot.ticket_coupons[idx].coupon_status;
+            }
+          });
+        }
+
+        // Continue batch processing for other bookings
+      }
     }
 
     return cancelledCount;
