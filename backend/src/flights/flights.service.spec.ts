@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { FlightsService } from './flights.service';
 import { getModelToken } from '@nestjs/mongoose';
 import { Flight } from './flights.schema';
-import { Booking } from '../bookings/bookings.schema';
+import { Booking, BookingStatus } from '../bookings/bookings.schema';
 import { AirportsService } from '../airports/airports.service';
 import { BadRequestException } from '@nestjs/common';
 import { FlightStatus } from './flights.schema';
@@ -10,6 +10,7 @@ import { ReferenceService } from '../reference/reference.service';
 import { SearchFlightDto } from './flights.dto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import { UsersService } from '../users/users.service';
 
 describe('FlightsService', () => {
   let service: FlightsService;
@@ -17,6 +18,7 @@ describe('FlightsService', () => {
   let bookingModel: any;
   let airportsService: any;
   let referenceService: any;
+  let usersService: any;
 
   beforeEach(async () => {
     flightModel = {
@@ -48,6 +50,10 @@ describe('FlightsService', () => {
       findRouteNetworkConnections: jest.fn().mockResolvedValue([]),
     };
 
+    usersService = {
+      deductSkyMiles: jest.fn().mockResolvedValue(true),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FlightsService,
@@ -55,6 +61,7 @@ describe('FlightsService', () => {
         { provide: getModelToken(Booking.name), useValue: bookingModel },
         { provide: AirportsService, useValue: airportsService },
         { provide: ReferenceService, useValue: referenceService },
+        { provide: UsersService, useValue: usersService },
       ],
     }).compile();
 
@@ -1175,6 +1182,176 @@ describe('FlightsService', () => {
       expect(res.connecting_routes![0].layover_minutes).toBe(90);
       expect(res.connecting_routes![0].leg1.flight_number).toBe('LEGACY1');
       expect(res.connecting_routes![0].leg2.flight_number).toBe('LEGACY2');
+    });
+  });
+
+  describe('Emergency flight cancellation (cancelBookingsForFlight)', () => {
+    const flightId = 'flight_emergency_123';
+    const mockFlightDoc: any = {
+      _id: flightId,
+      flight_number: 'VN123',
+      origin_iata: 'HAN',
+      dest_iata: 'SGN',
+      status: FlightStatus.SCHEDULED,
+      save: jest.fn().mockResolvedValue(true),
+    };
+
+    beforeEach(() => {
+      jest.spyOn(service, 'updateAvailableSeats').mockResolvedValue(true);
+    });
+
+    it('Scenario A: BLOCKED booking is cancelled, seats released, NO refund transaction, SkyMiles untouched, coupons CANCELLED', async () => {
+      const mockBlockedBooking: any = {
+        _id: 'b_blocked_1',
+        pnr_code: 'PNRBLK1',
+        blocking_number: 'BLK-123456',
+        user_id: 'user_123',
+        status: BookingStatus.BLOCKED,
+        total_amount: 1500000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'AN', last_name: 'NGUYEN' }],
+        payment_transactions: [],
+        ticket_coupons: [
+          {
+            coupon_number: 'CPN1',
+            flight_id: flightId,
+            inventory_id: 'inv_1',
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.exec.mockResolvedValueOnce([mockBlockedBooking]);
+
+      const cancelledCount = await service.cancelBookingsForFlight(mockFlightDoc);
+
+      expect(cancelledCount).toBe(1);
+      expect(mockBlockedBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBlockedBooking.cancellation_number).toMatch(/^CAN-/);
+      expect(service.updateAvailableSeats).toHaveBeenCalledWith(flightId, 'inv_1', 1);
+      expect(mockBlockedBooking.payment_transactions).toHaveLength(0);
+      expect(usersService.deductSkyMiles).not.toHaveBeenCalled();
+      expect(mockBlockedBooking.total_miles_accrued).toBe(0);
+      expect(mockBlockedBooking.ticket_coupons[0].coupon_status).toBe('CANCELLED');
+      expect(mockBlockedBooking.save).toHaveBeenCalled();
+    });
+
+    it('Scenario B: CONFIRMED booking is cancelled, seats released, full refund transaction created, SkyMiles deducted once, total_miles_accrued reset to 0, coupons CANCELLED', async () => {
+      const mockConfirmedBooking: any = {
+        _id: 'b_confirmed_1',
+        pnr_code: 'PNRCNF1',
+        confirmation_number: 'CNF-654321',
+        user_id: 'user_456',
+        status: BookingStatus.CONFIRMED,
+        total_amount: 2500000,
+        total_miles_accrued: 750,
+        passengers: [
+          { first_name: 'BINH', last_name: 'TRAN' },
+          { first_name: 'CUONG', last_name: 'TRAN' },
+        ],
+        payment_transactions: [
+          {
+            transaction_type: 'PAYMENT',
+            amount: 2500000,
+            card_masked: '**** **** **** 1234',
+            status: 'SUCCESS',
+            created_at: new Date('2026-09-01'),
+          },
+        ],
+        ticket_coupons: [
+          {
+            coupon_number: 'CPN_B',
+            flight_id: flightId,
+            inventory_id: 'inv_2',
+            coupon_status: 'ACTIVE',
+          },
+          {
+            coupon_number: 'CPN_C',
+            flight_id: flightId,
+            inventory_id: 'inv_2',
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.exec.mockResolvedValueOnce([mockConfirmedBooking]);
+
+      const cancelledCount = await service.cancelBookingsForFlight(mockFlightDoc);
+
+      expect(cancelledCount).toBe(1);
+      expect(mockConfirmedBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockConfirmedBooking.cancellation_number).toMatch(/^CAN-/);
+      // Seats deduplicated per (flight_id, inventory_id) pair -> passengerCount = 2
+      expect(service.updateAvailableSeats).toHaveBeenCalledTimes(1);
+      expect(service.updateAvailableSeats).toHaveBeenCalledWith(flightId, 'inv_2', 2);
+      // Full refund transaction created with original card
+      expect(mockConfirmedBooking.payment_transactions).toHaveLength(2);
+      const refundTx = mockConfirmedBooking.payment_transactions[1];
+      expect(refundTx.transaction_type).toBe('REFUND');
+      expect(refundTx.amount).toBe(2500000);
+      expect(refundTx.card_masked).toBe('**** **** **** 1234');
+      expect(refundTx.status).toBe('SUCCESS');
+      // SkyMiles deducted exactly once and reset
+      expect(usersService.deductSkyMiles).toHaveBeenCalledTimes(1);
+      expect(usersService.deductSkyMiles).toHaveBeenCalledWith('user_456', 750);
+      expect(mockConfirmedBooking.total_miles_accrued).toBe(0);
+      // All coupons marked CANCELLED
+      expect(mockConfirmedBooking.ticket_coupons[0].coupon_status).toBe('CANCELLED');
+      expect(mockConfirmedBooking.ticket_coupons[1].coupon_status).toBe('CANCELLED');
+      expect(mockConfirmedBooking.save).toHaveBeenCalled();
+    });
+
+    it('Scenario C: Already CANCELLED bookings are skipped without duplicate processing', async () => {
+      const mockAlreadyCancelledBooking: any = {
+        _id: 'b_already_cancelled',
+        pnr_code: 'PNRCAN1',
+        status: BookingStatus.CANCELLED,
+        total_amount: 1000000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'HOA', last_name: 'LE' }],
+        payment_transactions: [{ transaction_type: 'REFUND', amount: 1000000 }],
+        ticket_coupons: [{ flight_id: flightId, inventory_id: 'inv_1', coupon_status: 'CANCELLED' }],
+        save: jest.fn(),
+      };
+
+      bookingModel.exec.mockResolvedValueOnce([mockAlreadyCancelledBooking]);
+
+      const cancelledCount = await service.cancelBookingsForFlight(mockFlightDoc);
+
+      expect(cancelledCount).toBe(0);
+      expect(service.updateAvailableSeats).not.toHaveBeenCalled();
+      expect(usersService.deductSkyMiles).not.toHaveBeenCalled();
+      expect(mockAlreadyCancelledBooking.save).not.toHaveBeenCalled();
+    });
+
+    it('Scenario D: Failure resilience (seat release or SkyMiles error does not crash cancellation batch)', async () => {
+      jest.spyOn(service, 'updateAvailableSeats').mockRejectedValueOnce(new Error('Flight deleted'));
+      usersService.deductSkyMiles.mockRejectedValueOnce(new Error('User service temporary error'));
+
+      const mockResilientBooking: any = {
+        _id: 'b_resilient_1',
+        pnr_code: 'PNRRES1',
+        user_id: 'user_err',
+        status: BookingStatus.CONFIRMED,
+        total_amount: 500000,
+        total_miles_accrued: 200,
+        passengers: [{ first_name: 'DUNG', last_name: 'VU' }],
+        payment_transactions: [],
+        ticket_coupons: [{ flight_id: flightId, inventory_id: 'inv_fail', coupon_status: 'ACTIVE' }],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.exec.mockResolvedValueOnce([mockResilientBooking]);
+
+      const cancelledCount = await service.cancelBookingsForFlight(mockFlightDoc);
+
+      expect(cancelledCount).toBe(1);
+      expect(mockResilientBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockResilientBooking.cancellation_number).toMatch(/^CAN-/);
+      expect(mockResilientBooking.ticket_coupons[0].coupon_status).toBe('CANCELLED');
+      expect(mockResilientBooking.save).toHaveBeenCalled();
     });
   });
 });

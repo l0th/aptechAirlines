@@ -6,6 +6,7 @@ import { Flight, FlightSchema } from './flights.schema';
 import { Booking, BookingSchema } from '../bookings/bookings.schema';
 import { AirportsModule } from '../airports/airports.module';
 import { ReferenceModule } from '../reference/reference.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ReferenceModule } from '../reference/reference.module';
     ]),
     AirportsModule,
     ReferenceModule,
+    UsersModule,
   ],
   controllers: [FlightsController],
   providers: [FlightsService],
