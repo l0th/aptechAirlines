@@ -246,10 +246,14 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center mb-4 font-bold border border-slate-300">
               <app-icon name="award" class="w-6 h-6" />
             </div>
-            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Hạng Khởi Đầu' : 'Entry Tier' }}</span>
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 20.000 dặm (-3% vé)' : 'From 20,000 miles (-3% fare)' }}</span>
             <h3 class="text-xl font-bold text-navy mt-1">{{ lang.isVietnamese() ? 'Silver Card (Thẻ Bạc)' : 'Silver Card' }}</h3>
-            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Dành cho hội viên mới tham gia chương trình.' : 'For members newly joined the program.' }}</p>
+            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Dành cho hội viên tích lũy từ 20.000 dặm bay.' : 'For members with at least 20,000 miles.' }}</p>
             <div class="mt-6 pt-6 border-t border-slate-100 space-y-3 text-xs">
+              <div class="flex items-center gap-2 text-slate-700">
+                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
+                <span class="font-semibold text-emerald-700">{{ lang.isVietnamese() ? 'Giảm ngay 3% giá vé cho mọi chuyến bay' : 'Direct 3% fare discount on all flights' }}</span>
+              </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
                 <span>{{ lang.isVietnamese() ? 'Tích lũy 100% dặm bay cơ bản' : 'Earn 100% base flight miles' }}</span>
@@ -273,10 +277,14 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             <div class="w-12 h-12 rounded-2xl bg-amber-500/20 text-gold flex items-center justify-center mb-4 font-bold border border-gold/40">
               <app-icon name="crown" class="w-6 h-6" />
             </div>
-            <span class="text-xs font-bold text-amber-600 uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 15.000 dặm' : 'From 15,000 miles' }}</span>
+            <span class="text-xs font-bold text-amber-600 uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 50.000 dặm (-7% vé)' : 'From 50,000 miles (-7% fare)' }}</span>
             <h3 class="text-xl font-bold text-navy mt-1">{{ lang.isVietnamese() ? 'Gold Card (Thẻ Vàng)' : 'Gold Card' }}</h3>
             <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đặc quyền ưu tiên dành cho khách hàng bay thường xuyên.' : 'Priority privileges for frequent flyers.' }}</p>
             <div class="mt-6 pt-6 border-t border-slate-100 space-y-3 text-xs">
+              <div class="flex items-center gap-2 text-slate-700">
+                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
+                <span class="font-semibold text-emerald-700">{{ lang.isVietnamese() ? 'Giảm ngay 7% giá vé cho mọi chuyến bay' : 'Direct 7% fare discount on all flights' }}</span>
+              </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
                 <span>{{ lang.isVietnamese() ? 'Cộng thêm 25% dặm thưởng mỗi chuyến bay' : 'Earn 25% bonus miles on every flight' }}</span>
@@ -297,10 +305,14 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             <div class="w-12 h-12 rounded-2xl bg-navy text-gold flex items-center justify-center mb-4 font-bold">
               <app-icon name="shieldcheck" class="w-6 h-6" />
             </div>
-            <span class="text-xs font-bold text-navy uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 50.000 dặm' : 'From 50,000 miles' }}</span>
+            <span class="text-xs font-bold text-navy uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 100.000 dặm (-12% vé)' : 'From 100,000 miles (-12% fare)' }}</span>
             <h3 class="text-xl font-bold text-navy mt-1">{{ lang.isVietnamese() ? 'Platinum VIP (Bạch Kim)' : 'Platinum VIP' }}</h3>
             <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đẳng cấp tối thượng chuẩn hàng không 5 sao quốc tế.' : 'Ultimate 5-star international aviation luxury.' }}</p>
             <div class="mt-6 pt-6 border-t border-slate-100 space-y-3 text-xs">
+              <div class="flex items-center gap-2 text-slate-700">
+                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
+                <span class="font-semibold text-emerald-700">{{ lang.isVietnamese() ? 'Giảm tối đa 12% giá vé cho mọi chuyến bay' : 'Maximum 12% fare discount on all flights' }}</span>
+              </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
                 <span>{{ lang.isVietnamese() ? 'Cộng thêm 50% dặm thưởng mỗi chuyến bay' : 'Earn 50% bonus miles on every flight' }}</span>
