@@ -87,10 +87,26 @@ export class BookingsController {
     return this.bookingsService.cancelTicket(cancelTicketDto);
   }
 
-  // Requirement 3.9: guest ticket tracking stays public
+  // Requirement 3.9: Authenticated customer can track their own tickets; staff can track any ticket
   @Get('track/:code')
-  async track(@Param('code') code: string) {
+  @UseGuards(JwtAuthGuard)
+  async track(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('code') code: string,
+  ) {
+    await this.bookingsService.assertOwnership(
+      code,
+      req.user.sub,
+      req.user.role,
+    );
     return this.bookingsService.trackTicket(code);
+  }
+
+  // Requirement 1.3.5: Allow authenticated customers to retrieve their own bookings list
+  @Get('my-trips')
+  @UseGuards(JwtAuthGuard)
+  async getMyTrips(@Req() req: { user: { sub: string } }) {
+    return this.bookingsService.findAll(undefined, req.user.sub);
   }
 
   @Get()

@@ -3,7 +3,9 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -26,6 +28,13 @@ import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/users.schema';
 import { PoliciesService } from '../policies/policies.service';
 import { applyPricing, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
+import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
+import {
+  BookingSeatSagaOperation,
+  BookingSeatSagaOperationDocument,
+  SagaState,
+  SagaOperationType,
+} from '../seat-allocation/booking-seat-saga-operation.schema';
 
 export function normalizeLegType(legType?: string): string {
   if (!legType) return 'OUTBOUND';
@@ -43,11 +52,17 @@ export function normalizeLegType(legType?: string): string {
 
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     @InjectModel(Booking.name) private bookingModel: Model<BookingDocument>,
     private readonly flightsService: FlightsService,
     private readonly usersService: UsersService,
     private readonly policiesService: PoliciesService,
+    @Optional() private readonly seatAllocationService?: SeatAllocationService,
+    @Optional()
+    @InjectModel(BookingSeatSagaOperation.name)
+    private readonly sagaModel?: Model<BookingSeatSagaOperationDocument>,
   ) {}
 
   private generateCode(prefix: string): string {
@@ -73,14 +88,23 @@ export class BookingsService {
     return booking;
   }
 
+  private assertBookableFlight(flight: FlightDocument, context = 'book'): void {
+    if (flight.is_bookable === false || (flight.operator && flight.operator !== 'APTECH_AIRLINES')) {
+      throw new BadRequestException(
+        `Cannot ${context} flight ${flight.flight_number}: only internal Aptech Airlines operational flights are customer-bookable.`,
+      );
+    }
+  }
+
   /**
    * Requirement 3.4: Make Reservations / Blocking / Direct Buying
    */
   async createBooking(dto: CreateBookingDto): Promise<BookingDocument> {
     const user = await this.usersService.findById(dto.user_id);
+
     const passengerCount = dto.passengers.length;
 
-    if (passengerCount === 0) {
+    if (passengerCount < 1) {
       throw new BadRequestException('Booking must have at least one passenger');
     }
     if (dto.legs.length === 0) {
@@ -94,6 +118,7 @@ export class BookingsService {
 
     for (const leg of dto.legs) {
       const flight = await this.flightsService.findById(leg.flight_id);
+      this.assertBookableFlight(flight, 'book');
       const inventory = flight.inventories.find(
         (i: any) => i._id.toString() === leg.inventory_id || i.id === leg.inventory_id,
       );
@@ -190,47 +215,274 @@ export class BookingsService {
       }
     }
 
-    // Decrement seats on all flight inventories (atomic)
-    const reservedLegs: typeof dto.legs = [];
+    // Pre-generate Booking ObjectId and SAGA Operation
+    const pregeneratedBookingId = new Types.ObjectId();
+    const sagaOperationId = this.generateCode('SAGA-CREATE');
+    let businessCommitted = false;
+
+    let sagaOp: BookingSeatSagaOperationDocument | null = null;
+    if (this.sagaModel) {
+      sagaOp = new this.sagaModel({
+        operation_id: sagaOperationId,
+        operation_type: SagaOperationType.CREATE,
+        booking_id: pregeneratedBookingId,
+        state: SagaState.PRECOMMIT,
+        new_inventory_reservations: [],
+        new_seat_allocations: [],
+        last_progress_at: new Date(),
+      });
+      await sagaOp.save();
+    }
+
+    // Decrement seats on all flight inventories (atomic with SAGA tracking)
+    const reservedLegs: Array<{ flight_id: string; inventory_id: string; mutation_key: string }> = [];
     for (const leg of dto.legs) {
+      const mutationKey = `${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`;
+      // SAGA JOURNAL CRASH GAP FIX: Persist intended journal entry BEFORE executing atomic Flight mutation
+      if (sagaOp) {
+        sagaOp.new_inventory_reservations.push({
+          flight_id: new Types.ObjectId(leg.flight_id),
+          inventory_id: leg.inventory_id,
+          seat_count: passengerCount,
+          mutation_key: mutationKey,
+        });
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save();
+      }
+      reservedLegs.push({ flight_id: leg.flight_id, inventory_id: leg.inventory_id, mutation_key: mutationKey });
+
       let reserved = false;
       try {
-        reserved = await this.flightsService.reserveSeats(
-          leg.flight_id,
-          leg.inventory_id,
-          passengerCount,
-        );
+        if (this.sagaModel) {
+          reserved = await this.flightsService.reserveSeats(
+            leg.flight_id,
+            leg.inventory_id,
+            passengerCount,
+            { operation_id: sagaOperationId, mutation_key: mutationKey },
+          );
+        } else {
+          reserved = await this.flightsService.reserveSeats(
+            leg.flight_id,
+            leg.inventory_id,
+            passengerCount,
+          );
+        }
       } catch (error) {
+        let allCompensated = true;
         for (const reservedLeg of reservedLegs) {
-          try {
-            await this.flightsService.updateAvailableSeats(
-              reservedLeg.flight_id,
-              reservedLeg.inventory_id,
-              passengerCount,
-            );
-          } catch (_) {}
+          if (this.sagaModel) {
+            try {
+              const ok = await this.flightsService.compensateInventoryReservation(
+                reservedLeg.flight_id,
+                reservedLeg.inventory_id,
+                reservedLeg.mutation_key,
+                passengerCount,
+              );
+              if (!ok) allCompensated = false;
+            } catch (compErr) {
+              allCompensated = false;
+              this.logger.error(`Failed to compensate reservation for flight ${reservedLeg.flight_id}: ${compErr}`);
+            }
+          } else {
+            try {
+              await this.flightsService.updateAvailableSeats(
+                reservedLeg.flight_id,
+                reservedLeg.inventory_id,
+                passengerCount,
+              );
+            } catch (_) {}
+          }
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+            await sagaOp.save().catch(() => {});
+          } else {
+            sagaOp.last_progress_at = new Date();
+            await sagaOp.save().catch(() => {});
+            this.logger.warn(`Saga ${sagaOperationId} compensation incomplete; leaving in PRECOMMIT for scheduler retry.`);
+          }
         }
         throw error;
       }
       if (!reserved) {
-        // Rollback already reserved legs
+        // Rollback already reserved legs using compensateInventoryReservation for SAGA
+        let allCompensated = true;
         for (const rLeg of reservedLegs) {
-          try {
-            await this.flightsService.updateAvailableSeats(
-              rLeg.flight_id,
-              rLeg.inventory_id,
-              passengerCount,
-            );
-          } catch (_) {}
+          if (this.sagaModel) {
+            try {
+              const ok = await this.flightsService.compensateInventoryReservation(
+                rLeg.flight_id,
+                rLeg.inventory_id,
+                rLeg.mutation_key,
+                passengerCount,
+              );
+              if (!ok) allCompensated = false;
+            } catch (compErr) {
+              allCompensated = false;
+              this.logger.error(`Failed to compensate reservation for flight ${rLeg.flight_id}: ${compErr}`);
+            }
+          } else {
+            try {
+              await this.flightsService.updateAvailableSeats(
+                rLeg.flight_id,
+                rLeg.inventory_id,
+                passengerCount,
+              );
+            } catch (_) {}
+          }
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+            await sagaOp.save().catch(() => {});
+          } else {
+            sagaOp.last_progress_at = new Date();
+            await sagaOp.save().catch(() => {});
+            this.logger.warn(`Saga ${sagaOperationId} compensation incomplete; leaving in PRECOMMIT for scheduler retry.`);
+          }
         }
         const flight = await this.flightsService.findById(leg.flight_id);
         throw new BadRequestException(`Not enough available seats on flight ${flight.flight_number}`);
       }
-      reservedLegs.push(leg);
+    }
+
+    // Allocate physical seats (Phase B)
+    let totalSeatFees = 0;
+    if (this.seatAllocationService) {
+      try {
+        for (const { definition: leg, flight, inventory } of selectedLegs) {
+          const normalizedLeg = normalizeLegType(leg.leg_type);
+          const legCoupons = ticketCoupons.filter(
+            (c) => c.flight_id.toString() === flight._id.toString() && c.leg_type === normalizedLeg,
+          );
+
+          const passRequests = dto.passengers.map((p, idx) => {
+            const coupon = legCoupons[idx];
+            const explicitRequest = dto.seat_requests?.find(
+              (r) => r.passenger_index === idx && r.flight_id === flight._id.toString(),
+            );
+
+            let selType: 'AUTO' | 'CHOOSE';
+            let explicitSeat: string | undefined;
+
+            if (explicitRequest) {
+              selType = explicitRequest.selection_type;
+              explicitSeat = selType === 'CHOOSE' && explicitRequest.seat_code ? explicitRequest.seat_code.trim() : undefined;
+            } else {
+              const legacySeat =
+                (p as any).seat_codes?.[normalizedLeg] ||
+                (p as any).seat_codes?.[leg.leg_type || 'OUTBOUND'] ||
+                (normalizedLeg === 'OUTBOUND' ? p.seat_code || '' : '');
+              selType = legacySeat && legacySeat.trim() ? ('CHOOSE' as const) : ('AUTO' as const);
+              explicitSeat = selType === 'CHOOSE' ? legacySeat.trim() : undefined;
+            }
+
+            return {
+              passenger_name: `${p.first_name} ${p.last_name}`,
+              coupon_number: coupon.coupon_number,
+              cabin_class: inventory.cabin_class,
+              selection_type: selType,
+              seat_code: explicitSeat,
+              passenger_index: idx,
+            };
+          });
+
+          const aircraftType = flight.aircraft?.model_code;
+          if (!aircraftType) {
+            throw new BadRequestException(
+              `Flight ${flight.flight_number} is missing aircraft model configuration.`,
+            );
+          }
+          const heldUntil = dto.is_block
+            ? new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000)
+            : new Date(Date.now() + 30 * 60 * 1000);
+
+          const allocResults = await this.seatAllocationService.allocateSeats({
+            flight_id: flight._id,
+            aircraft_type: aircraftType,
+            booking_id: pregeneratedBookingId,
+            held_until: heldUntil,
+            saga_operation_id: sagaOperationId,
+            passengers: passRequests,
+          });
+
+          for (const res of allocResults) {
+            const matchingCoupon = legCoupons.find((c) => c.coupon_number === res.coupon_number);
+            if (matchingCoupon) {
+              matchingCoupon.seat_code = res.seat_code;
+              matchingCoupon.seat_selection_type = res.selection_type;
+              matchingCoupon.seat_fee = res.seat_fee;
+              matchingCoupon.seat_pricing_snapshot = res.pricing_snapshot;
+            }
+            totalSeatFees += res.seat_fee;
+            if (sagaOp) {
+              sagaOp.new_seat_allocations.push({
+                flight_id: flight._id,
+                seat_code: res.seat_code,
+                coupon_number: res.coupon_number,
+              });
+            }
+          }
+        }
+        if (sagaOp) {
+          sagaOp.last_progress_at = new Date();
+          await sagaOp.save().catch(() => {});
+        }
+      } catch (allocErr) {
+        let allCompensated = true;
+        if (this.seatAllocationService && sagaOperationId) {
+          try {
+            await this.seatAllocationService.releaseAllocationsBySaga(sagaOperationId);
+          } catch (relErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to release allocations by saga ${sagaOperationId}: ${relErr}`);
+          }
+        }
+        for (const rLeg of reservedLegs) {
+          if (this.sagaModel) {
+            try {
+              const ok = await this.flightsService.compensateInventoryReservation(
+                rLeg.flight_id,
+                rLeg.inventory_id,
+                rLeg.mutation_key,
+                passengerCount,
+              );
+              if (!ok) allCompensated = false;
+            } catch (compErr) {
+              allCompensated = false;
+              this.logger.error(`Failed to compensate reservation for flight ${rLeg.flight_id}: ${compErr}`);
+            }
+          } else {
+            try {
+              await this.flightsService.updateAvailableSeats(
+                rLeg.flight_id,
+                rLeg.inventory_id,
+                passengerCount,
+              );
+            } catch (_) {}
+          }
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+            await sagaOp.save().catch(() => {});
+          } else {
+            sagaOp.last_progress_at = new Date();
+            await sagaOp.save().catch(() => {});
+            this.logger.warn(`Saga ${sagaOperationId} compensation incomplete; leaving in PRECOMMIT for scheduler retry.`);
+          }
+        }
+        throw allocErr;
+      }
     }
 
     const originalSkyMiles = user.sky_miles || 0;
     let skyMilesCredited = false;
+    const totalAmount = totalFare + totalSeatFees;
 
     try {
       const pnrCode = this.generateCode('PNR');
@@ -246,11 +498,16 @@ export class BookingsService {
         deadline = new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000);
       } else {
         confirmationNumber = this.generateCode('CNF');
-        const card = dto.credit_card_number || user.preferred_credit_card || 'CARD-DEFAULT';
-        const maskedCard = card.length >= 4 ? `**** **** **** ${card.slice(-4)}` : card;
+        const rawCard = (dto.credit_card_number || user.preferred_credit_card || '').trim();
+        const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
+        if (!rawCard || placeholders.has(rawCard.toUpperCase()) || rawCard.startsWith('*')) {
+          throw new BadRequestException('Payment card is required to purchase tickets.');
+        }
+        const digits = rawCard.replace(/\D/g, '');
+        const maskedCard = digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : `**** **** **** ${rawCard.slice(-4)}`;
         paymentTransactions.push({
           transaction_type: 'PAYMENT',
-          amount: totalFare,
+          amount: totalAmount,
           card_masked: maskedCard,
           status: 'SUCCESS',
           created_at: new Date(),
@@ -260,6 +517,7 @@ export class BookingsService {
       }
 
       const booking = new this.bookingModel({
+        _id: pregeneratedBookingId,
         pnr_code: pnrCode,
         user_id: user._id,
         booking_type: dto.booking_type,
@@ -267,7 +525,15 @@ export class BookingsService {
         blocking_number: blockingNumber,
         confirmation_number: confirmationNumber,
         time_limit_deadline: deadline,
-        total_amount: totalFare,
+        total_amount: totalAmount,
+        total_fare: totalFare,
+        total_seat_fees: totalSeatFees,
+        seat_saga_commit: {
+          operation_id: sagaOperationId,
+          operation_type: 'CREATE',
+          status: 'PENDING_FINALIZATION',
+          committed_at: new Date(),
+        },
         total_miles_accrued: dto.is_block ? 0 : totalMiles,
         passengers: dto.passengers,
         ticket_coupons: ticketCoupons,
@@ -280,17 +546,122 @@ export class BookingsService {
         pricing_note: dto.legs.length > 1 ? 'Applied pricing based on earliest departure leg' : '',
       });
 
-      return await booking.save();
-    } catch (error) {
-      for (const leg of reservedLegs) {
-        try {
-          await this.flightsService.updateAvailableSeats(leg.flight_id, leg.inventory_id, passengerCount);
-        } catch (_) {}
+      const savedBooking = await booking.save();
+      businessCommitted = true;
+
+      // Post-commit phase (Forward Recovery Only — Never roll back committed booking)
+      if (sagaOp) {
+        sagaOp.state = SagaState.COMMITTED;
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save().catch(() => {});
       }
+
+      let postCommitFinalized = true;
+      if (!dto.is_block && this.seatAllocationService) {
+        try {
+          await this.seatAllocationService.confirmAllocations(pregeneratedBookingId, sagaOperationId);
+        } catch (confirmErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Failed to confirm allocations post-commit for booking ${pregeneratedBookingId}: ${confirmErr}`);
+        }
+      }
+
+      if (postCommitFinalized) {
+        let witnessPersisted = false;
+        if (typeof this.bookingModel?.updateOne === 'function') {
+          try {
+            await this.bookingModel.updateOne(
+              { _id: pregeneratedBookingId },
+              { $set: { 'seat_saga_commit.status': 'COMPLETED' } },
+            );
+            witnessPersisted = true;
+          } catch (witnessErr) {
+            this.logger.error(
+              `Failed to persist seat_saga_commit.status=COMPLETED witness on booking ${pregeneratedBookingId}: ${witnessErr}. Saga remains COMMITTED for scheduler retry.`,
+            );
+          }
+        } else {
+          witnessPersisted = true;
+        }
+
+        if (witnessPersisted) {
+          if (savedBooking.seat_saga_commit) {
+            savedBooking.seat_saga_commit.status = 'COMPLETED';
+          }
+
+          if (sagaOp) {
+            sagaOp.state = SagaState.COMPLETED;
+            sagaOp.completed_at = new Date();
+            await sagaOp.save().catch(() => {});
+          }
+        }
+      }
+
+      return savedBooking;
+    } catch (error) {
+      if (businessCommitted) {
+        this.logger.error(
+          `Post-commit error in createBooking for booking ${pregeneratedBookingId}; leaving in COMMITTED / PENDING_FINALIZATION: ${error}`,
+        );
+        throw error;
+      }
+
+      let allCompensated = true;
+
+      // A. Release NEW physical allocations by saga_operation_id ONLY
+      if (this.seatAllocationService && sagaOperationId) {
+        try {
+          await this.seatAllocationService.releaseAllocationsBySaga(sagaOperationId);
+        } catch (allocErr) {
+          allCompensated = false;
+          this.logger.error(`Failed to release allocations by saga ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
+      // B. Compensate NEW inventory reservations
+      for (const leg of reservedLegs) {
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(
+              leg.flight_id,
+              leg.inventory_id,
+              leg.mutation_key,
+              passengerCount,
+            );
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate reservation for flight ${leg.flight_id}: ${compErr}`);
+          }
+        } else {
+          try {
+            await this.flightsService.updateAvailableSeats(leg.flight_id, leg.inventory_id, passengerCount);
+          } catch (_) {}
+        }
+      }
+
+      // C. Restore SkyMiles compensation where required
       if (skyMilesCredited) {
         try {
           await this.usersService.setSkyMiles(user._id.toString(), originalSkyMiles);
         } catch (_) {}
+      }
+
+      // IF allCompensated -> ABORTED, else leave in PRECOMMIT for scheduler retry
+      if (sagaOp) {
+        if (allCompensated) {
+          try {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+            await sagaOp.save();
+          } catch (_) {}
+        } else {
+          try {
+            sagaOp.last_progress_at = new Date();
+            await sagaOp.save();
+          } catch (_) {}
+          this.logger.warn(`Saga ${sagaOperationId} compensation incomplete; leaving in PRECOMMIT for scheduler retry.`);
+        }
       }
       throw error;
     }
@@ -347,6 +718,7 @@ export class BookingsService {
     const user = await this.usersService.findById(booking.user_id.toString());
     const originalSkyMiles = user.sky_miles || 0;
     let skyMilesCredited = false;
+    let businessCommitted = false;
     try {
       await this.usersService.addSkyMiles(booking.user_id.toString(), totalMiles);
       skyMilesCredited = true;
@@ -354,8 +726,19 @@ export class BookingsService {
       booking.confirmation_number = confirmationNumber;
       booking.total_miles_accrued = totalMiles;
       await booking.save();
+      businessCommitted = true;
+
+      if (this.seatAllocationService) {
+        await this.seatAllocationService.confirmAllocations(booking._id);
+      }
       return booking;
     } catch (error) {
+      if (businessCommitted) {
+        this.logger.error(
+          `Post-commit seat confirmation failure in confirmTicket for booking ${booking._id}; scheduler will recover: ${error?.message || error}`,
+        );
+        return booking;
+      }
       if (skyMilesCredited) {
         try {
           await this.usersService.setSkyMiles(booking.user_id.toString(), originalSkyMiles);
@@ -379,6 +762,53 @@ export class BookingsService {
    * 4. applyPricing() for dynamic pricing.
    * 5. Currency VND in response message.
    */
+  private async resolveRescheduleCard(
+    booking: BookingDocument,
+    dtoCardNumber?: string,
+    isCharge: boolean = true,
+  ): Promise<string> {
+    const user = booking.user_id
+      ? await this.usersService.findById(booking.user_id.toString())
+      : null;
+
+    const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
+
+    if (isCharge) {
+      const rawCard = (dtoCardNumber || user?.preferred_credit_card || '').trim();
+      if (!rawCard || placeholders.has(rawCard.toUpperCase()) || rawCard.startsWith('*')) {
+        throw new BadRequestException('Payment card is required for reschedule fare difference.');
+      }
+      const digits = rawCard.replace(/\D/g, '');
+      return digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : `**** **** **** ${rawCard.slice(-4)}`;
+    } else {
+      // 1. Prefer original successful transaction's card_masked
+      if (Array.isArray(booking.payment_transactions) && booking.payment_transactions.length > 0) {
+        const paymentTx = booking.payment_transactions
+          .slice()
+          .reverse()
+          .find((t) => t.status === 'SUCCESS' && (t.transaction_type === 'PAYMENT' || t.transaction_type === 'RESCHEDULE_CHARGE'));
+
+        if (paymentTx?.card_masked) {
+          const masked = paymentTx.card_masked.trim();
+          if (masked && !placeholders.has(masked.toUpperCase())) {
+            return masked;
+          }
+        }
+      }
+
+      // 2. Fall back to valid explicit / preferred card
+      const rawCard = (dtoCardNumber || user?.preferred_credit_card || '').trim();
+      if (rawCard && !placeholders.has(rawCard.toUpperCase()) && !rawCard.startsWith('*')) {
+        const digits = rawCard.replace(/\D/g, '');
+        if (digits.length >= 4) {
+          return `**** **** **** ${digits.slice(-4)}`;
+        }
+      }
+
+      throw new BadRequestException('Cannot process refund: no valid payment card found for this booking.');
+    }
+  }
+
   async rescheduleTicket(dto: RescheduleTicketDto): Promise<{
     booking: BookingDocument;
     price_difference: number;
@@ -493,6 +923,7 @@ export class BookingsService {
 
     // --- New outbound flight ---
     const newFlight = await this.flightsService.findById(dto.new_flight_id);
+    this.assertBookableFlight(newFlight, 'reschedule');
     const newInventory = newFlight.inventories.find(
       (i: any) => i._id.toString() === dto.new_inventory_id || i.id === dto.new_inventory_id,
     );
@@ -538,6 +969,7 @@ export class BookingsService {
       }
 
       newReturnFlight = await this.flightsService.findById(dto.new_return_flight_id!);
+      this.assertBookableFlight(newReturnFlight, 'reschedule');
       newReturnInventory = newReturnFlight.inventories.find(
         (i: any) =>
           i._id.toString() === dto.new_return_inventory_id || i.id === dto.new_return_inventory_id,
@@ -615,45 +1047,178 @@ export class BookingsService {
 
     const milesDiff = (outboundDelta + returnDelta) * passengerCount;
 
+    // SAGA setup
+    const sagaOperationId = this.generateCode('SAGA-RESCHEDULE');
+    let sagaOp: BookingSeatSagaOperationDocument | null = null;
+    const oldSeatAllocations: Array<{ flight_id: any; seat_code: string }> = [];
+    for (const c of outboundCoupons) {
+      if (c.seat_code && c.flight_id) {
+        oldSeatAllocations.push({ flight_id: c.flight_id, seat_code: c.seat_code });
+      }
+    }
+    if (shouldRescheduleReturn) {
+      for (const c of inboundCoupons) {
+        if (c.seat_code && c.flight_id) {
+          oldSeatAllocations.push({ flight_id: c.flight_id, seat_code: c.seat_code });
+        }
+      }
+    }
+
+    let businessCommitted = false;
+    if (this.sagaModel) {
+      try {
+        sagaOp = new this.sagaModel({
+          operation_id: sagaOperationId,
+          operation_type: SagaOperationType.RESCHEDULE,
+          booking_id: booking._id,
+          state: SagaState.PRECOMMIT,
+          new_inventory_reservations: [],
+          old_inventory_restorations: [],
+          new_seat_allocations: [],
+          old_seat_allocations: oldSeatAllocations.map((s) => ({
+            flight_id: new Types.ObjectId(s.flight_id),
+            seat_code: s.seat_code,
+          })),
+          last_progress_at: new Date(),
+        });
+        await sagaOp.save();
+      } catch (_) {}
+    }
+
     // ===== §2 RESERVE NEW SEATS (atomic, before any release) =====
-    const outboundReserved = await this.flightsService.reserveSeats(
-      dto.new_flight_id, dto.new_inventory_id, passengerCount,
-    );
+    const reservedLegs: Array<{ flight_id: string; inventory_id: string; mutation_key: string }> = [];
+
+    const outMutationKey = `${sagaOperationId}_${dto.new_flight_id}_${dto.new_inventory_id}`;
+    if (sagaOp) {
+      sagaOp.new_inventory_reservations.push({
+        flight_id: new Types.ObjectId(dto.new_flight_id),
+        inventory_id: dto.new_inventory_id,
+        seat_count: passengerCount,
+        mutation_key: outMutationKey,
+      });
+      sagaOp.last_progress_at = new Date();
+      await sagaOp.save();
+    }
+
+    const outboundReserved = this.sagaModel
+      ? await this.flightsService.reserveSeats(
+          dto.new_flight_id,
+          dto.new_inventory_id,
+          passengerCount,
+          { operation_id: sagaOperationId, mutation_key: outMutationKey },
+        )
+      : await this.flightsService.reserveSeats(
+          dto.new_flight_id,
+          dto.new_inventory_id,
+          passengerCount,
+        );
+
     if (!outboundReserved) {
+      if (sagaOp) {
+        sagaOp.state = SagaState.ABORTED;
+        sagaOp.aborted_at = new Date();
+        await sagaOp.save().catch(() => {});
+      }
       throw new BadRequestException(
         `Not enough seats on new flight ${newFlight.flight_number}.`,
       );
     }
+    reservedLegs.push({ flight_id: dto.new_flight_id, inventory_id: dto.new_inventory_id, mutation_key: outMutationKey });
 
     if (shouldRescheduleReturn) {
+      const retMutationKey = `${sagaOperationId}_${dto.new_return_flight_id}_${dto.new_return_inventory_id}`;
+      if (sagaOp) {
+        sagaOp.new_inventory_reservations.push({
+          flight_id: new Types.ObjectId(dto.new_return_flight_id!),
+          inventory_id: dto.new_return_inventory_id!,
+          seat_count: passengerCount,
+          mutation_key: retMutationKey,
+        });
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save();
+      }
+
       let returnReserved = false;
       try {
-        returnReserved = await this.flightsService.reserveSeats(
-          dto.new_return_flight_id!, dto.new_return_inventory_id!, passengerCount,
-        );
+        returnReserved = this.sagaModel
+          ? await this.flightsService.reserveSeats(
+              dto.new_return_flight_id!,
+              dto.new_return_inventory_id!,
+              passengerCount,
+              { operation_id: sagaOperationId, mutation_key: retMutationKey },
+            )
+          : await this.flightsService.reserveSeats(
+              dto.new_return_flight_id!,
+              dto.new_return_inventory_id!,
+              passengerCount,
+            );
       } catch (err) {
         // Rollback outbound reservation on error
-        await this.flightsService.updateAvailableSeats(
-          dto.new_flight_id, dto.new_inventory_id, +passengerCount,
-        );
+        let allCompensated = true;
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(
+              dto.new_flight_id, dto.new_inventory_id, outMutationKey, passengerCount,
+            );
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate outbound reservation in reschedule error: ${compErr}`);
+          }
+        } else {
+          await this.flightsService.updateAvailableSeats(
+            dto.new_flight_id, dto.new_inventory_id, +passengerCount,
+          ).catch(() => {});
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+          } else {
+            sagaOp.last_progress_at = new Date();
+            this.logger.warn(`Saga ${sagaOperationId} return error compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+          }
+          await sagaOp.save().catch(() => {});
+        }
         throw err;
       }
 
       if (!returnReserved) {
         // Rollback outbound reservation
-        await this.flightsService.updateAvailableSeats(
-          dto.new_flight_id, dto.new_inventory_id, +passengerCount,
-        );
+        let allCompensated = true;
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(
+              dto.new_flight_id, dto.new_inventory_id, outMutationKey, passengerCount,
+            );
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate outbound reservation in reschedule: ${compErr}`);
+          }
+        } else {
+          await this.flightsService.updateAvailableSeats(
+            dto.new_flight_id, dto.new_inventory_id, +passengerCount,
+          ).catch(() => {});
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+          } else {
+            sagaOp.last_progress_at = new Date();
+            this.logger.warn(`Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+          }
+          await sagaOp.save().catch(() => {});
+        }
         throw new BadRequestException(
           `Not enough seats on new return flight ${newReturnFlight!.flight_number}. Outbound reservation rolled back.`,
         );
       }
+      reservedLegs.push({ flight_id: dto.new_return_flight_id!, inventory_id: dto.new_return_inventory_id!, mutation_key: retMutationKey });
     }
 
     // ===== §2 MUTATING PHASE: try/catch with compensating rollback =====
-    // Track state for rollback
-    let oldOutboundReleased = false;
-    let oldInboundReleased = false;
     let skyMilesAdjusted = false;
     let originalUserSkyMiles = 0;
 
@@ -673,14 +1238,7 @@ export class BookingsService {
     };
 
     try {
-      // Release old seats (strict mode: propagate errors)
-      await this.releaseSeatsForCouponsStrict(passengerCount, outboundCoupons);
-      oldOutboundReleased = true;
-
-      if (shouldRescheduleReturn) {
-        await this.releaseSeatsForCouponsStrict(passengerCount, inboundCoupons);
-        oldInboundReleased = true;
-      }
+      // NOTE: Per SAGA Order Invariant, old inventory is NOT released here prior to commit!
 
       // ===== §4 PRICING using applyPricing() =====
       const user = await this.usersService.findById(booking.user_id.toString());
@@ -720,13 +1278,126 @@ export class BookingsService {
         newInboundCouponsResult = inboundCoupons;
       }
 
-      const priceDiff = newTotalFare - oldTotalFare;
+      // Physical seat allocations for rescheduled flights
+      if (this.seatAllocationService) {
+        const outAircraftType = newFlight.aircraft?.model_code;
+        if (!outAircraftType) {
+          throw new BadRequestException(
+            `Flight ${newFlight.flight_number} is missing aircraft model configuration.`,
+          );
+        }
+
+        const outPassRequests = booking.passengers.map((p, idx) => {
+          const explicitRequest = dto.seat_requests?.find(
+            (r) => r.passenger_index === idx && r.flight_id === newFlight._id.toString(),
+          );
+          const selType = explicitRequest?.selection_type || 'AUTO';
+          const explicitSeat = selType === 'CHOOSE' && explicitRequest?.seat_code ? explicitRequest.seat_code.trim() : undefined;
+          return {
+            passenger_name: `${p.first_name} ${p.last_name}`,
+            coupon_number: newOutboundCoupons[idx].coupon_number,
+            cabin_class: newInventory.cabin_class,
+            selection_type: selType,
+            seat_code: explicitSeat,
+            passenger_index: idx,
+          };
+        });
+
+        const outAllocResults = await this.seatAllocationService.allocateSeats({
+          flight_id: newFlight._id,
+          aircraft_type: outAircraftType,
+          booking_id: booking._id,
+          held_until: new Date(Date.now() + 30 * 60 * 1000),
+          saga_operation_id: sagaOperationId,
+          passengers: outPassRequests,
+        });
+
+        for (let idx = 0; idx < outAllocResults.length; idx++) {
+          const res = outAllocResults[idx];
+          newOutboundCoupons[idx].seat_code = res.seat_code;
+          newOutboundCoupons[idx].seat_selection_type = res.selection_type;
+          newOutboundCoupons[idx].seat_fee = res.seat_fee;
+          newOutboundCoupons[idx].seat_pricing_snapshot = res.pricing_snapshot;
+          if (sagaOp) {
+            sagaOp.new_seat_allocations.push({
+              flight_id: newFlight._id,
+              seat_code: res.seat_code,
+              coupon_number: res.coupon_number,
+            });
+          }
+        }
+
+        if (shouldRescheduleReturn && newReturnFlight && newReturnInventory) {
+          const retAircraftType = newReturnFlight.aircraft?.model_code;
+          if (!retAircraftType) {
+            throw new BadRequestException(
+              `Flight ${newReturnFlight.flight_number} is missing aircraft model configuration.`,
+            );
+          }
+
+          const retPassRequests = booking.passengers.map((p, idx) => {
+            const explicitRequest = dto.seat_requests?.find(
+              (r) => r.passenger_index === idx && r.flight_id === newReturnFlight!._id.toString(),
+            );
+            const selType = explicitRequest?.selection_type || 'AUTO';
+            const explicitSeat = selType === 'CHOOSE' && explicitRequest?.seat_code ? explicitRequest.seat_code.trim() : undefined;
+            return {
+              passenger_name: `${p.first_name} ${p.last_name}`,
+              coupon_number: newInboundCouponsResult[idx].coupon_number,
+              cabin_class: newReturnInventory.cabin_class,
+              selection_type: selType,
+              seat_code: explicitSeat,
+              passenger_index: idx,
+            };
+          });
+
+          const retAllocResults = await this.seatAllocationService.allocateSeats({
+            flight_id: newReturnFlight._id,
+            aircraft_type: retAircraftType,
+            booking_id: booking._id,
+            held_until: new Date(Date.now() + 30 * 60 * 1000),
+            saga_operation_id: sagaOperationId,
+            passengers: retPassRequests,
+          });
+
+          for (let idx = 0; idx < retAllocResults.length; idx++) {
+            const res = retAllocResults[idx];
+            newInboundCouponsResult[idx].seat_code = res.seat_code;
+            newInboundCouponsResult[idx].seat_selection_type = res.selection_type;
+            newInboundCouponsResult[idx].seat_fee = res.seat_fee;
+            newInboundCouponsResult[idx].seat_pricing_snapshot = res.pricing_snapshot;
+            if (sagaOp) {
+              sagaOp.new_seat_allocations.push({
+                flight_id: newReturnFlight._id,
+                seat_code: res.seat_code,
+                coupon_number: res.coupon_number,
+              });
+            }
+          }
+        }
+      }
+
+      // Compute total seat fees and authoritative new total amount
+      let newTotalSeatFees = 0;
+      for (const c of newOutboundCoupons) {
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+      if (shouldRescheduleReturn) {
+        for (const c of newInboundCouponsResult) {
+          newTotalSeatFees += (c.seat_fee || 0);
+        }
+      } else {
+        for (const c of inboundCoupons) {
+          newTotalSeatFees += (c.seat_fee || 0);
+        }
+      }
+
+      const newTotalAmount = newTotalFare + newTotalSeatFees;
+      const priceDiff = newTotalAmount - booking.total_amount;
 
       // Financial adjustment
-      const card = dto.credit_card_number || 'SAVED-CARD';
-      const maskedCard = card.length >= 4 ? `**** **** **** ${card.slice(-4)}` : card;
-
       if (priceDiff > 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_CHARGE',
           amount: priceDiff,
@@ -735,6 +1406,7 @@ export class BookingsService {
           created_at: new Date(),
         });
       } else if (priceDiff < 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_REFUND',
           amount: Math.abs(priceDiff),
@@ -744,19 +1416,7 @@ export class BookingsService {
         });
       }
 
-      // Update booking
-      const newConfirmationNumber = this.generateCode('CNF');
-      booking.confirmation_number = newConfirmationNumber;
-      booking.status = BookingStatus.CONFIRMED;
-      booking.total_amount = newTotalFare;
-      booking.early_bird_percent = outPricing.early_bird_percent;
-      booking.early_bird_label = outPricing.early_bird_label;
-      booking.early_bird_label_en = outPricing.early_bird_label_en;
-      booking.ff_tier = outPricing.ff_tier;
-      booking.ff_discount_percent = outPricing.ff_percent;
-      booking.ticket_coupons = [...newOutboundCoupons, ...newInboundCouponsResult] as any;
-
-      // §1: Adjust SkyMiles
+      // 4. Update SkyMiles delta
       if (milesDiff > 0) {
         await this.usersService.addSkyMiles(booking.user_id.toString(), milesDiff);
       } else if (milesDiff < 0) {
@@ -764,10 +1424,136 @@ export class BookingsService {
       }
       skyMilesAdjusted = true;
 
+      // Update booking
+      const newConfirmationNumber = this.generateCode('CNF');
+      booking.confirmation_number = newConfirmationNumber;
+      booking.status = BookingStatus.CONFIRMED;
+      booking.total_amount = newTotalAmount;
+      booking.total_fare = newTotalFare;
+      booking.total_seat_fees = newTotalSeatFees;
+      booking.early_bird_percent = outPricing.early_bird_percent;
+      booking.early_bird_label = outPricing.early_bird_label;
+      booking.early_bird_label_en = outPricing.early_bird_label_en;
+      booking.ff_tier = outPricing.ff_tier;
+      booking.ff_discount_percent = outPricing.ff_percent;
+      booking.ticket_coupons = [...newOutboundCoupons, ...newInboundCouponsResult] as any;
       booking.total_miles_accrued = (booking.total_miles_accrued || 0) + milesDiff;
       if (booking.total_miles_accrued < 0) booking.total_miles_accrued = 0;
+      booking.seat_saga_commit = {
+        operation_id: sagaOperationId,
+        operation_type: 'RESCHEDULE',
+        status: 'PENDING_FINALIZATION',
+        committed_at: new Date(),
+      };
+
+      // Derive and pre-register old_inventory_restorations in sagaOp BEFORE booking.save()
+      const oldLegsToRestore: Array<{ flight_id: string; inventory_id: string }> = [];
+      for (const c of outboundCoupons) {
+        if (!oldLegsToRestore.some((l) => l.flight_id === c.flight_id.toString() && l.inventory_id === c.inventory_id.toString())) {
+          oldLegsToRestore.push({ flight_id: c.flight_id.toString(), inventory_id: c.inventory_id.toString() });
+        }
+      }
+      if (shouldRescheduleReturn) {
+        for (const c of inboundCoupons) {
+          if (!oldLegsToRestore.some((l) => l.flight_id === c.flight_id.toString() && l.inventory_id === c.inventory_id.toString())) {
+            oldLegsToRestore.push({ flight_id: c.flight_id.toString(), inventory_id: c.inventory_id.toString() });
+          }
+        }
+      }
+
+      if (sagaOp) {
+        sagaOp.old_inventory_restorations = oldLegsToRestore.map((leg) => ({
+          flight_id: new Types.ObjectId(leg.flight_id),
+          inventory_id: leg.inventory_id,
+          seat_count: passengerCount,
+          mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+        }));
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save();
+      }
 
       await booking.save();
+      businessCommitted = true;
+
+      // Post-commit progression:
+      if (sagaOp) {
+        sagaOp.state = SagaState.COMMITTED;
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save().catch(() => {});
+      }
+
+      let postCommitFinalized = true;
+
+      if (this.seatAllocationService) {
+        try {
+          await this.seatAllocationService.finalizeRescheduleAllocations(
+            booking._id,
+            sagaOperationId,
+            oldSeatAllocations,
+          );
+        } catch (allocErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Failed to finalize reschedule allocations for ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
+      // Restore OLD inventory via restoreSeatsWithSaga
+      const oldRestorations = sagaOp?.old_inventory_restorations?.length
+        ? sagaOp.old_inventory_restorations
+        : oldLegsToRestore.map((leg) => ({
+            flight_id: leg.flight_id,
+            inventory_id: leg.inventory_id,
+            seat_count: passengerCount,
+            mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+          }));
+      for (const leg of oldRestorations) {
+        try {
+          const restored = typeof this.flightsService.restoreSeatsWithSaga === 'function'
+            ? await this.flightsService.restoreSeatsWithSaga(
+                leg.flight_id.toString(),
+                leg.inventory_id,
+                leg.seat_count,
+                { operation_id: sagaOperationId, mutation_key: leg.mutation_key },
+              )
+            : true;
+          if (!restored) {
+            postCommitFinalized = false;
+            this.logger.error(`Failed to restore old seat capacity for flight ${leg.flight_id}`);
+          }
+        } catch (restoreErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Error restoring old seat capacity for flight ${leg.flight_id}: ${restoreErr}`);
+        }
+      }
+
+      if (postCommitFinalized) {
+        let witnessPersisted = false;
+        if (typeof this.bookingModel?.updateOne === 'function') {
+          try {
+            await this.bookingModel.updateOne(
+              { _id: booking._id },
+              { $set: { 'seat_saga_commit.status': 'COMPLETED' } },
+            );
+            witnessPersisted = true;
+          } catch (witnessErr) {
+            this.logger.error(
+              `Failed to persist seat_saga_commit.status=COMPLETED witness on booking ${booking._id}: ${witnessErr}. Saga remains COMMITTED for scheduler retry.`,
+            );
+          }
+        } else {
+          witnessPersisted = true;
+        }
+
+        if (witnessPersisted) {
+          booking.seat_saga_commit.status = 'COMPLETED';
+
+          if (sagaOp) {
+            sagaOp.state = SagaState.COMPLETED;
+            sagaOp.completed_at = new Date();
+            await sagaOp.save().catch(() => {});
+          }
+        }
+      }
 
       const legsMessage = shouldRescheduleReturn ? 'Outbound and return legs' : 'Outbound leg';
       return {
@@ -776,42 +1562,59 @@ export class BookingsService {
         message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.`,
       };
     } catch (err) {
+      if (businessCommitted) {
+        this.logger.error(
+          `Post-commit error in rescheduleTicket for booking ${booking._id}; leaving in COMMITTED / PENDING_FINALIZATION: ${err}`,
+        );
+        throw err;
+      }
+
       // ===== §2 COMPENSATING ROLLBACK =====
-      // Rollback SkyMiles if already adjusted
+      let allCompensated = true;
+
+      // A. Release NEW physical allocations by saga_operation_id ONLY
+      if (this.seatAllocationService && sagaOperationId) {
+        try {
+          await this.seatAllocationService.releaseAllocationsBySaga(sagaOperationId);
+        } catch (allocErr) {
+          allCompensated = false;
+          this.logger.error(`Failed to release allocations by saga ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
       if (skyMilesAdjusted && milesDiff !== 0) {
         try {
           await this.usersService.setSkyMiles(booking.user_id.toString(), originalUserSkyMiles);
-        } catch (_) { /* best-effort rollback */ }
+        } catch (_) {}
       }
 
-      // Restore old seats that were released (deduplicated)
-      if (oldOutboundReleased) {
-        try {
-          await this.restoreSeatsForCouponsStrict(passengerCount, outboundCoupons);
-        } catch (_) { /* best-effort */ }
-      }
-      if (oldInboundReleased) {
-        try {
-          await this.restoreSeatsForCouponsStrict(passengerCount, inboundCoupons);
-        } catch (_) { /* best-effort */ }
+      // B. Roll back reserved NEW inventory
+      for (const leg of reservedLegs) {
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(
+              leg.flight_id,
+              leg.inventory_id,
+              leg.mutation_key,
+              passengerCount,
+            );
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate reservation in reschedule: ${compErr}`);
+          }
+        } else {
+          try {
+            await this.flightsService.updateAvailableSeats(
+              leg.flight_id,
+              leg.inventory_id,
+              +passengerCount,
+            );
+          } catch (_) {}
+        }
       }
 
-      // Release new seats that were reserved
-      try {
-        await this.flightsService.updateAvailableSeats(
-          dto.new_flight_id, dto.new_inventory_id, +passengerCount,
-        );
-      } catch (_) { /* best-effort */ }
-
-      if (shouldRescheduleReturn) {
-        try {
-          await this.flightsService.updateAvailableSeats(
-            dto.new_return_flight_id!, dto.new_return_inventory_id!, +passengerCount,
-          );
-        } catch (_) { /* best-effort */ }
-      }
-
-      // Restore in-memory booking state
+      // C. Restore in-memory booking state
       booking.confirmation_number = bookingSnapshot.confirmation_number;
       booking.status = bookingSnapshot.status as any;
       booking.total_amount = bookingSnapshot.total_amount;
@@ -823,6 +1626,20 @@ export class BookingsService {
       booking.ff_tier = bookingSnapshot.ff_tier;
       booking.ff_discount_percent = bookingSnapshot.ff_discount_percent;
       booking.total_miles_accrued = bookingSnapshot.total_miles_accrued;
+
+      // D. Transition sagaOp state
+      if (sagaOp) {
+        if (allCompensated) {
+          sagaOp.state = SagaState.ABORTED;
+          sagaOp.aborted_at = new Date();
+        } else {
+          sagaOp.last_progress_at = new Date();
+          this.logger.warn(
+            `Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`,
+          );
+        }
+        await sagaOp.save().catch(() => {});
+      }
 
       throw err;
     }
@@ -874,6 +1691,7 @@ export class BookingsService {
       if (outboundIsConnecting) {
         for (const legDef of dto.new_legs!) {
           const flight = await this.flightsService.findById(legDef.flight_id);
+          this.assertBookableFlight(flight, 'reschedule');
           const inventory = flight.inventories.find(
             (inv: any) => inv._id.toString() === legDef.inventory_id || inv.id === legDef.inventory_id,
           );
@@ -904,6 +1722,7 @@ export class BookingsService {
         }
       } else {
         const flight = await this.flightsService.findById(dto.new_flight_id!);
+        this.assertBookableFlight(flight, 'reschedule');
         const inventory = flight.inventories.find(
           (inv: any) => inv._id.toString() === dto.new_inventory_id || inv.id === dto.new_inventory_id,
         );
@@ -935,6 +1754,7 @@ export class BookingsService {
       if (returnIsConnecting) {
         for (const legDef of dto.new_return_legs!) {
           const flight = await this.flightsService.findById(legDef.flight_id);
+          this.assertBookableFlight(flight, 'reschedule');
           const inventory = flight.inventories.find(
             (inv: any) => inv._id.toString() === legDef.inventory_id || inv.id === legDef.inventory_id,
           );
@@ -965,6 +1785,7 @@ export class BookingsService {
         }
       } else {
         const flight = await this.flightsService.findById(dto.new_return_flight_id!);
+        this.assertBookableFlight(flight, 'reschedule');
         const inventory = flight.inventories.find(
           (inv: any) => inv._id.toString() === dto.new_return_inventory_id || inv.id === dto.new_return_inventory_id,
         );
@@ -1025,30 +1846,135 @@ export class BookingsService {
     }
     const milesDiff = outboundMilesDelta + returnMilesDelta;
 
+    // SAGA setup
+    const sagaOperationId = this.generateCode('SAGA-RESCHEDULE');
+    let sagaOp: BookingSeatSagaOperationDocument | null = null;
+    const oldSeatAllocations: Array<{ flight_id: any; seat_code: string }> = [];
+    if (rescheduleOutbound) {
+      for (const c of outboundCoupons) {
+        if (c.seat_code && c.flight_id) {
+          oldSeatAllocations.push({ flight_id: c.flight_id, seat_code: c.seat_code });
+        }
+      }
+    }
+    if (rescheduleReturn) {
+      for (const c of inboundCoupons) {
+        if (c.seat_code && c.flight_id) {
+          oldSeatAllocations.push({ flight_id: c.flight_id, seat_code: c.seat_code });
+        }
+      }
+    }
+
+    let businessCommitted = false;
+    if (this.sagaModel) {
+      try {
+        sagaOp = new this.sagaModel({
+          operation_id: sagaOperationId,
+          operation_type: SagaOperationType.RESCHEDULE,
+          booking_id: booking._id,
+          state: SagaState.PRECOMMIT,
+          new_inventory_reservations: [],
+          old_inventory_restorations: [],
+          new_seat_allocations: [],
+          old_seat_allocations: oldSeatAllocations.map((s) => ({
+            flight_id: new Types.ObjectId(s.flight_id),
+            seat_code: s.seat_code,
+          })),
+          last_progress_at: new Date(),
+        });
+        await sagaOp.save();
+      } catch (_) {}
+    }
+
     // 4. Reserve ALL new seats before releasing any old seats
-    interface ReservedLeg { flight_id: string; inventory_id: string }
+    interface ReservedLeg { flight_id: string; inventory_id: string; mutation_key: string }
     const reservedLegs: ReservedLeg[] = [];
 
     const reserveDirection = async (legs: Array<{ flight_id: string; inventory_id: string }>) => {
       for (const leg of legs) {
         let reserved = false;
+        const mutKey = `${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`;
+        if (sagaOp) {
+          sagaOp.new_inventory_reservations.push({
+            flight_id: new Types.ObjectId(leg.flight_id),
+            inventory_id: leg.inventory_id,
+            seat_count: passengerCount,
+            mutation_key: mutKey,
+          });
+          sagaOp.last_progress_at = new Date();
+          await sagaOp.save();
+        }
+        reservedLegs.push({ ...leg, mutation_key: mutKey });
+
         try {
-          reserved = await this.flightsService.reserveSeats(leg.flight_id, leg.inventory_id, passengerCount);
+          reserved = this.sagaModel
+            ? await this.flightsService.reserveSeats(
+                leg.flight_id,
+                leg.inventory_id,
+                passengerCount,
+                { operation_id: sagaOperationId, mutation_key: mutKey },
+              )
+            : await this.flightsService.reserveSeats(leg.flight_id, leg.inventory_id, passengerCount);
         } catch (error) {
           // Rollback all previously reserved new legs
+          let allCompensated = true;
           for (const r of reservedLegs) {
-            try { await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount); } catch (_) {}
+            if (this.sagaModel) {
+              try {
+                const ok = await this.flightsService.compensateInventoryReservation(
+                  r.flight_id, r.inventory_id, r.mutation_key, passengerCount,
+                );
+                if (!ok) allCompensated = false;
+              } catch (compErr) {
+                allCompensated = false;
+                this.logger.error(`Failed to compensate reservation in reschedule error: ${compErr}`);
+              }
+            } else {
+              try { await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount); } catch (_) {}
+            }
+          }
+          if (sagaOp) {
+            if (allCompensated) {
+              sagaOp.state = SagaState.ABORTED;
+              sagaOp.aborted_at = new Date();
+            } else {
+              sagaOp.last_progress_at = new Date();
+              this.logger.warn(`Saga ${sagaOperationId} reservation failure compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+            }
+            await sagaOp.save().catch(() => {});
           }
           throw error;
         }
         if (!reserved) {
+          let allCompensated = true;
           for (const r of reservedLegs) {
-            try { await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount); } catch (_) {}
+            if (this.sagaModel) {
+              try {
+                const ok = await this.flightsService.compensateInventoryReservation(
+                  r.flight_id, r.inventory_id, r.mutation_key, passengerCount,
+                );
+                if (!ok) allCompensated = false;
+              } catch (compErr) {
+                allCompensated = false;
+                this.logger.error(`Failed to compensate reservation in reschedule: ${compErr}`);
+              }
+            } else {
+              try { await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount); } catch (_) {}
+            }
+          }
+          if (sagaOp) {
+            if (allCompensated) {
+              sagaOp.state = SagaState.ABORTED;
+              sagaOp.aborted_at = new Date();
+            } else {
+              sagaOp.last_progress_at = new Date();
+              this.logger.warn(`Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+            }
+            await sagaOp.save().catch(() => {});
           }
           const f = await this.flightsService.findById(leg.flight_id);
           throw new BadRequestException(`Not enough seats on flight ${f.flight_number}. All reservations rolled back.`);
         }
-        reservedLegs.push(leg);
       }
     };
 
@@ -1080,21 +2006,11 @@ export class BookingsService {
       total_miles_accrued: booking.total_miles_accrued,
     };
 
-    let outboundReleased = false;
-    let returnReleased = false;
     let skyMilesAdjusted = false;
     let originalUserSkyMiles = 0;
 
     try {
-      // Release old seats for changed directions
-      if (rescheduleOutbound) {
-        await this.releaseSeatsForCouponsStrict(passengerCount, outboundCoupons);
-        outboundReleased = true;
-      }
-      if (rescheduleReturn) {
-        await this.releaseSeatsForCouponsStrict(passengerCount, inboundCoupons);
-        returnReleased = true;
-      }
+      // NOTE: Per SAGA Order Invariant, old inventory is NOT released here prior to commit!
 
       // Pricing
       const user = await this.usersService.findById(booking.user_id.toString());
@@ -1147,17 +2063,144 @@ export class BookingsService {
         newReturnCoupons.push(...inboundCoupons);
       }
 
-      const priceDiff = newTotalFare - oldTotalFare;
+      // Physical seat allocations for rescheduled flights
+      if (this.seatAllocationService) {
+        if (rescheduleOutbound) {
+          for (let i = 0; i < outboundFlights.length; i++) {
+            const fl = outboundFlights[i];
+            const inv = outboundInventories[i];
+            const legType = outboundIsConnecting ? `CONNECTING_${i + 1}` : 'OUTBOUND';
+            const legCoupons = newOutboundCoupons.filter(c => c.flight_id.toString() === fl._id.toString() && c.leg_type === legType);
+            const aircraftType = fl.aircraft?.model_code;
+            if (!aircraftType) {
+              throw new BadRequestException(
+                `Flight ${fl.flight_number} is missing aircraft model configuration.`,
+              );
+            }
+
+            const outPassRequests = booking.passengers.map((p, idx) => {
+              const explicitRequest = dto.seat_requests?.find(
+                (r) => r.passenger_index === idx && r.flight_id === fl._id.toString(),
+              );
+              const selType = explicitRequest?.selection_type || 'AUTO';
+              const explicitSeat = selType === 'CHOOSE' && explicitRequest?.seat_code ? explicitRequest.seat_code.trim() : undefined;
+              return {
+                passenger_name: `${p.first_name} ${p.last_name}`,
+                coupon_number: legCoupons[idx]?.coupon_number,
+                cabin_class: inv.cabin_class,
+                selection_type: selType,
+                seat_code: explicitSeat,
+                passenger_index: idx,
+              };
+            });
+
+            const allocResults = await this.seatAllocationService.allocateSeats({
+              flight_id: fl._id,
+              aircraft_type: aircraftType,
+              booking_id: booking._id,
+              held_until: new Date(Date.now() + 30 * 60 * 1000),
+              saga_operation_id: sagaOperationId,
+              passengers: outPassRequests,
+            });
+
+            for (let idx = 0; idx < allocResults.length; idx++) {
+              const res = allocResults[idx];
+              if (legCoupons[idx]) {
+                legCoupons[idx].seat_code = res.seat_code;
+                legCoupons[idx].seat_selection_type = res.selection_type;
+                legCoupons[idx].seat_fee = res.seat_fee;
+                legCoupons[idx].seat_pricing_snapshot = res.pricing_snapshot;
+              }
+              if (sagaOp) {
+                sagaOp.new_seat_allocations.push({
+                  flight_id: fl._id,
+                  seat_code: res.seat_code,
+                  coupon_number: res.coupon_number,
+                });
+              }
+            }
+          }
+        }
+
+        if (rescheduleReturn) {
+          for (let i = 0; i < returnFlights.length; i++) {
+            const fl = returnFlights[i];
+            const inv = returnInventories[i];
+            const legType = returnIsConnecting ? `INBOUND_${i + 1}` : 'INBOUND';
+            const legCoupons = newReturnCoupons.filter(c => c.flight_id.toString() === fl._id.toString() && c.leg_type === legType);
+            const aircraftType = fl.aircraft?.model_code;
+            if (!aircraftType) {
+              throw new BadRequestException(
+                `Flight ${fl.flight_number} is missing aircraft model configuration.`,
+              );
+            }
+
+            const retPassRequests = booking.passengers.map((p, idx) => {
+              const explicitRequest = dto.seat_requests?.find(
+                (r) => r.passenger_index === idx && r.flight_id === fl._id.toString(),
+              );
+              const selType = explicitRequest?.selection_type || 'AUTO';
+              const explicitSeat = selType === 'CHOOSE' && explicitRequest?.seat_code ? explicitRequest.seat_code.trim() : undefined;
+              return {
+                passenger_name: `${p.first_name} ${p.last_name}`,
+                coupon_number: legCoupons[idx]?.coupon_number,
+                cabin_class: inv.cabin_class,
+                selection_type: selType,
+                seat_code: explicitSeat,
+                passenger_index: idx,
+              };
+            });
+
+            const allocResults = await this.seatAllocationService.allocateSeats({
+              flight_id: fl._id,
+              aircraft_type: aircraftType,
+              booking_id: booking._id,
+              held_until: new Date(Date.now() + 30 * 60 * 1000),
+              saga_operation_id: sagaOperationId,
+              passengers: retPassRequests,
+            });
+
+            for (let idx = 0; idx < allocResults.length; idx++) {
+              const res = allocResults[idx];
+              if (legCoupons[idx]) {
+                legCoupons[idx].seat_code = res.seat_code;
+                legCoupons[idx].seat_selection_type = res.selection_type;
+                legCoupons[idx].seat_fee = res.seat_fee;
+                legCoupons[idx].seat_pricing_snapshot = res.pricing_snapshot;
+              }
+              if (sagaOp) {
+                sagaOp.new_seat_allocations.push({
+                  flight_id: fl._id,
+                  seat_code: res.seat_code,
+                  coupon_number: res.coupon_number,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // Compute total seat fees and authoritative new total amount
+      let newTotalSeatFees = 0;
+      for (const c of newOutboundCoupons) {
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+      for (const c of newReturnCoupons) {
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+
+      const newTotalAmount = newTotalFare + newTotalSeatFees;
+      const priceDiff = newTotalAmount - booking.total_amount;
 
       // Financial adjustment
-      const card = dto.credit_card_number || 'SAVED-CARD';
-      const maskedCard = card.length >= 4 ? `**** **** **** ${card.slice(-4)}` : card;
       if (priceDiff > 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_CHARGE', amount: priceDiff,
           card_masked: maskedCard, status: 'SUCCESS', created_at: new Date(),
         });
       } else if (priceDiff < 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_REFUND', amount: Math.abs(priceDiff),
           card_masked: maskedCard, status: 'SUCCESS', created_at: new Date(),
@@ -1175,12 +2218,129 @@ export class BookingsService {
       const newConfirmationNumber = this.generateCode('CNF');
       booking.confirmation_number = newConfirmationNumber;
       booking.status = BookingStatus.CONFIRMED;
-      booking.total_amount = newTotalFare;
+      booking.total_amount = newTotalAmount;
+      booking.total_fare = newTotalFare;
+      booking.total_seat_fees = newTotalSeatFees;
       booking.ticket_coupons = [...newOutboundCoupons, ...newReturnCoupons] as any;
       booking.total_miles_accrued = (booking.total_miles_accrued || 0) + milesDiff;
       if (booking.total_miles_accrued < 0) booking.total_miles_accrued = 0;
+      booking.seat_saga_commit = {
+        operation_id: sagaOperationId,
+        operation_type: 'RESCHEDULE',
+        status: 'PENDING_FINALIZATION',
+        committed_at: new Date(),
+      };
+
+      // Derive and pre-register old_inventory_restorations in sagaOp BEFORE booking.save()
+      const oldLegsToRestore: Array<{ flight_id: string; inventory_id: string }> = [];
+      if (rescheduleOutbound) {
+        for (const c of outboundCoupons) {
+          if (!oldLegsToRestore.some((l) => l.flight_id === c.flight_id.toString() && l.inventory_id === c.inventory_id.toString())) {
+            oldLegsToRestore.push({ flight_id: c.flight_id.toString(), inventory_id: c.inventory_id.toString() });
+          }
+        }
+      }
+      if (rescheduleReturn) {
+        for (const c of inboundCoupons) {
+          if (!oldLegsToRestore.some((l) => l.flight_id === c.flight_id.toString() && l.inventory_id === c.inventory_id.toString())) {
+            oldLegsToRestore.push({ flight_id: c.flight_id.toString(), inventory_id: c.inventory_id.toString() });
+          }
+        }
+      }
+
+      if (sagaOp) {
+        sagaOp.old_inventory_restorations = oldLegsToRestore.map((leg) => ({
+          flight_id: new Types.ObjectId(leg.flight_id),
+          inventory_id: leg.inventory_id,
+          seat_count: passengerCount,
+          mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+        }));
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save();
+      }
 
       await booking.save();
+      businessCommitted = true;
+
+      // Post-commit progression:
+      if (sagaOp) {
+        sagaOp.state = SagaState.COMMITTED;
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save().catch(() => {});
+      }
+
+      let postCommitFinalized = true;
+
+      if (this.seatAllocationService) {
+        try {
+          await this.seatAllocationService.finalizeRescheduleAllocations(
+            booking._id,
+            sagaOperationId,
+            oldSeatAllocations,
+          );
+        } catch (allocErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Failed to finalize reschedule allocations for ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
+      // Restore OLD inventory via restoreSeatsWithSaga
+      const oldRestorations = sagaOp?.old_inventory_restorations?.length
+        ? sagaOp.old_inventory_restorations
+        : oldLegsToRestore.map((leg) => ({
+            flight_id: leg.flight_id,
+            inventory_id: leg.inventory_id,
+            seat_count: passengerCount,
+            mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+          }));
+      for (const leg of oldRestorations) {
+        try {
+          const restored = typeof this.flightsService.restoreSeatsWithSaga === 'function'
+            ? await this.flightsService.restoreSeatsWithSaga(
+                leg.flight_id.toString(),
+                leg.inventory_id,
+                leg.seat_count,
+                { operation_id: sagaOperationId, mutation_key: leg.mutation_key },
+              )
+            : true;
+          if (!restored) {
+            postCommitFinalized = false;
+            this.logger.error(`Failed to restore old seat capacity for flight ${leg.flight_id}`);
+          }
+        } catch (restoreErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Error restoring old seat capacity for flight ${leg.flight_id}: ${restoreErr}`);
+        }
+      }
+
+      if (postCommitFinalized) {
+        let witnessPersisted = false;
+        if (typeof this.bookingModel?.updateOne === 'function') {
+          try {
+            await this.bookingModel.updateOne(
+              { _id: booking._id },
+              { $set: { 'seat_saga_commit.status': 'COMPLETED' } },
+            );
+            witnessPersisted = true;
+          } catch (witnessErr) {
+            this.logger.error(
+              `Failed to persist seat_saga_commit.status=COMPLETED witness on booking ${booking._id}: ${witnessErr}. Saga remains COMMITTED for scheduler retry.`,
+            );
+          }
+        } else {
+          witnessPersisted = true;
+        }
+
+        if (witnessPersisted) {
+          booking.seat_saga_commit.status = 'COMPLETED';
+
+          if (sagaOp) {
+            sagaOp.state = SagaState.COMPLETED;
+            sagaOp.completed_at = new Date();
+            await sagaOp.save().catch(() => {});
+          }
+        }
+      }
 
       const legsMessage = rescheduleOutbound && rescheduleReturn
         ? 'Outbound and return legs' : rescheduleOutbound ? 'Outbound leg' : 'Return leg';
@@ -1190,19 +2350,47 @@ export class BookingsService {
         message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.`,
       };
     } catch (err) {
+      if (businessCommitted) {
+        this.logger.error(
+          `Post-commit error in rescheduleMixedRoundTrip for booking ${booking._id}; leaving in COMMITTED / PENDING_FINALIZATION: ${err}`,
+        );
+        throw err;
+      }
+
       // Compensating rollback
+      let allCompensated = true;
+
+      // A. Release physical allocations by saga_operation_id
+      if (this.seatAllocationService && sagaOperationId) {
+        try {
+          await this.seatAllocationService.releaseAllocationsBySaga(sagaOperationId);
+        } catch (allocErr) {
+          allCompensated = false;
+          this.logger.error(`Failed to release allocations by saga ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
       if (skyMilesAdjusted && milesDiff !== 0) {
         try { await this.usersService.setSkyMiles(booking.user_id.toString(), originalUserSkyMiles); } catch (_) {}
       }
-      if (outboundReleased) {
-        try { await this.restoreSeatsForCouponsStrict(passengerCount, outboundCoupons); } catch (_) {}
-      }
-      if (returnReleased) {
-        try { await this.restoreSeatsForCouponsStrict(passengerCount, inboundCoupons); } catch (_) {}
-      }
+
+      // B. Compensate inventory reservations
       for (const r of reservedLegs) {
-        try { await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount); } catch (_) {}
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(r.flight_id, r.inventory_id, r.mutation_key, passengerCount);
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate reservation in reschedule catch: ${compErr}`);
+          }
+        } else {
+          try {
+            await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount);
+          } catch (_) {}
+        }
       }
+
       // Restore booking in memory
       booking.confirmation_number = bookingSnapshot.confirmation_number;
       booking.status = bookingSnapshot.status as any;
@@ -1215,6 +2403,18 @@ export class BookingsService {
       booking.ff_tier = bookingSnapshot.ff_tier;
       booking.ff_discount_percent = bookingSnapshot.ff_discount_percent;
       booking.total_miles_accrued = bookingSnapshot.total_miles_accrued;
+
+      if (sagaOp) {
+        if (allCompensated) {
+          sagaOp.state = SagaState.ABORTED;
+          sagaOp.aborted_at = new Date();
+        } else {
+          sagaOp.last_progress_at = new Date();
+          this.logger.warn(`Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+        }
+        await sagaOp.save().catch(() => {});
+      }
+
       throw err;
     }
   }
@@ -1243,6 +2443,7 @@ export class BookingsService {
     for (let i = 0; i < newLegs.length; i++) {
       const legDef = newLegs[i];
       const flight = await this.flightsService.findById(legDef.flight_id);
+      this.assertBookableFlight(flight, 'reschedule');
       const inventory = flight.inventories.find(
         (inv: any) => inv._id.toString() === legDef.inventory_id || inv.id === legDef.inventory_id,
       );
@@ -1288,40 +2489,142 @@ export class BookingsService {
     }
 
     // 3. Atomically reserve seats on all new legs first
-    const reservedLegs: typeof newLegs = [];
+    const sagaOperationId = this.generateCode('SAGA-RESCHEDULE');
+    let sagaOp: BookingSeatSagaOperationDocument | null = null;
+    const oldSeatAllocations: Array<{ flight_id: any; seat_code: string }> = [];
+    for (const c of oldCoupons) {
+      if (c.seat_code && c.flight_id) {
+        oldSeatAllocations.push({ flight_id: c.flight_id, seat_code: c.seat_code });
+      }
+    }
+
+    if (this.sagaModel) {
+      try {
+        sagaOp = new this.sagaModel({
+          operation_id: sagaOperationId,
+          operation_type: SagaOperationType.RESCHEDULE,
+          booking_id: booking._id,
+          state: SagaState.PRECOMMIT,
+          new_inventory_reservations: [],
+          old_inventory_restorations: [],
+          new_seat_allocations: [],
+          old_seat_allocations: oldSeatAllocations.map((s) => ({
+            flight_id: new Types.ObjectId(s.flight_id),
+            seat_code: s.seat_code,
+          })),
+          last_progress_at: new Date(),
+        });
+        await sagaOp.save();
+      } catch (_) {}
+    }
+
+    const reservedLegs: Array<typeof newLegs[number] & { mutation_key: string }> = [];
     for (const legDef of newLegs) {
       let reserved = false;
+      const mutKey = `${sagaOperationId}_${legDef.flight_id}_${legDef.inventory_id}`;
+
+      // Persist intended journal entry BEFORE atomic mutation so scheduler always discovers it
+      if (sagaOp) {
+        sagaOp.new_inventory_reservations.push({
+          flight_id: new Types.ObjectId(legDef.flight_id),
+          inventory_id: legDef.inventory_id,
+          seat_count: passengerCount,
+          mutation_key: mutKey,
+        });
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save().catch(() => {});
+      }
+
       try {
-        reserved = await this.flightsService.reserveSeats(
-          legDef.flight_id,
-          legDef.inventory_id,
-          passengerCount,
-        );
-      } catch (error) {
-        for (const reservedLeg of reservedLegs) {
-          try {
-            await this.flightsService.updateAvailableSeats(
-              reservedLeg.flight_id,
-              reservedLeg.inventory_id,
+        reserved = this.sagaModel
+          ? await this.flightsService.reserveSeats(
+              legDef.flight_id,
+              legDef.inventory_id,
+              passengerCount,
+              { operation_id: sagaOperationId, mutation_key: mutKey },
+            )
+          : await this.flightsService.reserveSeats(
+              legDef.flight_id,
+              legDef.inventory_id,
               passengerCount,
             );
-          } catch (_) {}
+      } catch (error) {
+        let allCompensated = true;
+        for (const reservedLeg of reservedLegs) {
+          if (this.sagaModel) {
+            try {
+              const ok = await this.flightsService.compensateInventoryReservation(
+                reservedLeg.flight_id,
+                reservedLeg.inventory_id,
+                reservedLeg.mutation_key,
+                passengerCount,
+              );
+              if (!ok) allCompensated = false;
+            } catch (compErr) {
+              allCompensated = false;
+              this.logger.error(`Failed to compensate reservation in reschedule error: ${compErr}`);
+            }
+          } else {
+            try {
+              await this.flightsService.updateAvailableSeats(
+                reservedLeg.flight_id,
+                reservedLeg.inventory_id,
+                passengerCount,
+              );
+            } catch (_) {}
+          }
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+          } else {
+            sagaOp.last_progress_at = new Date();
+            this.logger.warn(`Saga ${sagaOperationId} reservation failure compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+          }
+          await sagaOp.save().catch(() => {});
         }
         throw error;
       }
       if (!reserved) {
         // Rollback already reserved new legs
+        let allCompensated = true;
         for (const r of reservedLegs) {
-          try {
-            await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount);
-          } catch (_) {}
+          if (this.sagaModel) {
+            try {
+              const ok = await this.flightsService.compensateInventoryReservation(
+                r.flight_id,
+                r.inventory_id,
+                r.mutation_key,
+                passengerCount,
+              );
+              if (!ok) allCompensated = false;
+            } catch (compErr) {
+              allCompensated = false;
+              this.logger.error(`Failed to compensate reservation in reschedule: ${compErr}`);
+            }
+          } else {
+            try {
+              await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount);
+            } catch (_) {}
+          }
+        }
+        if (sagaOp) {
+          if (allCompensated) {
+            sagaOp.state = SagaState.ABORTED;
+            sagaOp.aborted_at = new Date();
+          } else {
+            sagaOp.last_progress_at = new Date();
+            this.logger.warn(`Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+          }
+          await sagaOp.save().catch(() => {});
         }
         const f = await this.flightsService.findById(legDef.flight_id);
         throw new BadRequestException(
           `Not enough available seats on flight ${f.flight_number}. Reschedule cancelled and no seats were modified.`,
         );
       }
-      reservedLegs.push(legDef);
+      reservedLegs.push({ ...legDef, mutation_key: mutKey });
     }
 
     // 4. Mutating Phase with compensating rollback
@@ -1339,15 +2642,13 @@ export class BookingsService {
       total_miles_accrued: booking.total_miles_accrued,
     };
 
-    let oldSeatsReleased = false;
     let skyMilesAdjusted = false;
     let milesDiff = 0;
     let originalUserSkyMiles = 0;
+    let businessCommitted = false;
 
     try {
-      // Release old seats strictly
-      await this.releaseSeatsForCouponsStrict(passengerCount, oldCoupons);
-      oldSeatsReleased = true;
+      // NOTE: Per SAGA Order Invariant, old inventory is NOT released here prior to commit!
 
       // Price calculation
       const user = await this.usersService.findById(booking.user_id.toString());
@@ -1391,12 +2692,74 @@ export class BookingsService {
         }
       }
 
-      const priceDiff = newTotalFare - oldTotalFare;
+      // Physical seat allocations for connecting flights
+      if (this.seatAllocationService) {
+        for (let i = 0; i < loadedFlights.length; i++) {
+          const fl = loadedFlights[i];
+          const inv = loadedInventories[i];
+          const legType = `CONNECTING_${i + 1}`;
+          const legCoupons = newCoupons.filter(c => c.flight_id.toString() === fl._id.toString() && c.leg_type === legType);
+          const aircraftType = fl.aircraft?.model_code;
+          if (!aircraftType) {
+            throw new BadRequestException(
+              `Flight ${fl.flight_number} is missing aircraft model configuration.`,
+            );
+          }
 
-      const card = dto.credit_card_number || 'SAVED-CARD';
-      const maskedCard = card.length >= 4 ? `**** **** **** ${card.slice(-4)}` : card;
+          const connPassRequests = booking.passengers.map((p, idx) => {
+            const explicitRequest = dto.seat_requests?.find(
+              (r) => r.passenger_index === idx && r.flight_id === fl._id.toString(),
+            );
+            const selType = explicitRequest?.selection_type || 'AUTO';
+            const explicitSeat = selType === 'CHOOSE' && explicitRequest?.seat_code ? explicitRequest.seat_code.trim() : undefined;
+            return {
+              passenger_name: `${p.first_name} ${p.last_name}`,
+              passenger_index: idx,
+              coupon_number: legCoupons[idx]?.coupon_number,
+              cabin_class: inv.cabin_class,
+              selection_type: selType,
+              seat_code: explicitSeat,
+            };
+          });
+
+          const allocResults = await this.seatAllocationService.allocateSeats({
+            flight_id: fl._id,
+            aircraft_type: aircraftType,
+            booking_id: booking._id,
+            held_until: new Date(Date.now() + 30 * 60 * 1000),
+            saga_operation_id: sagaOperationId,
+            passengers: connPassRequests,
+          });
+
+          for (let idx = 0; idx < allocResults.length; idx++) {
+            const res = allocResults[idx];
+            if (legCoupons[idx]) {
+              legCoupons[idx].seat_code = res.seat_code;
+              legCoupons[idx].seat_selection_type = res.selection_type;
+              legCoupons[idx].seat_fee = res.seat_fee;
+              legCoupons[idx].seat_pricing_snapshot = res.pricing_snapshot;
+            }
+            if (sagaOp) {
+              sagaOp.new_seat_allocations.push({
+                flight_id: fl._id,
+                seat_code: res.seat_code,
+                coupon_number: res.coupon_number,
+              });
+            }
+          }
+        }
+      }
+
+      let newTotalSeatFees = 0;
+      for (const c of newCoupons) {
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+
+      const newTotalAmount = newTotalFare + newTotalSeatFees;
+      const priceDiff = newTotalAmount - booking.total_amount;
 
       if (priceDiff > 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_CHARGE',
           amount: priceDiff,
@@ -1405,6 +2768,7 @@ export class BookingsService {
           created_at: new Date(),
         });
       } else if (priceDiff < 0) {
+        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_REFUND',
           amount: Math.abs(priceDiff),
@@ -1427,11 +2791,119 @@ export class BookingsService {
       const newConfirmationNumber = this.generateCode('CNF');
       booking.confirmation_number = newConfirmationNumber;
       booking.status = BookingStatus.CONFIRMED;
-      booking.total_amount = newTotalFare;
+      booking.total_amount = newTotalAmount;
+      booking.total_fare = newTotalFare;
+      booking.total_seat_fees = newTotalSeatFees;
       booking.ticket_coupons = newCoupons;
       booking.total_miles_accrued = newTotalMiles;
+      booking.seat_saga_commit = {
+        operation_id: sagaOperationId,
+        operation_type: 'RESCHEDULE',
+        status: 'PENDING_FINALIZATION',
+        committed_at: new Date(),
+      };
+
+      // Derive and pre-register old_inventory_restorations in sagaOp BEFORE booking.save()
+      const oldLegsToRestore: Array<{ flight_id: string; inventory_id: string }> = [];
+      for (const c of oldCoupons) {
+        if (!oldLegsToRestore.some((l) => l.flight_id === c.flight_id.toString() && l.inventory_id === c.inventory_id.toString())) {
+          oldLegsToRestore.push({ flight_id: c.flight_id.toString(), inventory_id: c.inventory_id.toString() });
+        }
+      }
+
+      if (sagaOp) {
+        sagaOp.old_inventory_restorations = oldLegsToRestore.map((leg) => ({
+          flight_id: new Types.ObjectId(leg.flight_id),
+          inventory_id: leg.inventory_id,
+          seat_count: passengerCount,
+          mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+        }));
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save();
+      }
 
       await booking.save();
+      businessCommitted = true;
+
+      // Post-commit progression:
+      if (sagaOp) {
+        sagaOp.state = SagaState.COMMITTED;
+        sagaOp.last_progress_at = new Date();
+        await sagaOp.save().catch(() => {});
+      }
+
+      let postCommitFinalized = true;
+
+      if (this.seatAllocationService) {
+        try {
+          await this.seatAllocationService.finalizeRescheduleAllocations(
+            booking._id,
+            sagaOperationId,
+            oldSeatAllocations,
+          );
+        } catch (allocErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Failed to finalize reschedule allocations for ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
+      // Restore OLD inventory via restoreSeatsWithSaga
+      const oldRestorations = sagaOp?.old_inventory_restorations?.length
+        ? sagaOp.old_inventory_restorations
+        : oldLegsToRestore.map((leg) => ({
+            flight_id: leg.flight_id,
+            inventory_id: leg.inventory_id,
+            seat_count: passengerCount,
+            mutation_key: `RESTORE_OLD_${sagaOperationId}_${leg.flight_id}_${leg.inventory_id}`,
+          }));
+      for (const leg of oldRestorations) {
+        try {
+          const restored = typeof this.flightsService.restoreSeatsWithSaga === 'function'
+            ? await this.flightsService.restoreSeatsWithSaga(
+                leg.flight_id.toString(),
+                leg.inventory_id,
+                leg.seat_count,
+                { operation_id: sagaOperationId, mutation_key: leg.mutation_key },
+              )
+            : true;
+          if (!restored) {
+            postCommitFinalized = false;
+            this.logger.error(`Failed to restore old seat capacity for flight ${leg.flight_id}`);
+          }
+        } catch (restoreErr) {
+          postCommitFinalized = false;
+          this.logger.error(`Error restoring old seat capacity for flight ${leg.flight_id}: ${restoreErr}`);
+        }
+      }
+
+      if (postCommitFinalized) {
+        let witnessPersisted = false;
+        if (typeof this.bookingModel?.updateOne === 'function') {
+          try {
+            await this.bookingModel.updateOne(
+              { _id: booking._id },
+              { $set: { 'seat_saga_commit.status': 'COMPLETED' } },
+            );
+            witnessPersisted = true;
+          } catch (witnessErr) {
+            this.logger.error(
+              `Failed to persist seat_saga_commit.status=COMPLETED witness on booking ${booking._id}: ${witnessErr}. Saga remains COMMITTED for scheduler retry.`,
+            );
+          }
+        } else {
+          witnessPersisted = true;
+        }
+
+        if (witnessPersisted) {
+          booking.seat_saga_commit.status = 'COMPLETED';
+
+          if (sagaOp) {
+            sagaOp.state = SagaState.COMPLETED;
+            sagaOp.completed_at = new Date();
+            await sagaOp.save().catch(() => {});
+          }
+        }
+      }
 
       const diffMsg =
         priceDiff > 0
@@ -1446,24 +2918,47 @@ export class BookingsService {
         message: `Đổi vé nối chuyến thành công. Mã xác nhận mới: ${newConfirmationNumber}.${diffMsg}`,
       };
     } catch (err) {
+      if (businessCommitted) {
+        this.logger.error(
+          `Post-commit error in rescheduleConnectingTicket for booking ${booking._id}; leaving in COMMITTED / PENDING_FINALIZATION: ${err}`,
+        );
+        throw err;
+      }
+
       // Compensating rollback
+      let allCompensated = true;
+
+      // A. Release physical allocations by saga_operation_id
+      if (this.seatAllocationService && sagaOperationId) {
+        try {
+          await this.seatAllocationService.releaseAllocationsBySaga(sagaOperationId);
+        } catch (allocErr) {
+          allCompensated = false;
+          this.logger.error(`Failed to release allocations by saga ${sagaOperationId}: ${allocErr}`);
+        }
+      }
+
       if (skyMilesAdjusted) {
         try {
           await this.usersService.setSkyMiles(booking.user_id.toString(), originalUserSkyMiles);
         } catch (_) {}
       }
 
-      if (oldSeatsReleased) {
-        try {
-          await this.restoreSeatsForCouponsStrict(passengerCount, oldCoupons);
-        } catch (_) {}
-      }
-
-      // Release new seats
+      // B. Compensate inventory reservations
       for (const r of reservedLegs) {
-        try {
-          await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount);
-        } catch (_) {}
+        if (this.sagaModel) {
+          try {
+            const ok = await this.flightsService.compensateInventoryReservation(r.flight_id, r.inventory_id, r.mutation_key, passengerCount);
+            if (!ok) allCompensated = false;
+          } catch (compErr) {
+            allCompensated = false;
+            this.logger.error(`Failed to compensate reservation in reschedule catch: ${compErr}`);
+          }
+        } else {
+          try {
+            await this.flightsService.updateAvailableSeats(r.flight_id, r.inventory_id, +passengerCount);
+          } catch (_) {}
+        }
       }
 
       // Restore booking in memory
@@ -1478,6 +2973,17 @@ export class BookingsService {
       booking.ff_tier = bookingSnapshot.ff_tier;
       booking.ff_discount_percent = bookingSnapshot.ff_discount_percent;
       booking.total_miles_accrued = bookingSnapshot.total_miles_accrued;
+
+      if (sagaOp) {
+        if (allCompensated) {
+          sagaOp.state = SagaState.ABORTED;
+          sagaOp.aborted_at = new Date();
+        } else {
+          sagaOp.last_progress_at = new Date();
+          this.logger.warn(`Saga ${sagaOperationId} compensation incomplete. Leaving PRECOMMIT for scheduler retry.`);
+        }
+        await sagaOp.save().catch(() => {});
+      }
 
       throw err;
     }
@@ -1555,6 +3061,9 @@ export class BookingsService {
 
     try {
       await booking.save();
+      if (this.seatAllocationService) {
+        await this.seatAllocationService.releaseAllocations(booking._id).catch(() => {});
+      }
     } catch (saveError) {
       try {
         await this.restoreSeatsForCouponsStrict(
@@ -1768,6 +3277,9 @@ export class BookingsService {
       is_smoking: inventory.is_smoking,
       fare_paid: fare,
       seat_code: (passenger as any).seat_code || '',
+      seat_selection_type: 'AUTO' as any,
+      seat_fee: 0,
+      seat_pricing_snapshot: undefined as any,
       leg_type: legType,
       coupon_status: 'ACTIVE',
     };
@@ -1948,6 +3460,9 @@ export class BookingsService {
       booking.status = BookingStatus.CANCELLED;
       booking.cancellation_number = cancellationNumber;
       await booking.save();
+      if (this.seatAllocationService) {
+        await this.seatAllocationService.releaseAllocations(booking._id).catch(() => {});
+      }
 
       const message = `Ticket successfully cancelled. Cancellation number: ${cancellationNumber}. Refund: ${refundAmount.toLocaleString('vi-VN')} VND (${refundPercentage}%).`;
 
@@ -2116,6 +3631,7 @@ export class BookingsService {
           { blocking_number: identifier },
           { confirmation_number: identifier },
           { pnr_code: identifier },
+          { cancellation_number: identifier },
         ],
       })
       .exec();

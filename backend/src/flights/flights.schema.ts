@@ -32,6 +32,31 @@ export class AircraftInfo {
   registration?: string;
 }
 
+@Schema({ _id: false })
+export class InventorySagaMarker {
+  @Prop({ required: true })
+  mutation_key: string;
+
+  @Prop({ required: true })
+  operation_id: string;
+
+  @Prop({ required: true, enum: ['RESERVE_NEW', 'RESTORE_OLD'] })
+  action: 'RESERVE_NEW' | 'RESTORE_OLD';
+
+  @Prop({ required: true, min: 1 })
+  seat_count: number;
+
+  @Prop({ required: true, enum: ['APPLIED', 'COMPENSATED'], default: 'APPLIED' })
+  state: 'APPLIED' | 'COMPENSATED';
+
+  @Prop({ default: () => new Date() })
+  created_at: Date;
+
+  @Prop({ required: false })
+  compensated_at?: Date;
+}
+export const InventorySagaMarkerSchema = SchemaFactory.createForClass(InventorySagaMarker);
+
 @Schema({ _id: true })
 export class FlightInventory {
   @Prop({ type: String, enum: CabinClass, required: true })
@@ -52,6 +77,9 @@ export class FlightInventory {
 
   @Prop({ required: true, min: 0 })
   available_seats: number;
+
+  @Prop({ type: [InventorySagaMarkerSchema], default: [] })
+  saga_markers: InventorySagaMarker[];
 }
 export const FlightInventorySchema = SchemaFactory.createForClass(FlightInventory);
 
@@ -105,9 +133,41 @@ export class Flight {
 
   @Prop({ type: [FlightInventorySchema], default: [] })
   inventories: FlightInventory[];
+
+  // Provenance & Deterministic Schedule Identity (Phase A)
+  @Prop({ required: false, trim: true })
+  template_id?: string;
+
+  @Prop({ required: false })
+  operating_date?: string;
+
+  @Prop({ default: false })
+  is_generated: boolean;
+
+  @Prop({ default: 'seed' })
+  generated_source?: string;
+
+  @Prop({ default: false })
+  is_manually_modified: boolean;
+
+  @Prop({ required: true, uppercase: true, trim: true, default: 'APTECH_AIRLINES' })
+  operator: string;
+
+  @Prop({ required: true, default: true, index: true })
+  is_bookable: boolean;
+
+  @Prop({ default: 'INTERNAL_GENERATED' })
+  data_source: string;
 }
 
 export const FlightSchema = SchemaFactory.createForClass(Flight);
 
-// Index for fast search queries
-FlightSchema.index({ origin_iata: 1, dest_iata: 1, departure_date: 1 });
+// Covering and compound indexes for 15k+ operational flight documents
+FlightSchema.index({ template_id: 1, operating_date: 1 }, { unique: true, sparse: true });
+FlightSchema.index({ flight_number: 1, departure_date: 1 });
+FlightSchema.index({ origin_iata: 1, departure_date: 1, status: 1 });
+FlightSchema.index({ dest_iata: 1, departure_date: 1, status: 1 });
+FlightSchema.index({ origin_iata: 1, dest_iata: 1, departure_date: 1, status: 1 });
+FlightSchema.index({ is_bookable: 1, origin_iata: 1, dest_iata: 1, departure_date: 1, status: 1 });
+FlightSchema.index({ operator: 1, is_bookable: 1 });
+FlightSchema.index({ status: 1, scheduled_departure: 1 });

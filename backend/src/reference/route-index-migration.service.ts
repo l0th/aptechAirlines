@@ -1,7 +1,7 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { RouteRef, RouteRefDocument } from './reference.schema';
+import { RouteRef, RouteRefDocument, RouteSyncState, RouteSyncStateDocument } from './reference.schema';
 
 export interface LegacyDocumentsReport {
   missingCount: number;
@@ -105,6 +105,7 @@ export class RouteIndexMigrationService implements OnModuleInit {
 
   constructor(
     @InjectModel(RouteRef.name) private routeRefModel: Model<RouteRefDocument>,
+    @Optional() @InjectModel(RouteSyncState.name) private routeSyncStateModel?: Model<RouteSyncStateDocument>,
   ) {}
 
   /**
@@ -114,9 +115,79 @@ export class RouteIndexMigrationService implements OnModuleInit {
   async onModuleInit() {
     try {
       await this.migrateIndexes();
+      await this.migrateRouteSyncStateIndexes();
     } catch (err: any) {
-      this.logger.error(`Critical RouteRef index migration failure on startup: ${err.message}`, err.stack);
+      this.logger.error(`Critical Route / RouteSyncState index migration failure on startup: ${err.message}`, err.stack);
       throw err;
+    }
+  }
+
+  /**
+   * Safely migrates RouteSyncState collection indexes:
+   * Drops obsolete single-field unique index on dep_iata (dep_iata_1),
+   * creates compound unique index { dep_iata: 1, source: 1 },
+   * and verifies final collection index state.
+   *
+   * Re-throws genuine failures to onModuleInit() to abort startup on invalid index state.
+   */
+  async migrateRouteSyncStateIndexes(): Promise<void> {
+    if (!this.routeSyncStateModel) return;
+
+    const col = this.routeSyncStateModel.collection;
+    let indexes: any[] = [];
+    try {
+      indexes = await col.indexes();
+    } catch (err: any) {
+      // Code 26: NamespaceNotFound (collection does not exist yet) is harmless
+      if (err.code === 26 || err.codeName === 'NamespaceNotFound' || err.message?.includes('ns does not exist')) {
+        indexes = [];
+      } else {
+        throw err;
+      }
+    }
+
+    const obsoleteSingleIdx = indexes.find(
+      (i) => i.name === 'dep_iata_1' || (Object.keys(i.key || {}).length === 1 && i.key.dep_iata === 1 && i.unique),
+    );
+    if (obsoleteSingleIdx) {
+      this.logger.warn(`Dropping obsolete single-field unique index ${obsoleteSingleIdx.name} on RouteSyncState`);
+      try {
+        await col.dropIndex(obsoleteSingleIdx.name);
+      } catch (err: any) {
+        // Code 27: IndexNotFound is harmless (already dropped)
+        if (err.code !== 27 && err.codeName !== 'IndexNotFound' && !err.message?.includes('index not found')) {
+          throw err;
+        }
+      }
+    }
+
+    const hasCompound = indexes.some(
+      (i) => i.key && i.key.dep_iata === 1 && i.key.source === 1 && i.unique === true,
+    );
+    if (!hasCompound) {
+      this.logger.log('Creating compound unique index { dep_iata: 1, source: 1 } on RouteSyncState');
+      await col.createIndex({ dep_iata: 1, source: 1 }, { unique: true, name: 'dep_iata_1_source_1' });
+    }
+
+    // Post-migration authoritative verification
+    const finalIndexes = await col.indexes();
+    const verifiedCompound = finalIndexes.some(
+      (i) => i.key && i.key.dep_iata === 1 && i.key.source === 1 && i.unique === true,
+    );
+    if (!verifiedCompound) {
+      throw new Error(
+        'RouteSyncState post-migration verification failed: compound unique index { dep_iata: 1, source: 1 } is missing or non-unique',
+      );
+    }
+
+    const remainingObsolete = finalIndexes.find(
+      (i) => (i.name === 'dep_iata_1' && i.unique) ||
+             (Object.keys(i.key || {}).length === 1 && i.key.dep_iata === 1 && i.unique === true),
+    );
+    if (remainingObsolete) {
+      throw new Error(
+        `RouteSyncState post-migration verification failed: obsolete single-field unique index '${remainingObsolete.name}' on dep_iata is still present`,
+      );
     }
   }
 

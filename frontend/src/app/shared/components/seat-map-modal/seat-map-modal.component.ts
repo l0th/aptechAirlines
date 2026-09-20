@@ -101,14 +101,14 @@ export interface PassengerSeatSelection {
                 </div>
               </div>
 
-              <!-- Color Legend (Tuân thủ bảng màu GUI Standards) -->
+              <!-- Color Legend -->
               <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                 <h4 class="text-xs font-bold text-navy uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <app-icon name="info" class="w-4 h-4 text-navy" />
                   <span>{{ lang.t('seatmap.legendTitle') }}</span>
                 </h4>
                 <div class="space-y-2 text-xs">
-                  <!-- Business / Skyboss (Gold) -->
+                  <!-- Business Class (Gold) -->
                   <div class="flex items-center gap-2.5">
                     <div class="w-5 h-5 rounded-md bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                       <app-icon name="crown" class="w-3 h-3" />
@@ -124,7 +124,7 @@ export interface PassengerSeatSelection {
                     <span class="text-slate-700 font-medium">{{ lang.t('seatmap.legend.availableDesc') }}</span>
                   </div>
 
-                  <!-- Exit Row (Navy/Sky) -->
+                  <!-- Exit Row (Sky) -->
                   <div class="flex items-center gap-2.5">
                     <div class="w-5 h-5 rounded-md bg-sky-600 text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
                       <app-icon name="shieldcheck" class="w-3 h-3" />
@@ -150,27 +150,30 @@ export interface PassengerSeatSelection {
                 </div>
               </div>
 
-              <!-- Safety Notices -->
+              <!-- Selection Policy & Safety Notices -->
               <div class="bg-amber-50/70 p-4 rounded-2xl border border-amber-200/80 text-xs space-y-2">
                 <div class="font-bold text-amber-900 flex items-center gap-1.5">
                   <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600" />
                   <span>{{ lang.t('seatmap.safetyRegulations') }}</span>
                 </div>
-                <p class="text-slate-600 leading-relaxed text-[11px]">
-                  {{ seatMapData()?.notice?.exit_row_warning || lang.t('seatmap.notice.exit') }}
-                </p>
-                <div class="text-amber-800 font-semibold text-[11px] pt-1">
-                  {{ seatMapData()?.notice?.skyboss_benefit || lang.t('seatmap.notice.skyboss') }}
+                <div class="text-slate-700 space-y-1 text-[11px] leading-relaxed">
+                  <p><strong>AUTO (Tự động):</strong> Miễn phí 100%. Hệ thống tự xếp ghế gần nhau khi hoàn tất.</p>
+                  <p><strong>CHOOSE (Tự chọn):</strong> Chọn vị trí mong muốn, áp dụng phụ phí niêm yết theo sơ đồ.</p>
                 </div>
+                @if (seatMapData()?.notice?.exit_row_warning) {
+                  <p class="text-slate-600 leading-relaxed text-[11px] pt-1 border-t border-amber-200/60">
+                    {{ seatMapData()?.notice?.exit_row_warning }}
+                  </p>
+                }
               </div>
 
             </div>
 
-            <!-- Right / Center: Airplane Fuselage (Thân máy bay Vietjet x Aptech Style) -->
+            <!-- Right / Center: Airplane Fuselage -->
             <div class="flex-1 flex flex-col items-center justify-start order-1 md:order-2 overflow-x-auto pb-4">
               
               <!-- Airplane Fuselage Outer Container -->
-              <div class="w-full max-w-md aircraft-fuselage shadow-xl p-4 sm:p-6 relative">
+              <div class="w-full max-w-lg aircraft-fuselage shadow-xl p-4 sm:p-6 relative">
                 
                 <!-- Airplane Nose / Cockpit Cone -->
                 <div class="text-center pb-6 border-b border-slate-200/80 relative">
@@ -188,83 +191,72 @@ export interface PassengerSeatSelection {
                   </div>
                 </div>
 
-                <!-- Column Headers (A B C | Lối đi | D E F) -->
-                <div class="grid grid-cols-7 gap-1.5 sm:gap-2 my-4 text-center text-xs font-bold text-slate-500">
-                  <span>A</span>
-                  <span>B</span>
-                  <span>C</span>
-                  <span class="text-[10px] uppercase tracking-wider text-slate-400">{{ lang.t('seatmap.aisle') }}</span>
-                  <span>D</span>
-                  <span>E</span>
-                  <span>F</span>
-                </div>
-
                 <!-- Rows List -->
                 @if (loading()) {
                   <div class="py-20 text-center text-slate-400">
                     <app-icon name="refreshcw" class="w-8 h-8 animate-spin mx-auto text-gold mb-2" />
                     <p class="text-xs">{{ lang.t('common.loading') }}</p>
                   </div>
+                } @else if (!displayRows().length || seatMapData()?.layout_available === false) {
+                  <div class="py-16 text-center text-slate-500">
+                    <app-icon name="plane" class="w-10 h-10 mx-auto text-slate-300 mb-3" />
+                    <p class="text-sm font-semibold text-slate-700">Sơ đồ chỗ ngồi chưa sẵn sàng cho chuyến bay này</p>
+                    <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Hệ thống sẽ tự động xếp chỗ miễn phí cho quý khách khi hoàn tất đặt vé.</p>
+                  </div>
                 } @else {
-                  <div class="space-y-2">
+                  <div class="space-y-1.5 py-4">
                     @for (row of displayRows(); track row.row_number) {
                       
-                      <!-- Exit Row Divider Alert before row 12 or 14 -->
+                      <!-- Exit Row Alert Header -->
                       @if (row.is_exit_row) {
-                        <div class="flex items-center justify-between py-1 px-2 my-1 bg-sky-50 border-y border-sky-200 text-sky-800 text-[10px] font-bold rounded">
+                        <div class="flex items-center justify-between py-1 px-3 my-1.5 bg-sky-50 border-y border-sky-200 text-sky-800 text-[10px] font-bold rounded">
                           <span>{{ lang.t('seatmap.emergencyExit') }}</span>
                           <span class="font-mono">EXIT ROW {{ row.row_number }}</span>
                         </div>
                       }
 
-                      <!-- Row item with 7 cols: 3 seats + aisle label + 3 seats -->
-                      <div class="grid grid-cols-7 gap-1.5 sm:gap-2 items-center">
-                        <!-- Left Seats: A, B, C -->
-                        @for (col of ['A', 'B', 'C']; track col) {
-                          @let seat = getSeat(row, col);
-                          <button
-                            type="button"
-                            [disabled]="isSeatDisabled(seat)"
-                            (click)="selectSeat(seat)"
-                            [title]="getSeatTooltip(seat, row)"
-                            [ngClass]="getSeatClasses(seat, row)"
-                            class="aspect-square rounded-lg flex flex-col items-center justify-center text-[10px] sm:text-xs font-bold transition-all duration-150 cursor-pointer disabled:cursor-not-allowed"
-                          >
-                            @if (seat?.is_occupied) {
-                              <app-icon name="lock" class="w-3 h-3 text-slate-500" />
-                            } @else if (isSeatSelectedByActive(seat?.seat_code)) {
-                              <app-icon name="armchair" class="w-3.5 h-3.5 text-navy" />
-                            } @else {
-                              <span class="leading-none">{{ col }}</span>
-                            }
-                          </button>
-                        }
-
-                        <!-- Aisle Column (Row Number Indicator) -->
-                        <div class="text-center font-mono text-[11px] font-bold text-slate-400">
+                      <!-- Dynamic Row by column_groups -->
+                      <div class="flex items-center justify-center gap-1.5 sm:gap-2">
+                        <!-- Left Row Number -->
+                        <div class="w-5 text-right font-mono text-[11px] font-bold text-slate-400 shrink-0 select-none">
                           {{ row.row_number }}
                         </div>
 
-                        <!-- Right Seats: D, E, F -->
-                        @for (col of ['D', 'E', 'F']; track col) {
-                          @let seat = getSeat(row, col);
-                          <button
-                            type="button"
-                            [disabled]="isSeatDisabled(seat)"
-                            (click)="selectSeat(seat)"
-                            [title]="getSeatTooltip(seat, row)"
-                            [ngClass]="getSeatClasses(seat, row)"
-                            class="aspect-square rounded-lg flex flex-col items-center justify-center text-[10px] sm:text-xs font-bold transition-all duration-150 cursor-pointer disabled:cursor-not-allowed"
-                          >
-                            @if (seat?.is_occupied) {
-                              <app-icon name="lock" class="w-3 h-3 text-slate-500" />
-                            } @else if (isSeatSelectedByActive(seat?.seat_code)) {
-                              <app-icon name="armchair" class="w-3.5 h-3.5 text-navy" />
-                            } @else {
-                              <span class="leading-none">{{ col }}</span>
+                        <!-- Column Groups -->
+                        @for (group of (row.column_groups || [row.seats]); track $index; let gIdx = $index) {
+                          <div class="flex items-center gap-1 sm:gap-1.5">
+                            @for (seat of group; track seat.seat_code) {
+                              <button
+                                type="button"
+                                [disabled]="isSeatDisabled(seat)"
+                                (click)="selectSeat(seat)"
+                                [title]="getSeatTooltip(seat, row)"
+                                [ngClass]="getSeatClasses(seat, row)"
+                                class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex flex-col items-center justify-center text-[10px] sm:text-xs font-bold transition-all duration-150 cursor-pointer disabled:cursor-not-allowed"
+                              >
+                                @if (seat.is_occupied) {
+                                  <app-icon name="lock" class="w-3 h-3 text-slate-500" />
+                                } @else if (isSeatSelectedByActive(seat.seat_code)) {
+                                  <app-icon name="armchair" class="w-3.5 h-3.5 text-navy" />
+                                } @else {
+                                  <span class="leading-none">{{ seat.column }}</span>
+                                }
+                              </button>
                             }
-                          </button>
+                          </div>
+
+                          <!-- Aisle Spacer between Groups -->
+                          @if (gIdx < (row.column_groups?.length || 1) - 1) {
+                            <div class="w-3 sm:w-4 flex items-center justify-center shrink-0">
+                              <div class="w-0.5 h-4 bg-slate-200 rounded-full"></div>
+                            </div>
+                          }
                         }
+
+                        <!-- Right Row Number -->
+                        <div class="w-5 text-left font-mono text-[11px] font-bold text-slate-400 shrink-0 select-none">
+                          {{ row.row_number }}
+                        </div>
                       </div>
                     }
                   </div>
@@ -353,18 +345,14 @@ export class SeatMapModalComponent implements OnChanges {
         this.loading.set(false);
       },
       error: () => {
-        // Fallback to local default map if flightId not in backend
-        this.seatMapData.set(this.generateDefaultSeatMap());
+        this.seatMapData.set(null);
         this.loading.set(false);
       },
     });
   }
 
   displayRows = computed<SeatRow[]>(() => {
-    if (this.seatMapData()?.rows?.length) {
-      return this.seatMapData()!.rows;
-    }
-    return this.generateDefaultSeatMap().rows;
+    return this.seatMapData()?.rows || [];
   });
 
   getSeat(row: SeatRow, col: string): SeatItem | undefined {
@@ -408,13 +396,13 @@ export class SeatMapModalComponent implements OnChanges {
       return 'bg-amber-300 text-navy border-2 border-amber-500 font-bold opacity-90';
     }
 
-    // 4. Business / Skyboss rows 1-5 (Royal Gold)
-    if (row.row_number <= 5) {
+    // 4. Business class by cabin_class (Gold)
+    if (seat.cabin_class === CabinClass.BUSINESS || (seat.cabin_class as string) === 'BUSINESS') {
       return 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm border border-amber-600 hover:scale-105';
     }
 
-    // 5. Emergency Exit rows 12 & 14 (Sky Navy)
-    if (row.is_exit_row) {
+    // 5. Emergency Exit rows (Sky Blue)
+    if (seat.is_exit_row || row.is_exit_row) {
       return 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm border border-sky-700 hover:scale-105';
     }
 
@@ -426,9 +414,13 @@ export class SeatMapModalComponent implements OnChanges {
     if (!seat) return '';
     if (seat.is_occupied) return `${this.lang.t('seatmap.seat')} ${seat.seat_code}: ${this.lang.t('seatmap.occupied')}`;
     let type = this.lang.t('seatmap.economy');
-    if (row.row_number <= 5) type = this.lang.t('seatmap.business');
-    if (row.is_exit_row) type = this.lang.t('seatmap.exitRow');
-    return `${this.lang.t('seatmap.seat')} ${seat.seat_code} (${type})`;
+    if (seat.cabin_class === CabinClass.BUSINESS || (seat.cabin_class as string) === 'BUSINESS') {
+      type = this.lang.t('seatmap.business');
+    } else if (seat.is_exit_row || row.is_exit_row) {
+      type = this.lang.t('seatmap.exitRow');
+    }
+    const feeStr = seat.fee ? ` • +${seat.fee.toLocaleString()} VND` : '';
+    return `${this.lang.t('seatmap.seat')} ${seat.seat_code} (${type}${feeStr})`;
   }
 
   selectSeat(seat?: SeatItem): void {
@@ -468,52 +460,5 @@ export class SeatMapModalComponent implements OnChanges {
 
   close(): void {
     this.closeEvent.emit();
-  }
-
-  private generateDefaultSeatMap(): SeatMapResponse {
-    const rows: SeatRow[] = [];
-    const exitRows = [12, 14];
-    const skippedRows = [13];
-
-    for (let r = 1; r <= 31; r++) {
-      if (skippedRows.includes(r)) continue;
-
-      const isExit = exitRows.includes(r);
-      const isBusiness = r <= 5;
-      const seats: SeatItem[] = ['A', 'B', 'C', 'D', 'E', 'F'].map((col) => ({
-        seat_code: `${r}${col}`,
-        column: col,
-        is_occupied: false,
-        cabin_class: isBusiness ? CabinClass.BUSINESS : CabinClass.ECONOMY,
-      }));
-
-      rows.push({
-        row_number: r,
-        is_exit_row: isExit,
-        is_special: isBusiness,
-        seats,
-      });
-    }
-
-    return {
-      flight_id: this.flightId,
-      flight_number: this.flightNumber || '',
-      route: this.routeInfo || '',
-      aircraft_model: this.aircraftModel || this.lang.t('seatmap.mockNotice'),
-      departure_time: new Date().toISOString(),
-      legend: [],
-      notice: {
-        skyboss_benefit: this.lang.t('seatmap.notice.skyboss'),
-        exit_row_warning: this.lang.t('seatmap.notice.exit'),
-      },
-      layout: {
-        left_columns: ['A', 'B', 'C'],
-        right_columns: ['D', 'E', 'F'],
-        exit_rows: [12, 14],
-        special_rows: [1, 2, 3, 4, 5],
-        skipped_rows: [13],
-      },
-      rows,
-    };
   }
 }

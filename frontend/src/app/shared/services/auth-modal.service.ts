@@ -1,5 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
+export type AuthModalMode = 'LOGIN' | 'REGISTER';
+
 /**
  * Global state for the Auth Modal (login / register).
  * The modal itself is rendered once inside the global NavbarComponent,
@@ -11,8 +13,10 @@ import { Injectable, signal } from '@angular/core';
 })
 export class AuthModalService {
   readonly isOpen = signal(false);
+  readonly mode = signal<AuthModalMode>('LOGIN');
 
-  open(): void {
+  open(mode: AuthModalMode = 'LOGIN'): void {
+    this.mode.set(mode);
     this.isOpen.set(true);
   }
 
@@ -20,7 +24,12 @@ export class AuthModalService {
     this.isOpen.set(false);
   }
 
-  toggle(): void {
-    this.isOpen.update((v) => !v);
+  toggle(mode: AuthModalMode = 'LOGIN'): void {
+    if (!this.isOpen()) {
+      this.mode.set(mode);
+      this.isOpen.set(true);
+    } else {
+      this.isOpen.set(false);
+    }
   }
 }

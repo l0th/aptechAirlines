@@ -29,6 +29,8 @@ export interface ValidatedItineraryLeg {
   aircraft_icao?: string;
   days?: string[];
   chronology_basis?: 'UTC' | 'LOCAL';
+  is_bookable?: boolean;
+  inventories?: any[];
 }
 
 export interface ValidatedItinerary {
@@ -38,6 +40,8 @@ export interface ValidatedItinerary {
   total_duration_minutes: number;
   layover_minutes: number[];
   legs: ValidatedItineraryLeg[];
+  is_bookable?: boolean;
+  inventories?: any[];
 }
 
 export interface ScheduleValidationOptions {
@@ -274,8 +278,14 @@ export class RouteScheduleValidatorService {
       return true;
     }
     const weekday = WEEKDAYS[date.getUTCDay()];
+    const isoDay = String(date.getUTCDay() === 0 ? 7 : date.getUTCDay());
+    const zeroDay = String(date.getUTCDay());
     const normalizedDays = service.days.map(d => d.trim().toLowerCase());
-    return normalizedDays.includes(weekday);
+    return (
+      normalizedDays.includes(weekday) ||
+      normalizedDays.includes(isoDay) ||
+      normalizedDays.includes(zeroDay)
+    );
   }
 
   private materializeServiceTimes(

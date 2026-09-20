@@ -586,30 +586,64 @@ export class ReferenceService {
       };
     });
 
-    const airports = await this.airportModel.find({
-      is_serviced_directly: true,
-      $or: [
-        { iata_code: regex },
-        { airport_name: regex },
-        { city_name: regex }
-      ]
-    }).limit(8).exec();
+    const matchedAirports = await this.airportModel
+      .find({
+        $or: [
+          { iata_code: regex },
+          { airport_name: regex },
+          { city_name: regex },
+        ],
+      })
+      .limit(30)
+      .exec();
+
+    // Sort: Exact IATA match first, then directly serviced hubs first, then alphabetical by city
+    const upperQ = cleanQ.toUpperCase();
+    const sortedAirports = matchedAirports
+      .sort((a, b) => {
+        const aExactIata = a.iata_code.toUpperCase() === upperQ ? 1 : 0;
+        const bExactIata = b.iata_code.toUpperCase() === upperQ ? 1 : 0;
+        if (aExactIata !== bExactIata) return bExactIata - aExactIata;
+
+        const aServiced = a.is_serviced_directly ? 1 : 0;
+        const bServiced = b.is_serviced_directly ? 1 : 0;
+        if (aServiced !== bServiced) return bServiced - aServiced;
+
+        return (a.city_name || '').localeCompare(b.city_name || '');
+      })
+      .slice(0, 10);
 
     return {
-      countries: countries.map(c => ({ code: c.code, name: c.name, name_vi: c.name_vi })),
+      countries: countries.map((c) => ({ code: c.code, name: c.name, name_vi: c.name_vi })),
       cities,
-      airports: airports.map(a => ({
+      airports: sortedAirports.map((a) => ({
         iata_code: a.iata_code,
         airport_name: a.airport_name,
         city_name: a.city_name,
         country_code: a.country_code,
-        time_zone: a.time_zone
-      }))
+        time_zone: a.time_zone,
+        is_serviced_directly: a.is_serviced_directly ?? false,
+        nearest_airport_code: a.nearest_airport_code || undefined,
+        distance_to_nearest_km: a.distance_to_nearest_km || undefined,
+        label_vi: a.is_serviced_directly
+          ? 'Khai thác trực tiếp bởi Aptech'
+          : a.nearest_airport_code
+            ? `Sân bay tham chiếu — Gần ${a.nearest_airport_code} (${a.distance_to_nearest_km || 0} km)`
+            : 'Sân bay tham chiếu',
+        label_en: a.is_serviced_directly
+          ? 'Served directly by Aptech'
+          : a.nearest_airport_code
+            ? `Reference airport — Near ${a.nearest_airport_code} (${a.distance_to_nearest_km || 0} km)`
+            : 'Reference airport',
+      })),
     };
   }
 
   // Mở rộng location thành tập hợp mã IATA kèm thông tin gợi ý sân bay lân cận
-  async expandLocation(token: string): Promise<ExpandedLocation> {
+  async expandLocation(
+    token: string,
+    options?: { includeUnserviced?: boolean },
+  ): Promise<ExpandedLocation> {
     const cleanToken = token ? token.trim() : '';
     if (!cleanToken) {
       return { iata_codes: [], matched_kind: 'none', label: '', using_nearest_airport: false };
@@ -625,7 +659,7 @@ export class ReferenceService {
 
     const exactAirport = await this.airportModel.findOne({ iata_code: upperToken }).exec();
     if (exactAirport) {
-      if (exactAirport.is_serviced_directly) {
+      if (exactAirport.is_serviced_directly || options?.includeUnserviced) {
         return {
           iata_codes: [exactAirport.iata_code],
           matched_kind: 'airport',
@@ -667,10 +701,14 @@ export class ReferenceService {
     }
 
     const exactCountry = await this.countryModel.findOne({
-      $or: [{ code: upperToken }, { name: regex }, { name_vi: regex }]
+      $or: [{ code: upperToken }, { code3: upperToken }, { name: regex }, { name_vi: regex }]
     }).exec();
     if (exactCountry) {
-      const apts = await this.airportModel.find({ country_code: exactCountry.code, is_serviced_directly: true }).exec();
+      const filter: any = { country_code: exactCountry.code };
+      if (!options?.includeUnserviced) {
+        filter.is_serviced_directly = true;
+      }
+      const apts = await this.airportModel.find(filter).exec();
       const codes = apts.map(a => a.iata_code);
       if (codes.length > 0) {
         return {
@@ -680,16 +718,35 @@ export class ReferenceService {
           using_nearest_airport: false,
         };
       }
+    } else if (upperToken.length === 2) {
+      // Direct 2-letter country code fallback
+      const filter: any = { country_code: upperToken };
+      if (!options?.includeUnserviced) {
+        filter.is_serviced_directly = true;
+      }
+      const apts = await this.airportModel.find(filter).exec();
+      const codes = apts.map(a => a.iata_code);
+      if (codes.length > 0) {
+        return {
+          iata_codes: codes,
+          matched_kind: 'country',
+          label: `Mọi sân bay ${upperToken}`,
+          using_nearest_airport: false,
+        };
+      }
     }
 
     const exactCity = await this.cityModel.findOne({
       $or: [{ city_code: upperToken }, { name: regex }, { name_vi: regex }]
     }).exec();
     if (exactCity) {
-      const apts = await this.airportModel.find({
-        is_serviced_directly: true,
+      const filter: any = {
         $or: [{ city_code: exactCity.city_code }, { city_name: regex }]
-      }).exec();
+      };
+      if (!options?.includeUnserviced) {
+        filter.is_serviced_directly = true;
+      }
+      const apts = await this.airportModel.find(filter).exec();
       const codes = apts.map(a => a.iata_code);
       if (codes.length > 0) {
         return {
@@ -740,31 +797,59 @@ export class ReferenceService {
     return { iata_codes: [], matched_kind: 'none', label: 'Không tìm thấy', using_nearest_airport: false };
   }
 
-  async findRouteNetworkConnections(originIatas: string[], destIatas: string[]): Promise<any[]> {
+  async findRouteNetworkConnections(
+    originIatas: string[],
+    destIatas: string[],
+    source: string = 'aptech_internal',
+  ): Promise<any[]> {
     if (originIatas.length === 0 || destIatas.length === 0) return [];
-    
-    // Find a transit airport T where Origin -> T and T -> Dest exists
-    const leg1Routes = await this.routeRefModel.find({ dep_iata: { $in: originIatas } }).exec();
-    
-    const transitOptions = new Map<string, { leg1: RouteRef, leg2: RouteRef }>();
-    
+
+    // 1. Batched Leg 1 Query with strict source isolation
+    const leg1Routes = await this.routeRefModel
+      .find({ dep_iata: { $in: originIatas }, source })
+      .lean()
+      .exec();
+    if (leg1Routes.length === 0) return [];
+
+    // 2. Candidate Transit Hubs
+    const candidateTransits = Array.from(
+      new Set(
+        leg1Routes
+          .map((r: any) => r.arr_iata)
+          .filter((t: string) => !originIatas.includes(t) && !destIatas.includes(t)),
+      ),
+    );
+    if (candidateTransits.length === 0) return [];
+
+    // 3. Batched Leg 2 Query (Zero N+1)
+    const leg2Routes = await this.routeRefModel
+      .find({ dep_iata: { $in: candidateTransits }, arr_iata: { $in: destIatas }, source })
+      .lean()
+      .exec();
+
+    const leg2ByOrigin = new Map<string, any>();
+    for (const l2 of leg2Routes) {
+      if (!leg2ByOrigin.has(l2.dep_iata)) {
+        leg2ByOrigin.set(l2.dep_iata, l2);
+      }
+    }
+
+    const transitOptions = new Map<string, { leg1: any; leg2: any }>();
     for (const leg1 of leg1Routes) {
       const t = leg1.arr_iata;
-      if (destIatas.includes(t)) continue;
-      
-      const leg2 = await this.routeRefModel.findOne({ dep_iata: t, arr_iata: { $in: destIatas } }).exec();
+      const leg2 = leg2ByOrigin.get(t);
       if (leg2 && !transitOptions.has(t)) {
         transitOptions.set(t, { leg1, leg2 });
       }
     }
-    
+
     const results = [];
     for (const [t, { leg1, leg2 }] of transitOptions.entries()) {
       results.push({
         transit_airport: t,
         leg1: { airline_iata: leg1.airline_iata, dep_iata: leg1.dep_iata, arr_iata: leg1.arr_iata },
         leg2: { airline_iata: leg2.airline_iata, dep_iata: leg2.dep_iata, arr_iata: leg2.arr_iata },
-        note: 'Tuyến nối theo mạng đường bay thật của AirLabs - chưa có lịch bay cụ thể cho ngày đã chọn',
+        note: 'Tuyến nối theo mạng đường bay nội bộ Aptech Airlines - chưa có lịch bay cụ thể cho ngày đã chọn',
       });
     }
     return results;

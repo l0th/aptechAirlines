@@ -21,21 +21,21 @@ export class ReferenceController {
 
   @Post('sync-countries')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.CLERK)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async syncCountries(@Body() body: { codes?: string[] }) {
     return this.referenceService.syncCountries(body?.codes);
   }
 
   @Post('sync-cities')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.CLERK)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async syncCities(@Query('country_code') countryCode: string, @Query('limit') limit?: number) {
     return this.referenceService.syncCitiesForCountry(countryCode, limit ? Number(limit) : 200);
   }
 
   @Post('sync-routes')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.CLERK)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async syncRoutes(@Query('dep_iata') depIata: string, @Query('limit') limit?: number) {
     return this.referenceService.syncRoutesForAirport(depIata, limit ? Number(limit) : 200);
   }

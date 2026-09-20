@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { FlightsService } from './flights.service';
+import { FlightGeneratorService } from './flight-generator.service';
 import {
   CreateFlightDto,
   SearchFlightDto,
@@ -24,18 +25,63 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
 
-// Staff roles allowed to mutate flight data (create/update/delete/status)
-const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
+// Admin roles allowed to mutate flight data (create/update/delete/status) and trigger AirLabs enrichment
+const ADMIN_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
 
 // NOTE: every @Get route below stays public on purpose (requirements 3.3 & 3.10:
 // guests must be able to search, lookup and view flights/seat maps without auth).
 @Controller('flights')
 export class FlightsController {
-  constructor(private readonly flightsService: FlightsService) {}
+  constructor(
+    private readonly flightsService: FlightsService,
+    private readonly flightGeneratorService?: FlightGeneratorService,
+  ) {}
 
   @Get('search')
   async search(@Query() searchDto: SearchFlightDto) {
     return this.flightsService.searchFlights(searchDto);
+  }
+
+  // Requirement 3.3.3 & Phase A: Bounded nearby-date availability lookup
+  @Get('nearby-availability')
+  async getNearbyAvailability(
+    @Query('origin') origin: string,
+    @Query('destination') destination: string,
+    @Query('date') date: string,
+    @Query('cabin_class') cabinClass?: any,
+    @Query('passengers') passengers?: number,
+    @Query('adults') adults?: number,
+    @Query('children') children?: number,
+    @Query('seniors') seniors?: number,
+  ) {
+    if (!origin || !destination || !date) {
+      throw new BadRequestException('origin, destination, and date query parameters are required');
+    }
+    return this.flightsService.getNearbyAvailability(
+      origin,
+      destination,
+      date,
+      cabinClass,
+      passengers ? Number(passengers) : 1,
+      adults ? Number(adults) : 1,
+      children ? Number(children) : 0,
+      seniors ? Number(seniors) : 0,
+    );
+  }
+
+  // Admin on-demand schedule horizon generation
+  @Post('generate-schedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async generateSchedule(
+    @Query('start_date') startDate?: string,
+    @Query('days') days?: number,
+  ) {
+    if (!this.flightGeneratorService) {
+      throw new BadRequestException('FlightGeneratorService not available');
+    }
+    const daysNum = days ? Number(days) : 330;
+    return this.flightGeneratorService.generateRollingSchedule(startDate, daysNum);
   }
 
   @Get()
@@ -61,7 +107,7 @@ export class FlightsController {
 
   @Get('airline-fleet')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async getAirlineFleet(@Query('airline_iata') airlineIata: string) {
     if (!airlineIata) {
       throw new BadRequestException('airline_iata query param is required');
@@ -89,7 +135,7 @@ export class FlightsController {
 
   @Post(':id/enrich-aircraft')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async enrichAircraftFromAirLabs(@Param('id') id: string) {
     return this.flightsService.enrichAircraftFromAirLabs(id);
   }
@@ -128,14 +174,14 @@ export class FlightsController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async create(@Body() createFlightDto: CreateFlightDto) {
     return this.flightsService.create(createFlightDto);
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async update(
     @Param('id') id: string,
     @Body() updateFlightDto: UpdateFlightDto,
@@ -145,7 +191,7 @@ export class FlightsController {
 
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateFlightStatusDto,
@@ -155,8 +201,8 @@ export class FlightsController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async delete(@Param('id') id: string) {
-    return this.flightsService.delete(id);
+    return this.flightsService.deleteFlight(id);
   }
 }

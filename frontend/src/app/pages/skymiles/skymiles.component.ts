@@ -145,8 +145,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
                     <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('profile.age') }}</label>
                     <input
                       type="number"
-                      min="1"
-                      max="120"
+                      min="0"
                       [(ngModel)]="profileAge"
                       class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-gold"
                     />
@@ -441,15 +440,53 @@ export class SkyMilesComponent implements OnInit {
       return;
     }
 
+    // Requirement 1.3.4: Phone validation if provided
+    if (this.profilePhone.trim()) {
+      const phoneRegex = /^(?=(?:\D*\d){7,15}\D*$)\+?[0-9\s().-]+$/;
+      if (!phoneRegex.test(this.profilePhone.trim())) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Số điện thoại không hợp lệ (cần từ 7–15 chữ số)'
+            : 'Invalid phone number (7–15 digits required)',
+        );
+        return;
+      }
+    }
+
+    // Requirement 1.3.4: Preferred credit card validation if provided
+    if (this.profileCreditCard.trim()) {
+      const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
+      if (!cardRegex.test(this.profileCreditCard.trim())) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)'
+            : 'Invalid credit card number (12–19 digits required)',
+        );
+        return;
+      }
+    }
+
+    if (this.profileAge != null && this.profileAge !== ('' as any)) {
+      const ageNum = Number(this.profileAge);
+      if (isNaN(ageNum) || !Number.isInteger(ageNum) || ageNum < 0) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Tuổi phải là số nguyên không âm'
+            : 'Age must be a non-negative integer',
+        );
+        return;
+      }
+    }
+
     this.saving.set(true);
     const dto = {
       first_name: this.profileFirstName.trim(),
       last_name: this.profileLastName.trim(),
       address: this.profileAddress.trim(),
-      phone_number: this.profilePhone.trim(),
+      phone_number: this.profilePhone.trim() || undefined,
       sex: this.profileSex,
-      age: this.profileAge != null ? Number(this.profileAge) : undefined,
-      preferred_credit_card: this.profileCreditCard.trim(),
+      age: this.profileAge != null && this.profileAge !== ('' as any) ? Number(this.profileAge) : undefined,
+      preferred_credit_card: this.profileCreditCard.trim() || undefined,
     };
 
     this.api.updateUser(u._id, dto).subscribe({

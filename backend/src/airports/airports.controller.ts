@@ -18,8 +18,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
 
-// Staff roles allowed to mutate airport reference data
-const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
+// Admin roles allowed to mutate airport reference data and run syncs
+const ADMIN_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
 
 // NOTE: all @Get routes stay public (guests need airport lookup to search flights).
 @Controller('airports')
@@ -43,7 +43,7 @@ export class AirportsController {
 
   @Post('sync-airlabs')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async syncAirLabs(@Query('iata_code') iataCode?: string) {
     if (!iataCode) {
       throw new BadRequestException('iata_code query parameter is required');
@@ -53,14 +53,14 @@ export class AirportsController {
 
   @Post('sync-airlabs-all')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async syncAirLabsAll() {
     return this.airportsService.syncAllAirportsFromAirLabs();
   }
 
   @Post('import-country')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async importCountry(
     @Query('country_code') countryCode: string,
     @Query('limit') limit?: string,
@@ -76,7 +76,7 @@ export class AirportsController {
 
   @Post('import-countries')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async importCountries(@Query('codes') codes: string, @Req() req: any) {
     if (!codes) {
       throw new BadRequestException('Tham số codes là bắt buộc');
@@ -90,21 +90,21 @@ export class AirportsController {
 
   @Post('fix-city-names')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async fixCityNames() {
     return this.airportsService.fixCityNames();
   }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async create(@Body() createAirportDto: CreateAirportDto) {
     return this.airportsService.create(createAirportDto);
   }
 
   @Put(':iata')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async update(
     @Param('iata') iata: string,
     @Body() updateAirportDto: UpdateAirportDto,
@@ -114,7 +114,7 @@ export class AirportsController {
 
   @Delete(':iata')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async delete(@Param('iata') iata: string) {
     return this.airportsService.delete(iata);
   }

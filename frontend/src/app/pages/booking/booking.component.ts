@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -400,7 +400,7 @@ interface BookingContext {
                       {{ lang.t('booking.cardNumber') }} <span class="text-rose-500">*</span>
                     </label>
                     <div class="relative">
-                      <app-icon name="creditcard" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                      <app-icon name="creditcard" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
                         type="text"
                         [(ngModel)]="creditCardNumber"
@@ -743,6 +743,27 @@ export class BookingComponent implements OnInit {
   cardExp = '';
   cardCvv = '';
 
+  constructor() {
+    // Requirement 1.3.3: Reactively prefill passenger 1 and payment card when user logs in via auth modal
+    effect(() => {
+      const u = this.auth.currentUser();
+      if (u && this.passengers && this.passengers.length > 0) {
+        if (!this.passengers[0].first_name) {
+          this.passengers[0].first_name = u.first_name || '';
+        }
+        if (!this.passengers[0].last_name) {
+          this.passengers[0].last_name = u.last_name || '';
+        }
+        if (!this.cardName && (u.first_name || u.last_name)) {
+          this.cardName = `${u.first_name || ''} ${u.last_name || ''}`.trim().toUpperCase();
+        }
+        if (!this.creditCardNumber && u.preferred_credit_card) {
+          this.creditCardNumber = u.preferred_credit_card;
+        }
+      }
+    });
+  }
+
   get holdDeadlineText(): string {
     if (!this.holdDeadline) return this.lang.isVietnamese() ? 'ngày khởi hành − 14 ngày' : 'departure date − 14 days';
     const d = this.holdDeadline;
@@ -858,13 +879,13 @@ export class BookingComponent implements OnInit {
       if (this.passengers[0]) {
         this.passengers[0].first_name = u.first_name || '';
         this.passengers[0].last_name = u.last_name || '';
-        this.passengers[0].id_card_or_passport = u.phone_number || '';
+        this.passengers[0].id_card_or_passport = '';
       }
-      this.cardName = `${u.first_name} ${u.last_name}`.toUpperCase();
-      this.creditCardNumber = u.preferred_credit_card || '4111222233334444';
+      this.cardName = `${u.first_name || ''} ${u.last_name || ''}`.trim().toUpperCase();
+      this.creditCardNumber = u.preferred_credit_card || '';
     } else {
-      this.creditCardNumber = '4111222233334444';
-      this.cardName = 'NGUYEN VAN AN';
+      this.creditCardNumber = '';
+      this.cardName = '';
     }
   }
 
@@ -903,7 +924,7 @@ export class BookingComponent implements OnInit {
         passenger_type: PassengerType.ADULT,
         id_card_or_passport: '',
         nationality: this.lang.isVietnamese() ? 'Việt Nam' : 'Vietnam',
-        date_of_birth: '1990-01-01',
+        date_of_birth: '',
         seat_code: seats[idx] || '',
         return_seat_code: returnSeats[idx] || '',
       });
@@ -917,7 +938,7 @@ export class BookingComponent implements OnInit {
         passenger_type: PassengerType.CHILD,
         id_card_or_passport: '',
         nationality: this.lang.isVietnamese() ? 'Việt Nam' : 'Vietnam',
-        date_of_birth: '2016-01-01',
+        date_of_birth: '',
         seat_code: seats[idx] || '',
         return_seat_code: returnSeats[idx] || '',
       });
@@ -931,7 +952,7 @@ export class BookingComponent implements OnInit {
         passenger_type: PassengerType.SENIOR,
         id_card_or_passport: '',
         nationality: this.lang.isVietnamese() ? 'Việt Nam' : 'Vietnam',
-        date_of_birth: '1960-01-01',
+        date_of_birth: '',
         seat_code: seats[idx] || '',
         return_seat_code: returnSeats[idx] || '',
       });
@@ -1267,6 +1288,58 @@ export class BookingComponent implements OnInit {
     });
   }
 
+  private buildSeatRequests(legs: FlightLegSelection[]): Array<{
+    passenger_index: number;
+    flight_id: string;
+    selection_type: 'AUTO' | 'CHOOSE';
+    seat_code?: string;
+  }> {
+    const requests: Array<{
+      passenger_index: number;
+      flight_id: string;
+      selection_type: 'AUTO' | 'CHOOSE';
+      seat_code?: string;
+    }> = [];
+
+    const ctx = this.context;
+    const isRoundTrip = this.resolveBookingType() === BookingType.ROUND_TRIP;
+
+    for (let pIdx = 0; pIdx < this.passengers.length; pIdx++) {
+      const p = this.passengers[pIdx];
+      const outboundSeat = (p.seat_code || ctx?.seats?.[pIdx] || '').trim().toUpperCase();
+      const returnSeat = (p.return_seat_code || ctx?.return_seats?.[pIdx] || '').trim().toUpperCase();
+
+      for (let lIdx = 0; lIdx < legs.length; lIdx++) {
+        const leg = legs[lIdx];
+        const isReturnLeg = leg.leg_type === LegType.INBOUND || (isRoundTrip && lIdx === 1 && !leg.leg_type?.startsWith('CONNECTING'));
+
+        let chosenCode = '';
+        if (isReturnLeg) {
+          chosenCode = returnSeat;
+        } else if (lIdx === 0) {
+          chosenCode = outboundSeat;
+        }
+
+        if (chosenCode) {
+          requests.push({
+            passenger_index: pIdx,
+            flight_id: leg.flight_id,
+            selection_type: 'CHOOSE',
+            seat_code: chosenCode,
+          });
+        } else {
+          requests.push({
+            passenger_index: pIdx,
+            flight_id: leg.flight_id,
+            selection_type: 'AUTO',
+          });
+        }
+      }
+    }
+
+    return requests;
+  }
+
   /** Surface the real backend message ({ statusCode, message, error }). */
   private extractErrorMessage(err: any): string {
     const message = err?.error?.message ?? err?.message;
@@ -1307,6 +1380,54 @@ export class BookingComponent implements OnInit {
         this.toast.warning(this.lang.isVietnamese() ? `Vui lòng nhập số CCCD / Hộ chiếu của Hành khách ${i + 1}` : `Please enter ID / Passport number for Passenger ${i + 1}`);
         return;
       }
+
+      // Requirement 1.3.4: If customer supplies DOB, validate that it is a real valid calendar date and not in the future
+      if (p.date_of_birth && p.date_of_birth.trim()) {
+        const dobStr = p.date_of_birth.trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dobStr)) {
+          this.toast.warning(
+            this.lang.isVietnamese()
+              ? `Hành khách ${i + 1}: Ngày sinh không đúng định dạng YYYY-MM-DD`
+              : `Passenger ${i + 1}: Date of birth format must be YYYY-MM-DD`,
+          );
+          return;
+        }
+        const [yStr, mStr, dStr] = dobStr.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10);
+        const d = parseInt(dStr, 10);
+        if (m < 1 || m > 12 || d < 1 || d > 31) {
+          this.toast.warning(
+            this.lang.isVietnamese()
+              ? `Hành khách ${i + 1}: Ngày sinh không hợp lệ`
+              : `Passenger ${i + 1}: Invalid date of birth`,
+          );
+          return;
+        }
+        const parsedDate = new Date(Date.UTC(y, m - 1, d));
+        if (
+          parsedDate.getUTCFullYear() !== y ||
+          parsedDate.getUTCMonth() !== m - 1 ||
+          parsedDate.getUTCDate() !== d
+        ) {
+          this.toast.warning(
+            this.lang.isVietnamese()
+              ? `Hành khách ${i + 1}: Ngày sinh không tồn tại trong lịch thực tế`
+              : `Passenger ${i + 1}: Date of birth does not exist on the calendar`,
+          );
+          return;
+        }
+        const now = new Date();
+        const todayUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        if (parsedDate > todayUtc) {
+          this.toast.warning(
+            this.lang.isVietnamese()
+              ? `Hành khách ${i + 1}: Ngày sinh không thể là ngày trong tương lai`
+              : `Passenger ${i + 1}: Date of birth cannot be in the future`,
+          );
+          return;
+        }
+      }
     }
 
     // Free hold is only allowed when departure is more than 14 days away
@@ -1322,19 +1443,32 @@ export class BookingComponent implements OnInit {
     }
 
     if (!this.isBlock()) {
-      const cardDigits = this.creditCardNumber.replace(/\D/g, '');
-      if (!cardDigits) {
+      const cardRaw = this.creditCardNumber.trim();
+      if (!cardRaw) {
         this.toast.warning(this.lang.isVietnamese() ? 'Vui lòng nhập số thẻ tín dụng thanh toán' : 'Please enter payment credit card number');
         return;
       }
-      if (cardDigits.length < 12 || cardDigits.length > 19) {
+      const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
+      if (!cardRegex.test(cardRaw)) {
         this.toast.warning(this.lang.isVietnamese() ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)' : 'Invalid credit card number (12–19 digits required)');
         return;
       }
-      // Expiry / CVV are display-only (never transmitted) but still format-checked.
-      if (this.cardExp.trim() && !/^(0[1-9]|1[0-2])\/\d{2}$/.test(this.cardExp.trim())) {
-        this.toast.warning(this.lang.isVietnamese() ? 'Ngày hết hạn thẻ không hợp lệ. Định dạng đúng: MM/YY' : 'Invalid expiration date. Expected format: MM/YY');
-        return;
+      // Requirement 1.3.4: Expiry format & future date check
+      if (this.cardExp.trim()) {
+        if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(this.cardExp.trim())) {
+          this.toast.warning(this.lang.isVietnamese() ? 'Ngày hết hạn thẻ không hợp lệ. Định dạng đúng: MM/YY' : 'Invalid expiration date. Expected format: MM/YY');
+          return;
+        }
+        const [mStr, yStr] = this.cardExp.trim().split('/');
+        const expMonth = parseInt(mStr, 10);
+        const expYear = 2000 + parseInt(yStr, 10);
+        const now = new Date();
+        const curYear = now.getFullYear();
+        const curMonth = now.getMonth() + 1;
+        if (expYear < curYear || (expYear === curYear && expMonth < curMonth)) {
+          this.toast.warning(this.lang.isVietnamese() ? 'Thẻ tín dụng đã hết hạn sử dụng' : 'Credit card has expired');
+          return;
+        }
       }
       if (this.cardCvv.trim() && !/^\d{3,4}$/.test(this.cardCvv.trim())) {
         this.toast.warning(this.lang.isVietnamese() ? 'CVV không hợp lệ (cần 3–4 chữ số)' : 'Invalid CVV (3–4 digits required)');
@@ -1357,6 +1491,7 @@ export class BookingComponent implements OnInit {
       is_block: this.isBlock(),
       passengers: this.buildPassengerPayload(),
       legs: legs,
+      seat_requests: this.buildSeatRequests(legs),
       // Only the card number is sent: the backend stores a masked value.
       credit_card_number: this.isBlock() ? undefined : this.creditCardNumber.replace(/\D/g, ''),
     };

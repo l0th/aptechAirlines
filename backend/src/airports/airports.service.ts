@@ -510,7 +510,7 @@ export class AirportsService {
           // Khởi tạo sân bay mới: is_serviced_directly = true và múi giờ xấp xỉ
           airport = new this.airportModel({
             iata_code: cleanIata,
-            is_serviced_directly: true,
+            is_serviced_directly: false,
             nearest_airport_code: '',
             distance_to_nearest_km: 0,
             time_zone: this.approximateTimeZone(cleanCountry, item.lat, item.lng),

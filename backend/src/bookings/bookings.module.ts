@@ -9,6 +9,7 @@ import { PoliciesModule } from '../policies/policies.module';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { BookingsScheduler } from './bookings.scheduler';
+import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { BookingsScheduler } from './bookings.scheduler';
     PoliciesModule,
     AuthModule,
     MailModule,
+    SeatAllocationModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsScheduler],

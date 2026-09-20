@@ -57,6 +57,43 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
       expect(phoneError).toBeDefined();
     });
 
+    it('Case C2: Invalid phone_number format rejects validation (letters, punctuation only, too short)', async () => {
+      // 1. Letters
+      const p1: any = { ...validRegisterPayload, phone_number: 'not-a-phone' };
+      const errs1 = await validate(plainToInstance(RegisterDto, p1));
+      expect(errs1.find((e) => e.property === 'phone_number')?.constraints).toHaveProperty('matches');
+
+      // 2. Punctuation only (e.g. repeated '+')
+      const p2: any = { ...validRegisterPayload, phone_number: '+++++++' };
+      const errs2 = await validate(plainToInstance(RegisterDto, p2));
+      expect(errs2.find((e) => e.property === 'phone_number')?.constraints).toHaveProperty('matches');
+
+      // 3. Meaningful digits count too short (< 7 digits)
+      const p3: any = { ...validRegisterPayload, phone_number: '+1 (234) 5' };
+      const errs3 = await validate(plainToInstance(RegisterDto, p3));
+      expect(errs3.find((e) => e.property === 'phone_number')?.constraints).toHaveProperty('matches');
+    });
+
+    it('Case C3: Invalid email format rejects validation', async () => {
+      const payload: any = { ...validRegisterPayload, email: 'notanemail' };
+      const dto = plainToInstance(RegisterDto, payload);
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      const emailError = errors.find((e) => e.property === 'email');
+      expect(emailError).toBeDefined();
+      expect(emailError?.constraints).toHaveProperty('isEmail');
+    });
+
+    it('Case C4: Short password (< 6 chars) rejects validation', async () => {
+      const payload: any = { ...validRegisterPayload, password: '12345' };
+      const dto = plainToInstance(RegisterDto, payload);
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      const passError = errors.find((e) => e.property === 'password');
+      expect(passError).toBeDefined();
+      expect(passError?.constraints).toHaveProperty('minLength');
+    });
+
     it('Case D: Missing sex rejects validation', async () => {
       const payload: any = { ...validRegisterPayload };
       delete payload.sex;
@@ -91,6 +128,23 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
       expect(errors.length).toBeGreaterThan(0);
       const cardError = errors.find((e) => e.property === 'preferred_credit_card');
       expect(cardError).toBeDefined();
+    });
+
+    it('Case F2: Invalid preferred_credit_card format rejects validation (< 12 digits, letters, or punctuation only)', async () => {
+      // 1. Too short (< 12 digits)
+      const p1: any = { ...validRegisterPayload, preferred_credit_card: '12345' };
+      const errs1 = await validate(plainToInstance(RegisterDto, p1));
+      expect(errs1.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
+
+      // 2. Letters included
+      const p2: any = { ...validRegisterPayload, preferred_credit_card: '4111-2222-3333-abcd' };
+      const errs2 = await validate(plainToInstance(RegisterDto, p2));
+      expect(errs2.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
+
+      // 3. Punctuation only
+      const p3: any = { ...validRegisterPayload, preferred_credit_card: '    -   ' };
+      const errs3 = await validate(plainToInstance(RegisterDto, p3));
+      expect(errs3.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
     });
 
     describe('Case G: Invalid/non-integer/negative age rejects as appropriate to DTO contract', () => {

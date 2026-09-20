@@ -14,8 +14,8 @@ export class Airport {
   @Prop({ required: true, trim: true })
   airport_name: string;
 
-  // Requirement 3.3.1: check if directly serviced
-  @Prop({ default: true })
+  // Requirement 3.3.1: check if directly serviced (default false for reference data)
+  @Prop({ default: false })
   is_serviced_directly: boolean;
 
   // Nearest city/airport if not directly serviced
@@ -25,7 +25,7 @@ export class Airport {
   @Prop({ default: 0 })
   distance_to_nearest_km: number;
 
-  @Prop({ default: 'Asia/Ho_Chi_Minh' })
+  @Prop({ default: 'UTC' })
   time_zone: string;
 
   @Prop({ required: false })
@@ -43,8 +43,14 @@ export class Airport {
   @Prop({ required: false })
   lng?: number;
 
-  @Prop({ default: 'seed' })
+  @Prop({ default: 'ourairports' })
   data_source?: string;
 }
 
 export const AirportSchema = SchemaFactory.createForClass(Airport);
+
+// Performance indexes for suggestion autocomplete, city resolution and location expansion
+AirportSchema.index({ city_name: 1 });
+AirportSchema.index({ city_name: 1, is_serviced_directly: 1 });
+AirportSchema.index({ is_serviced_directly: 1 });
+AirportSchema.index({ country_code: 1 });

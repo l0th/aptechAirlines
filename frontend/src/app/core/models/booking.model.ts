@@ -74,6 +74,7 @@ export interface PassengerInput {
   nationality?: string;
   date_of_birth?: string;
   seat_code?: string;
+  seat_codes?: Record<string, string>;
 }
 
 /** One leg selection sent to `POST /api/bookings`. */

@@ -188,6 +188,7 @@ export interface SeatRow {
   row_number: number;
   is_exit_row: boolean;
   is_special: boolean;
+  column_groups?: SeatItem[][];
   seats: SeatItem[];
 }
 
@@ -197,19 +198,22 @@ export interface SeatMapResponse {
   route: string;
   aircraft_model: string | null;
   aircraft_known?: boolean;
+  aircraft_type?: string;
+  layout_available?: boolean;
   layout_notice?: string;
+  total_capacity?: number;
   departure_time: string;
-  legend: Array<{
+  legend?: Array<{
     type: string;
     label: string;
     color: string;
     bg: string;
   }>;
-  notice: {
-    skyboss_benefit: string;
-    exit_row_warning: string;
+  notice?: {
+    skyboss_benefit?: string;
+    exit_row_warning?: string;
   };
-  layout: {
+  layout?: {
     left_columns: string[];
     right_columns: string[];
     exit_rows: number[];

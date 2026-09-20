@@ -15,8 +15,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
 
-// Staff roles allowed to mutate fare/refund policies
-const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
+// Admin roles allowed to mutate fare/refund policies
+const ADMIN_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
 
 // NOTE: all @Get routes stay public (guests may read published policies).
 @Controller('policies')
@@ -35,14 +35,14 @@ export class PoliciesController {
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async create(@Body() createPolicyDto: CreatePolicyDto) {
     return this.policiesService.create(createPolicyDto);
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async update(
     @Param('id') id: string,
     @Body() updatePolicyDto: UpdatePolicyDto,
@@ -52,7 +52,7 @@ export class PoliciesController {
 
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(...STAFF_ROLES)
+  @Roles(...ADMIN_ROLES)
   async delete(@Param('id') id: string) {
     return this.policiesService.delete(id);
   }

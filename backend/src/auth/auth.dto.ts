@@ -1,4 +1,10 @@
-import { IsEmail, IsInt, IsNotEmpty, IsString, Min, MinLength } from 'class-validator';
+import { IsEmail, IsInt, IsNotEmpty, IsString, Matches, Min, MinLength } from 'class-validator';
+import {
+  CREDIT_CARD_MESSAGE,
+  CREDIT_CARD_REGEX,
+  PHONE_NUMBER_MESSAGE,
+  PHONE_NUMBER_REGEX,
+} from '../common/validation.constants';
 
 export class LoginDto {
   @IsString()
@@ -37,6 +43,7 @@ export class RegisterDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(PHONE_NUMBER_REGEX, { message: PHONE_NUMBER_MESSAGE })
   phone_number: string;
 
   @IsString()
@@ -49,6 +56,7 @@ export class RegisterDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
   preferred_credit_card: string;
 }
 

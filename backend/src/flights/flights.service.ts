@@ -4,10 +4,11 @@ import {
   Logger,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Flight, FlightDocument, FlightStatus } from './flights.schema';
+import { Flight, FlightDocument, FlightStatus, CabinClass } from './flights.schema';
 import {
   CreateFlightDto,
   SearchFlightDto,
@@ -21,9 +22,11 @@ import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes } 
 import { earlyBirdQuote, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
 
 import { ReferenceService } from '../reference/reference.service';
-import { RouteGraphService } from '../reference/route-graph.service';
-import { RouteScheduleValidatorService } from '../reference/route-schedule-validator.service';
+import { RouteGraphCoverage, RouteGraphResult, RouteGraphService } from '../reference/route-graph.service';
+import { RouteScheduleValidatorService, ValidatedItinerary } from '../reference/route-schedule-validator.service';
 import { UsersService } from '../users/users.service';
+import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
+import { FLEET_LAYOUT_CATALOG } from '../seat-allocation/fleet-layout.catalog';
 
 /**
  * Enumerates all calendar dates (YYYY-MM-DD) inclusively from startDate through endDate.
@@ -41,6 +44,19 @@ export function enumerateDateRange(startDate: string, endDate?: string): string[
   }
   return dates;
 }
+export interface RouteNetworkLeg {
+  airline_iata?: string;
+  dep_iata?: string;
+  arr_iata?: string;
+}
+
+export interface RouteNetworkSuggestion {
+  transit_airport: string;
+  leg1?: RouteNetworkLeg;
+  leg2?: RouteNetworkLeg;
+  leg3?: RouteNetworkLeg;
+  note?: string;
+}
 
 @Injectable()
 export class FlightsService {
@@ -54,6 +70,7 @@ export class FlightsService {
     private readonly usersService: UsersService,
     @Optional() private readonly routeGraphService?: RouteGraphService,
     @Optional() private readonly routeScheduleValidatorService?: RouteScheduleValidatorService,
+    @Optional() private readonly seatAllocationService?: SeatAllocationService,
   ) {}
 
   async findAll(status?: FlightStatus, origin?: string, dest?: string): Promise<Flight[]> {
@@ -92,7 +109,12 @@ export class FlightsService {
     }
 
     const flights = await this.flightModel
-      .find({ flight_number: normalizedNumber, departure_date: date })
+      .find({
+        flight_number: normalizedNumber,
+        departure_date: date,
+        is_bookable: true,
+        operator: 'APTECH_AIRLINES',
+      })
       .sort({ scheduled_departure: 1 })
       .exec();
 
@@ -199,6 +221,7 @@ export class FlightsService {
     if (updateFlightDto.delay_reason !== undefined) flight.delay_reason = updateFlightDto.delay_reason;
     if (updateFlightDto.inventories) flight.inventories = updateFlightDto.inventories as any;
 
+    flight.is_manually_modified = true;
     const savedFlight = await flight.save();
 
     // C.1 Hủy booking liên quan khi flight bị CANCELLED
@@ -211,6 +234,28 @@ export class FlightsService {
     }
 
     return savedFlight;
+  }
+
+  /**
+   * Authoritative safe flight deletion enforcing booking integrity.
+   * Rejects deletion if referenced by active BLOCKED or CONFIRMED bookings.
+   */
+  async deleteFlight(id: string): Promise<{ message: string; flight: FlightDocument }> {
+    const flight = await this.findById(id);
+    const hasBookings = await this.bookingModel.exists({
+      'ticket_coupons.flight_id': flight._id,
+      status: { $in: ['BLOCKED', 'CONFIRMED'] },
+    });
+    if (hasBookings) {
+      throw new BadRequestException(
+        'Không thể xóa chuyến bay đã có hành khách giữ chỗ hoặc mua vé. (Cannot delete flight with active BLOCKED or CONFIRMED bookings)',
+      );
+    }
+    await this.flightModel.findByIdAndDelete(id).exec();
+    return {
+      message: `Flight ${flight.flight_number} (${id}) deleted successfully`,
+      flight,
+    };
   }
 
   async updateStatus(id: string, dto: UpdateFlightStatusDto): Promise<FlightDocument> {
@@ -431,10 +476,11 @@ export class FlightsService {
     return cancelledCount;
   }
 
-  async delete(id: string): Promise<{ message: string }> {
-    await this.findById(id);
-    await this.flightModel.findByIdAndDelete(id).exec();
-    return { message: `Flight with ID ${id} deleted successfully` };
+  /**
+   * @deprecated Use deleteFlight() to enforce booking safety invariants.
+   */
+  async delete(id: string): Promise<{ message: string; flight?: FlightDocument }> {
+    return this.deleteFlight(id);
   }
 
   // Atomically decrement or increment available seats
@@ -461,20 +507,213 @@ export class FlightsService {
   }
 
   // Yêu cầu B.1: Đặt chỗ an toàn (atomic)
-  async reserveSeats(flightId: string, inventoryId: string, count: number): Promise<boolean> {
+  async reserveSeats(
+    flightId: string,
+    inventoryId: string,
+    count: number,
+    sagaOptions?: { operation_id: string; mutation_key: string },
+  ): Promise<boolean> {
+    if (!sagaOptions) {
+      const result = await this.flightModel.findOneAndUpdate(
+        {
+          _id: flightId,
+          inventories: {
+            $elemMatch: { _id: inventoryId, available_seats: { $gte: count } },
+          },
+        },
+        {
+          $inc: { 'inventories.$.available_seats': -count },
+        },
+        { new: true },
+      );
+      return !!result;
+    }
+
+    const invObjId = new Types.ObjectId(inventoryId);
+
+    // Atomic update filter requires:
+    // 1. the exact inventory via $elemMatch
+    // 2. available_seats >= count
+    // 3. that exact inventory does NOT already contain mutation_key
     const result = await this.flightModel.findOneAndUpdate(
       {
         _id: flightId,
         inventories: {
-          $elemMatch: { _id: inventoryId, available_seats: { $gte: count } },
+          $elemMatch: {
+            _id: inventoryId,
+            available_seats: { $gte: count },
+            'saga_markers.mutation_key': { $ne: sagaOptions.mutation_key },
+          },
         },
       },
       {
-        $inc: { 'inventories.$.available_seats': -count },
+        $inc: { 'inventories.$[inv].available_seats': -count },
+        $push: {
+          'inventories.$[inv].saga_markers': {
+            mutation_key: sagaOptions.mutation_key,
+            operation_id: sagaOptions.operation_id,
+            action: 'RESERVE_NEW',
+            seat_count: count,
+            state: 'APPLIED',
+            created_at: new Date(),
+          },
+        },
       },
-      { new: true }
+      {
+        arrayFilters: [{ 'inv._id': invObjId }],
+        new: true,
+      },
     );
-    return !!result;
+
+    if (result) {
+      return true;
+    }
+
+    // If atomic update returned null: query for the exact marker
+    // marker APPLIED => ALREADY_APPLIED / idempotent success
+    // marker absent => genuine capacity failure
+    const existingFlight = await this.flightModel.findOne({
+      _id: flightId,
+      inventories: {
+        $elemMatch: {
+          _id: inventoryId,
+          saga_markers: {
+            $elemMatch: { mutation_key: sagaOptions.mutation_key, state: 'APPLIED' },
+          },
+        },
+      },
+    }).exec();
+
+    if (existingFlight) {
+      return true; // ALREADY_APPLIED / idempotent success
+    }
+
+    return false; // Genuine capacity or flight failure
+  }
+
+  /**
+   * Phase B SAGA: Atomically compensates an inventory reservation if the marker is APPLIED.
+   */
+  async compensateInventoryReservation(
+    flightId: string | Types.ObjectId,
+    inventoryId: string,
+    mutationKey: string,
+    count: number,
+  ): Promise<boolean> {
+    const invObjId = new Types.ObjectId(inventoryId);
+    const now = new Date();
+    const result = await this.flightModel.findOneAndUpdate(
+      {
+        _id: flightId,
+        inventories: {
+          $elemMatch: {
+            _id: inventoryId,
+            saga_markers: {
+              $elemMatch: { mutation_key: mutationKey, state: 'APPLIED' },
+            },
+          },
+        },
+      },
+      {
+        $inc: { 'inventories.$[inv].available_seats': +count },
+        $set: {
+          'inventories.$[inv].saga_markers.$[m].state': 'COMPENSATED',
+          'inventories.$[inv].saga_markers.$[m].compensated_at': now,
+        },
+      },
+      {
+        arrayFilters: [{ 'inv._id': invObjId }, { 'm.mutation_key': mutationKey, 'm.state': 'APPLIED' }],
+        new: true,
+      },
+    );
+    if (result) {
+      return true;
+    }
+
+    // Idempotent recovery inspection:
+    // If findOneAndUpdate didn't match, check whether already compensated or never applied
+    const flight = await this.flightModel.findOne({ _id: flightId }).lean();
+    if (!flight) {
+      return false;
+    }
+    const inv = flight.inventories?.find((i: any) => String(i._id) === String(inventoryId));
+    if (!inv) {
+      return false;
+    }
+    const marker = inv.saga_markers?.find((m: any) => m.mutation_key === mutationKey);
+    if (!marker) {
+      // Marker absent: mutation never reached flight inventory -> NO-OP SUCCESS
+      return true;
+    }
+    if (marker.state === 'COMPENSATED') {
+      // Already compensated -> IDEMPOTENT SUCCESS
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Phase B SAGA: Atomically restores inventory with an idempotent saga marker.
+   * Two concurrent identical restore calls must never increment twice.
+   */
+  async restoreSeatsWithSaga(
+    flightId: string | Types.ObjectId,
+    inventoryId: string,
+    count: number,
+    sagaOptions: { operation_id: string; mutation_key: string },
+  ): Promise<boolean> {
+    const invObjId = new Types.ObjectId(inventoryId);
+
+    // Atomic update filter requires:
+    // 1. exact inventory via $elemMatch
+    // 2. that exact inventory does NOT already contain mutation_key
+    const result = await this.flightModel.findOneAndUpdate(
+      {
+        _id: flightId,
+        inventories: {
+          $elemMatch: {
+            _id: inventoryId,
+            'saga_markers.mutation_key': { $ne: sagaOptions.mutation_key },
+          },
+        },
+      },
+      {
+        $inc: { 'inventories.$[inv].available_seats': +count },
+        $push: {
+          'inventories.$[inv].saga_markers': {
+            mutation_key: sagaOptions.mutation_key,
+            operation_id: sagaOptions.operation_id,
+            action: 'RESTORE_OLD',
+            seat_count: count,
+            state: 'APPLIED',
+            created_at: new Date(),
+          },
+        },
+      },
+      {
+        arrayFilters: [{ 'inv._id': invObjId }],
+        new: true,
+      },
+    );
+
+    if (result) {
+      return true;
+    }
+
+    // Check if marker was already APPLIED (idempotent retry)
+    const existing = await this.flightModel.findOne({
+      _id: flightId,
+      inventories: {
+        $elemMatch: {
+          _id: inventoryId,
+          saga_markers: {
+            $elemMatch: { mutation_key: sagaOptions.mutation_key, state: 'APPLIED' },
+          },
+        },
+      },
+    }).exec();
+
+    return !!existing;
   }
 
   /**
@@ -491,7 +730,24 @@ export class FlightsService {
     return_flights?: any[];
     connecting_routes?: any[];
     return_connecting_routes?: any[];
-    route_network_suggestions?: any[];
+    route_network_suggestions?: RouteNetworkSuggestion[];
+    network_status?: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+    network_itineraries?: ValidatedItinerary[];
+    network_coverage?: RouteGraphCoverage;
+    network_discovery?: {
+      status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+      itineraries: ValidatedItinerary[];
+      coverage: RouteGraphCoverage;
+    };
+    return_route_network_suggestions?: RouteNetworkSuggestion[];
+    return_network_status?: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+    return_network_itineraries?: ValidatedItinerary[];
+    return_network_coverage?: RouteGraphCoverage;
+    return_network_discovery?: {
+      status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+      itineraries: ValidatedItinerary[];
+      coverage: RouteGraphCoverage;
+    };
   }> {
     const adults = Number(dto.adults) || 1;
     const children = Number(dto.children) || 0;
@@ -559,36 +815,69 @@ export class FlightsService {
 
     let connectingRoutes: any[] = [];
     let routeNetworkSuggestions: any[] = [];
+    let networkDiscovery: {
+      status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+      itineraries: ValidatedItinerary[];
+      coverage: RouteGraphCoverage;
+    } | undefined = undefined;
     
     if (onwardDirect.length === 0 || dto.include_connecting) {
-      connectingRoutes = await (dto.departure_date_end
-        ? this.findConnectingRoutes(
-            originScope.iata_codes,
-            destScope.iata_codes,
-            dto.departure_date,
-            totalPassengers,
-            adults,
-            children,
-            seniors,
-            dto.departure_date_end,
-          )
-        : this.findConnectingRoutes(
-            originScope.iata_codes,
-            destScope.iata_codes,
-            dto.departure_date,
-            totalPassengers,
-            adults,
-            children,
-            seniors,
-          ));
+      if (dto.departure_date_end || dto.cabin_class) {
+        connectingRoutes = await this.findConnectingRoutes(
+          originScope.iata_codes,
+          destScope.iata_codes,
+          dto.departure_date,
+          totalPassengers,
+          adults,
+          children,
+          seniors,
+          dto.departure_date_end,
+          dto.cabin_class,
+        );
+      } else {
+        connectingRoutes = await this.findConnectingRoutes(
+          originScope.iata_codes,
+          destScope.iata_codes,
+          dto.departure_date,
+          totalPassengers,
+          adults,
+          children,
+          seniors,
+        );
+      }
       
       if (connectingRoutes.length === 0 && onwardDirect.length === 0) {
-         routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(originScope.iata_codes, destScope.iata_codes);
+        if (this.routeGraphService && this.routeScheduleValidatorService) {
+          const originNetScope = await this.referenceService.expandLocation(dto.origin, { includeUnserviced: true });
+          const destNetScope = await this.referenceService.expandLocation(dto.destination, { includeUnserviced: true });
+          networkDiscovery = await this.discoverNetworkRoutes(
+            originNetScope.iata_codes.length > 0 ? originNetScope.iata_codes : originScope.iata_codes,
+            destNetScope.iata_codes.length > 0 ? destNetScope.iata_codes : destScope.iata_codes,
+            dto.departure_date,
+          );
+
+          if (networkDiscovery.itineraries.length > 0) {
+            routeNetworkSuggestions = this.mapItinerariesToSuggestions(networkDiscovery.itineraries);
+          } else {
+            routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
+              originScope.iata_codes,
+              destScope.iata_codes,
+            );
+          }
+        } else {
+          routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
+            originScope.iata_codes,
+            destScope.iata_codes,
+          );
+        }
       }
     }
 
     let returnFlights: any[] | undefined = undefined;
     let returnConnectingRoutes: any[] | undefined = undefined;
+    let returnNetworkDiscovery: any = undefined;
+    let returnRouteNetworkSuggestions: any[] | undefined = undefined;
+
     if (dto.return_date) {
       returnFlights = await this.findDirectFlights(
         destScope.iata_codes,
@@ -603,15 +892,56 @@ export class FlightsService {
         seniors,
       );
       if (returnFlights.length === 0 || dto.include_connecting) {
-        returnConnectingRoutes = await this.findConnectingRoutes(
-          destScope.iata_codes,
-          originScope.iata_codes,
-          dto.return_date,
-          totalPassengers,
-          adults,
-          children,
-          seniors,
-        );
+        if (dto.cabin_class) {
+          returnConnectingRoutes = await this.findConnectingRoutes(
+            destScope.iata_codes,
+            originScope.iata_codes,
+            dto.return_date,
+            totalPassengers,
+            adults,
+            children,
+            seniors,
+            undefined,
+            dto.cabin_class,
+          );
+        } else {
+          returnConnectingRoutes = await this.findConnectingRoutes(
+            destScope.iata_codes,
+            originScope.iata_codes,
+            dto.return_date,
+            totalPassengers,
+            adults,
+            children,
+            seniors,
+          );
+        }
+      }
+
+      // Reverse Network Discovery for return flight when both concrete direct and connecting yield 0
+      if ((returnFlights?.length ?? 0) === 0 && (returnConnectingRoutes?.length ?? 0) === 0) {
+        if (this.routeGraphService && this.routeScheduleValidatorService) {
+          const destNetScope = await this.referenceService.expandLocation(dto.destination, { includeUnserviced: true });
+          const originNetScope = await this.referenceService.expandLocation(dto.origin, { includeUnserviced: true });
+          returnNetworkDiscovery = await this.discoverNetworkRoutes(
+            destNetScope.iata_codes.length > 0 ? destNetScope.iata_codes : destScope.iata_codes,
+            originNetScope.iata_codes.length > 0 ? originNetScope.iata_codes : originScope.iata_codes,
+            dto.return_date,
+          );
+
+          if (returnNetworkDiscovery.itineraries.length > 0) {
+            returnRouteNetworkSuggestions = this.mapItinerariesToSuggestions(returnNetworkDiscovery.itineraries);
+          } else {
+            returnRouteNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
+              destScope.iata_codes,
+              originScope.iata_codes,
+            );
+          }
+        } else {
+          returnRouteNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
+            destScope.iata_codes,
+            originScope.iata_codes,
+          );
+        }
       }
     }
 
@@ -671,6 +1001,15 @@ export class FlightsService {
       connecting_routes: connectingRoutes,
       return_connecting_routes: returnConnectingRoutes,
       route_network_suggestions: routeNetworkSuggestions,
+      network_status: networkDiscovery?.status,
+      network_itineraries: networkDiscovery?.itineraries,
+      network_coverage: networkDiscovery?.coverage,
+      network_discovery: networkDiscovery,
+      return_route_network_suggestions: returnRouteNetworkSuggestions,
+      return_network_status: returnNetworkDiscovery?.status,
+      return_network_itineraries: returnNetworkDiscovery?.itineraries,
+      return_network_coverage: returnNetworkDiscovery?.coverage,
+      return_network_discovery: returnNetworkDiscovery,
     };
   }
 
@@ -692,6 +1031,8 @@ export class FlightsService {
       origin_iata: { $in: originIatas },
       dest_iata: { $in: destIatas },
       status: { $ne: FlightStatus.CANCELLED },
+      is_bookable: true,
+      operator: 'APTECH_AIRLINES',
     };
 
     if (departureDateEnd) {
@@ -802,6 +1143,7 @@ export class FlightsService {
     children: number,
     seniors: number,
     departureDateEnd?: string,
+    cabinClass?: CabinClass,
   ): Promise<any[]> {
     if (originIatas.length === 0 || destIatas.length === 0) return [];
 
@@ -834,7 +1176,11 @@ export class FlightsService {
       const earlyBird = earlyBirdQuote(daysUntilDeparture);
       
       const mappedInventories = leg.inventories
-        .filter((i: any) => i.available_seats >= totalPassengers)
+        .filter(
+          (i: any) =>
+            (!cabinClass || i.cabin_class === cabinClass) &&
+            i.available_seats >= totalPassengers,
+        )
         .map((inv: any) => {
             const rawInv = typeof inv.toObject === 'function' ? inv.toObject() : inv;
             const discountedBase = Math.round(inv.base_price * earlyBird.multiplier);
@@ -869,102 +1215,9 @@ export class FlightsService {
       };
     };
 
-    // 1. Authoritative Phase B/C when RouteGraphService and RouteScheduleValidatorService are available
-    if (this.routeGraphService && this.routeScheduleValidatorService) {
-      try {
-        const graphRes = await this.routeGraphService.findPaths(originIatas, destIatas, { maxStops: 2 });
-        const targetDates = enumerateDateRange(departureDate, departureDateEnd);
-
-        for (const targetDate of targetDates) {
-          const validated = this.routeScheduleValidatorService.validatePaths(graphRes, targetDate);
-
-          for (const itin of validated.itineraries) {
-            let allAvailable = true;
-
-            const candidatesByLeg: FlightDocument[][] = [];
-            for (const legDef of itin.legs) {
-              const identity = (legDef.flight_iata || legDef.flight_number || '').replace(/\s+/g, '').toUpperCase();
-              if (!identity || legDef.chronology_basis === 'LOCAL') {
-                allAvailable = false;
-                break;
-              }
-              const candidates = await this.flightModel.find({
-                origin_iata: legDef.dep_iata,
-                dest_iata: legDef.arr_iata,
-                status: { $ne: FlightStatus.CANCELLED },
-              }).exec();
-              const confidentMatches = candidates.filter((flight: FlightDocument) => {
-                const flightIdentity = flight.flight_number.replace(/\s+/g, '').toUpperCase();
-                const scheduleDelta = Math.abs(
-                  new Date(flight.scheduled_departure).getTime() - legDef.dep_datetime.getTime(),
-                );
-                return flightIdentity === identity && scheduleDelta <= 60000;
-              });
-              if (confidentMatches.length === 0) {
-                allAvailable = false;
-                break;
-              }
-              const reservable: FlightDocument[] = [];
-              for (const flight of confidentMatches) {
-                const processed = await processLeg(flight);
-                if (processed.inventories?.length > 0) reservable.push(flight);
-              }
-              if (reservable.length === 0) {
-                allAvailable = false;
-                break;
-              }
-              candidatesByLeg.push(reservable);
-            }
-
-            if (allAvailable) {
-              const combinations = candidatesByLeg.reduce<FlightDocument[][]>(
-                (acc, candidates) => acc.flatMap((prefix) => candidates.map((candidate) => [...prefix, candidate])),
-                [[]],
-              );
-              for (const combination of combinations) {
-                const mappedLegs = await Promise.all(combination.map(processLeg));
-                if (mappedLegs.length >= 2) {
-                  let valid = true;
-                  for (let i = 0; i < mappedLegs.length - 1; i++) {
-                    const arrTime = new Date(mappedLegs[i].arrival).getTime();
-                    const nextDepTime = new Date(mappedLegs[i + 1].departure).getTime();
-                    const layover = Math.round((nextDepTime - arrTime) / 60000);
-                    if (layover < 45 || layover > 720) {
-                      valid = false;
-                      break;
-                    }
-                  }
-
-                  if (valid) {
-                    const comboKey = mappedLegs.map((l: any) => l.flight_id.toString()).join('>');
-                    if (!seenCombos.has(comboKey)) {
-                      seenCombos.add(comboKey);
-                      connectingOptions.push({
-                        route_type: itin.route_type,
-                        departure_date: mappedLegs[0]?.departure_date || targetDate,
-                        transit_airport: itin.stops[0],
-                        transit_airports: itin.stops,
-                        total_duration_minutes: itin.total_duration_minutes,
-                        layover_minutes: itin.layover_minutes.length === 1 ? itin.layover_minutes[0] : itin.layover_minutes,
-                        leg1: mappedLegs[0],
-                        leg2: mappedLegs[1],
-                        legs: mappedLegs,
-                        coverage: validated.coverage,
-                      });
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Error resolving route graph connecting routes: ${err.message}`);
-      }
-      return connectingOptions;
-    }
-
-    // 2. Legacy fallback loop ONLY when graph services are genuinely unavailable
+    // Authoritative Zero N+1 Database-Driven Multi-Hop Connecting Search (0/1/2-Stop)
+    // Operates strictly on concrete dated Flight documents enforcing operator='APTECH_AIRLINES', is_bookable=true,
+    // status != CANCELLED, requested passenger inventory, requested cabin, and 45-720 minute layover windows.
     const leg1DateFilter = departureDateEnd
       ? { $gte: departureDate, $lte: departureDateEnd }
       : departureDate;
@@ -974,48 +1227,157 @@ export class FlightsService {
         origin_iata: { $in: originIatas },
         departure_date: leg1DateFilter,
         status: { $ne: FlightStatus.CANCELLED },
+        is_bookable: true,
+        operator: 'APTECH_AIRLINES',
+        'inventories.available_seats': { $gte: totalPassengers },
       })
       .exec();
 
-    for (const leg1 of leg1Flights) {
-      const transitIata = leg1.dest_iata;
-      if (destIatas.includes(transitIata)) continue;
+    if (leg1Flights.length === 0) return connectingOptions;
 
-      const leg1ArrTime = new Date(leg1.scheduled_arrival);
-      const minDepTime = new Date(leg1ArrTime.getTime() + 45 * 60000);
-      const maxDepTime = new Date(leg1ArrTime.getTime() + 720 * 60000);
+    // Collect candidate transit 1 airports
+    const transit1Iatas = Array.from(
+      new Set(
+        leg1Flights
+          .map((f: any) => f.dest_iata)
+          .filter((iata: string) => !originIatas.includes(iata) && !destIatas.includes(iata)),
+      ),
+    );
 
-      const leg2Flights = await this.flightModel
+    if (transit1Iatas.length === 0) return connectingOptions;
+
+    const baseDepDate = new Date(`${departureDate}T00:00:00+07:00`);
+    const nextDayDate = new Date(baseDepDate.getTime() + 86400000);
+    const nextDateStr = localDateKey(nextDayDate, 'Asia/Ho_Chi_Minh');
+    const dayAfterDate = new Date(nextDayDate.getTime() + 86400000);
+    const dayAfterStr = localDateKey(dayAfterDate, 'Asia/Ho_Chi_Minh');
+
+    const leg2Dates = departureDateEnd
+      ? [departureDate, nextDateStr, dayAfterStr, departureDateEnd]
+      : [departureDate, nextDateStr, dayAfterStr];
+
+    const leg2OriginFilter = transit1Iatas.length === 1 ? transit1Iatas[0] : { $in: transit1Iatas };
+    const leg2Flights = await this.flightModel
+      .find({
+        origin_iata: leg2OriginFilter,
+        departure_date: { $in: leg2Dates },
+        status: { $ne: FlightStatus.CANCELLED },
+        is_bookable: true,
+        operator: 'APTECH_AIRLINES',
+        'inventories.available_seats': { $gte: totalPassengers },
+      })
+      .exec();
+
+    const leg2ByOrigin = new Map<string, any[]>();
+    for (const fl of leg2Flights) {
+      if (!leg2ByOrigin.has(fl.origin_iata)) {
+        leg2ByOrigin.set(fl.origin_iata, []);
+      }
+      leg2ByOrigin.get(fl.origin_iata)!.push(fl);
+    }
+
+    // Collect candidate transit 2 airports for 2-stop routing
+    const transit2Iatas = new Set<string>();
+    for (const fl of leg2Flights) {
+      if (!destIatas.includes(fl.dest_iata) && !originIatas.includes(fl.dest_iata)) {
+        transit2Iatas.add(fl.dest_iata);
+      }
+    }
+
+    const transit2Arr = Array.from(transit2Iatas);
+    let leg3Flights: any[] = [];
+    if (transit2Arr.length > 0) {
+      const leg3OriginFilter = transit2Arr.length === 1 ? transit2Arr[0] : { $in: transit2Arr };
+      leg3Flights = await this.flightModel
         .find({
-          origin_iata: transitIata,
+          origin_iata: leg3OriginFilter,
           dest_iata: { $in: destIatas },
-          scheduled_departure: { $gte: minDepTime, $lte: maxDepTime },
+          departure_date: { $in: leg2Dates },
           status: { $ne: FlightStatus.CANCELLED },
+          is_bookable: true,
+          operator: 'APTECH_AIRLINES',
+          'inventories.available_seats': { $gte: totalPassengers },
         })
         .exec();
+    }
 
-      for (const leg2 of leg2Flights) {
-        const layoverMinutes = Math.round(
-          (new Date(leg2.scheduled_departure).getTime() - leg1ArrTime.getTime()) / 60000,
-        );
+    const leg3ByOrigin = new Map<string, any[]>();
+    for (const fl of leg3Flights) {
+      if (!leg3ByOrigin.has(fl.origin_iata)) {
+        leg3ByOrigin.set(fl.origin_iata, []);
+      }
+      leg3ByOrigin.get(fl.origin_iata)!.push(fl);
+    }
 
-        if (layoverMinutes >= 45 && layoverMinutes <= 720) {
+    for (const leg1 of leg1Flights) {
+      const leg1ArrTime = new Date(leg1.scheduled_arrival).getTime();
+      const candidates2 = leg2ByOrigin.get(leg1.dest_iata) || [];
+
+      for (const leg2 of candidates2) {
+        const leg2DepTime = new Date(leg2.scheduled_departure).getTime();
+        const layover1 = Math.round((leg2DepTime - leg1ArrTime) / 60000);
+        if (layover1 < 45 || layover1 > 720) continue;
+
+        const dur1 = leg1.duration_minutes ?? Math.round((new Date(leg1.scheduled_arrival).getTime() - new Date(leg1.scheduled_departure).getTime()) / 60000);
+        const dur2 = leg2.duration_minutes ?? Math.round((new Date(leg2.scheduled_arrival).getTime() - new Date(leg2.scheduled_departure).getTime()) / 60000);
+
+        if (destIatas.includes(leg2.dest_iata)) {
+          // 1-Stop Connection
           const comboKey = `${leg1._id.toString()}>${leg2._id.toString()}`;
           if (!seenCombos.has(comboKey)) {
             seenCombos.add(comboKey);
-            const processedLeg1 = await processLeg(leg1);
-            const processedLeg2 = await processLeg(leg2);
-            
-            connectingOptions.push({
-              route_type: 'CONNECTING',
-              departure_date: processedLeg1.departure_date,
-              transit_airport: transitIata,
-              total_duration_minutes: leg1.duration_minutes + layoverMinutes + leg2.duration_minutes,
-              layover_minutes: layoverMinutes,
-              leg1: processedLeg1,
-              leg2: processedLeg2,
-              legs: [processedLeg1, processedLeg2],
-            });
+            const pLeg1 = await processLeg(leg1);
+            const pLeg2 = await processLeg(leg2);
+            if (pLeg1.inventories?.length > 0 && pLeg2.inventories?.length > 0) {
+              connectingOptions.push({
+                route_type: 'ONE_STOP',
+                departure_date: pLeg1.departure_date,
+                transit_airport: leg1.dest_iata,
+                transit_airports: [leg1.dest_iata],
+                total_duration_minutes: dur1 + layover1 + dur2,
+                layover_minutes: layover1,
+                leg1: pLeg1,
+                leg2: pLeg2,
+                legs: [pLeg1, pLeg2],
+              });
+            }
+          }
+        } else {
+          // 2-Stop Connection Candidate
+          const leg2ArrTime = new Date(leg2.scheduled_arrival).getTime();
+          const candidates3 = leg3ByOrigin.get(leg2.dest_iata) || [];
+
+          for (const leg3 of candidates3) {
+            const leg3DepTime = new Date(leg3.scheduled_departure).getTime();
+            const layover2 = Math.round((leg3DepTime - leg2ArrTime) / 60000);
+            if (layover2 < 45 || layover2 > 720) continue;
+
+            const dur3 = leg3.duration_minutes ?? Math.round((new Date(leg3.scheduled_arrival).getTime() - new Date(leg3.scheduled_departure).getTime()) / 60000);
+
+            const comboKey3 = `${leg1._id.toString()}>${leg2._id.toString()}>${leg3._id.toString()}`;
+            if (!seenCombos.has(comboKey3)) {
+              seenCombos.add(comboKey3);
+              const pLeg1 = await processLeg(leg1);
+              const pLeg2 = await processLeg(leg2);
+              const pLeg3 = await processLeg(leg3);
+              if (
+                pLeg1.inventories?.length > 0 &&
+                pLeg2.inventories?.length > 0 &&
+                pLeg3.inventories?.length > 0
+              ) {
+                connectingOptions.push({
+                  route_type: 'TWO_STOP',
+                  departure_date: pLeg1.departure_date,
+                  transit_airport: leg1.dest_iata,
+                  transit_airports: [leg1.dest_iata, leg2.dest_iata],
+                  total_duration_minutes: dur1 + layover1 + dur2 + layover2 + dur3,
+                  layover_minutes: [layover1, layover2],
+                  leg1: pLeg1,
+                  leg2: pLeg2,
+                  legs: [pLeg1, pLeg2, pLeg3],
+                });
+              }
+            }
           }
         }
       }
@@ -1025,18 +1387,461 @@ export class FlightsService {
   }
 
   /**
-   * Mô phỏng sơ đồ ghế ngồi chuẩn hàng không (Vietjet / Airbus A321)
-   * Phân loại:
-   * - Hàng 1 - 5: Hàng ghế ĐẶC BIỆT (Skyboss/Thương gia) - Màu đỏ
-   * - Hàng 6 - 11: Hàng ghế TIÊU CHUẨN - Màu xanh lá
-   * - Hàng 12, 14: Hàng ghế LỐI THOÁT HIỂM (Chỗ để chân rộng) - Màu xanh dương (bỏ qua hàng 13)
-   * - Hàng 15 - 31: Hàng ghế TIÊU CHUẨN - Màu xanh lá
-   * - Ghế đã bị đặt: Màu xám / Đỏ dấu X (is_occupied = true)
+   * Discover multi-hop external route network itineraries via cached AirLabs RouteRef & RouteGraphService
+   * with strictly bounded on-demand airport expansion (max 8 expansions per customer search request).
+   */
+  async discoverNetworkRoutes(
+    originIatas: string[],
+    destIatas: string[],
+    departureDate: string,
+  ): Promise<{
+    status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+    itineraries: ValidatedItinerary[];
+    coverage: RouteGraphCoverage;
+  }> {
+    if (!this.routeGraphService || !this.routeScheduleValidatorService) {
+      return {
+        status: 'NETWORK_DATA_INCOMPLETE',
+        itineraries: [],
+        coverage: {
+          complete: false,
+          expanded_airports: [],
+          incomplete_airports: [],
+          missing_sync_state_airports: [],
+        },
+      };
+    }
+
+    const MAX_ON_DEMAND_AIRPORT_EXPANSIONS = 8;
+    const PRIORITY_HUBS = [
+      'SGN', 'HAN', 'DAD', 'SIN', 'BKK', 'KUL', 'HKG', 'PVG', 'PEK', 'CAN',
+      'NRT', 'HND', 'KIX', 'ICN', 'TPE', 'MNL', 'CGK', 'DEL', 'BOM', 'DXB',
+      'DOH', 'AUH', 'IST', 'LHR', 'CDG', 'FRA', 'AMS', 'JFK', 'LAX', 'SYD', 'MEL',
+    ];
+
+    const cleanOrigins = Array.from(
+      new Set((originIatas || []).map(s => s?.trim().toUpperCase()).filter(Boolean)),
+    );
+    const cleanDestinations = Array.from(
+      new Set((destIatas || []).map(s => s?.trim().toUpperCase()).filter(Boolean)),
+    );
+
+    if (cleanOrigins.length === 0 || cleanDestinations.length === 0) {
+      return {
+        status: 'NO_ROUTE_FOUND',
+        itineraries: [],
+        coverage: {
+          complete: true,
+          expanded_airports: [],
+          incomplete_airports: [],
+          missing_sync_state_airports: [],
+        },
+      };
+    }
+
+    const destSet = new Set(cleanDestinations);
+
+    // Initial graph exploration with maxStops = 2
+    let graphResult = await this.routeGraphService.findPaths(cleanOrigins, cleanDestinations, {
+      maxStops: 2,
+      source: 'airlabs',
+    });
+
+    if (!graphResult) {
+      graphResult = {
+        paths: [],
+        coverage: { complete: false, expanded_airports: [], incomplete_airports: [], missing_sync_state_airports: [] },
+      };
+    }
+    if (!graphResult.paths) graphResult.paths = [];
+    if (!graphResult.coverage) {
+      graphResult.coverage = { complete: false, expanded_airports: [], incomplete_airports: [], missing_sync_state_airports: [] };
+    }
+
+    let expansionsCount = 0;
+    const attemptedAirports = new Set<string>();
+    let hitRateLimit = false;
+
+    while (expansionsCount < MAX_ON_DEMAND_AIRPORT_EXPANSIONS) {
+      // 1. Check if current graph results yield valid flight itineraries on the departure date
+      if (graphResult.paths.length > 0) {
+        const validationResult = this.routeScheduleValidatorService.validatePaths(
+          graphResult,
+          departureDate,
+          { minLayoverMinutes: 45, maxLayoverMinutes: 720 },
+        );
+        if (validationResult.itineraries.length > 0) {
+          return {
+            status: 'FOUND',
+            itineraries: this.formatAndSortNetworkItineraries(validationResult.itineraries),
+            coverage: graphResult.coverage,
+          };
+        }
+      }
+
+      // 2. If coverage is complete and no valid path found, stop with NO_ROUTE_FOUND
+      if (graphResult.coverage.complete) {
+        return {
+          status: 'NO_ROUTE_FOUND',
+          itineraries: [],
+          coverage: graphResult.coverage,
+        };
+      }
+
+      // 3. Find candidate airports for bounded on-demand expansion (only missing/incomplete nodes)
+      const missingCandidates = (graphResult.coverage.missing_sync_state_airports || []).filter(
+        a => !attemptedAirports.has(a) && !destSet.has(a),
+      );
+      const incompleteCandidates = (graphResult.coverage.incomplete_airports || []).filter(
+        a => !attemptedAirports.has(a) && !destSet.has(a) && !missingCandidates.includes(a),
+      );
+
+      // Separate candidates into origins vs transit hubs
+      const originSet = new Set(cleanOrigins);
+      const missingOrigins = missingCandidates.filter(a => originSet.has(a));
+      const incompleteOrigins = incompleteCandidates.filter(a => originSet.has(a));
+
+      const missingTransits = missingCandidates.filter(a => !originSet.has(a));
+      const incompleteTransits = incompleteCandidates.filter(a => !originSet.has(a));
+
+      // Sort candidate transits: priority hubs first, then alphabetical
+      const transitCandidates = [...missingTransits, ...incompleteTransits].sort((a, b) => {
+        const idxA = PRIORITY_HUBS.indexOf(a);
+        const idxB = PRIORITY_HUBS.indexOf(b);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      const allCandidates = [...missingOrigins, ...incompleteOrigins, ...transitCandidates];
+      if (allCandidates.length === 0) {
+        // Frontier exhausted, no more candidate airports can be expanded
+        break;
+      }
+
+      const nextAirport = allCandidates[0];
+      attemptedAirports.add(nextAirport);
+      expansionsCount++;
+
+      hitRateLimit = false;
+      try {
+        const ensureRes = await this.referenceService.ensureRoutesForAirport(nextAirport);
+        if (ensureRes?.refresh_error) {
+          const isRateLimit =
+            ensureRes.refresh_error.includes('429') ||
+            ensureRes.refresh_error.toLowerCase().includes('rate limit') ||
+            ensureRes.refresh_error.toLowerCase().includes('quota');
+          if (isRateLimit) {
+            this.logger.warn(`AirLabs 429 Rate Limit encountered in refresh_error while expanding airport ${nextAirport}. Stopping.`);
+            hitRateLimit = true;
+          }
+        }
+      } catch (err: any) {
+        const isRateLimit =
+          err.status === 429 ||
+          err.message?.includes('429') ||
+          err.message?.toLowerCase().includes('rate limit') ||
+          err.message?.toLowerCase().includes('quota');
+        if (isRateLimit) {
+          this.logger.warn(`AirLabs 429 Rate Limit encountered while expanding airport ${nextAirport}. Stopping.`);
+          hitRateLimit = true;
+        } else {
+          this.logger.warn(`Error ensuring routes for airport ${nextAirport}: ${err.message}`);
+        }
+      }
+
+      if (hitRateLimit) {
+        break;
+      }
+
+      // Re-run findPaths after expansion
+      graphResult = await this.routeGraphService.findPaths(cleanOrigins, cleanDestinations, {
+        maxStops: 2,
+        source: 'airlabs',
+      });
+
+      if (!graphResult) {
+        graphResult = {
+          paths: [],
+          coverage: { complete: false, expanded_airports: [], incomplete_airports: [], missing_sync_state_airports: [] },
+        };
+      }
+      if (!graphResult.paths) graphResult.paths = [];
+      if (!graphResult.coverage) {
+        graphResult.coverage = { complete: false, expanded_airports: [], incomplete_airports: [], missing_sync_state_airports: [] };
+      }
+    }
+
+    if (hitRateLimit) {
+      return {
+        status: 'NETWORK_DATA_INCOMPLETE',
+        itineraries: [],
+        coverage: {
+          ...graphResult.coverage,
+          complete: false,
+        },
+      };
+    }
+
+    // Final evaluation after expansion loop completes
+    if (graphResult.paths.length > 0) {
+      const validationResult = this.routeScheduleValidatorService.validatePaths(
+        graphResult,
+        departureDate,
+        { minLayoverMinutes: 45, maxLayoverMinutes: 720 },
+      );
+      if (validationResult.itineraries.length > 0) {
+        return {
+          status: 'FOUND',
+          itineraries: this.formatAndSortNetworkItineraries(validationResult.itineraries),
+          coverage: graphResult.coverage,
+        };
+      }
+    }
+
+    if (graphResult.coverage.complete) {
+      return {
+        status: 'NO_ROUTE_FOUND',
+        itineraries: [],
+        coverage: graphResult.coverage,
+      };
+    }
+
+    return {
+      status: 'NETWORK_DATA_INCOMPLETE',
+      itineraries: [],
+      coverage: graphResult.coverage,
+    };
+  }
+
+  private formatAndSortNetworkItineraries(itineraries: ValidatedItinerary[]): ValidatedItinerary[] {
+    const sorted = [...itineraries].sort((a, b) => {
+      // 1. Number of stops ascending (0 stops < 1 stop < 2 stops)
+      if (a.stops.length !== b.stops.length) {
+        return a.stops.length - b.stops.length;
+      }
+      // 2. Total duration ascending
+      if (a.total_duration_minutes !== b.total_duration_minutes) {
+        return a.total_duration_minutes - b.total_duration_minutes;
+      }
+      // 3. Earliest departure datetime
+      const depTimeA = a.legs[0]?.dep_datetime ? new Date(a.legs[0].dep_datetime).getTime() : 0;
+      const depTimeB = b.legs[0]?.dep_datetime ? new Date(b.legs[0].dep_datetime).getTime() : 0;
+      if (depTimeA !== depTimeB) {
+        return depTimeA - depTimeB;
+      }
+      // 4. Deterministic lexical tiebreaker
+      const keyA = a.legs.map(l => l.source_key || `${l.airline_iata}_${l.dep_iata}_${l.arr_iata}`).join('>');
+      const keyB = b.legs.map(l => l.source_key || `${l.airline_iata}_${l.dep_iata}_${l.arr_iata}`).join('>');
+      return keyA.localeCompare(keyB);
+    });
+
+    return sorted.slice(0, 20).map(itin => ({
+      ...itin,
+      is_bookable: false,
+      inventories: [],
+      legs: itin.legs.map(leg => ({
+        ...leg,
+        is_bookable: false,
+        inventories: [],
+      })),
+    }));
+  }
+
+  private mapItinerariesToSuggestions(itineraries: ValidatedItinerary[]): any[] {
+    const suggestions: any[] = [];
+    const seenTransits = new Set<string>();
+
+    for (const itin of itineraries) {
+      if (itin.stops.length === 0) continue;
+      const transitKey = itin.stops.join('-');
+      if (seenTransits.has(transitKey)) continue;
+      seenTransits.add(transitKey);
+
+      if (itin.legs.length === 2) {
+        suggestions.push({
+          transit_airport: itin.stops[0],
+          leg1: {
+            airline_iata: itin.legs[0].airline_iata,
+            dep_iata: itin.legs[0].dep_iata,
+            arr_iata: itin.legs[0].arr_iata,
+          },
+          leg2: {
+            airline_iata: itin.legs[1].airline_iata,
+            dep_iata: itin.legs[1].dep_iata,
+            arr_iata: itin.legs[1].arr_iata,
+          },
+          note: `Tuyến nối qua ${itin.stops[0]} (AirLabs Route Network) - không thể đặt vé trực tiếp trên Aptech Airlines`,
+        });
+      } else if (itin.legs.length === 3) {
+        suggestions.push({
+          transit_airport: `${itin.stops[0]}, ${itin.stops[1]}`,
+          leg1: {
+            airline_iata: itin.legs[0].airline_iata,
+            dep_iata: itin.legs[0].dep_iata,
+            arr_iata: itin.legs[0].arr_iata,
+          },
+          leg2: {
+            airline_iata: itin.legs[1].airline_iata,
+            dep_iata: itin.legs[1].dep_iata,
+            arr_iata: itin.legs[1].arr_iata,
+          },
+          leg3: {
+            airline_iata: itin.legs[2].airline_iata,
+            dep_iata: itin.legs[2].dep_iata,
+            arr_iata: itin.legs[2].arr_iata,
+          },
+          note: `Tuyến nối 2 điểm dừng qua ${itin.stops[0]} và ${itin.stops[1]} (AirLabs Route Network) - không thể đặt vé trực tiếp trên Aptech Airlines`,
+        });
+      }
+    }
+
+    return suggestions;
+  }
+
+  /**
+   * Bounded Nearby-Date Availability Search (Requirement 3.3.3 & Phase A)
+   * Evaluates real availability (+-7 days) when exact date yields no result.
+   */
+  async getNearbyAvailability(
+    origin: string,
+    destination: string,
+    dateStr: string,
+    cabinClass?: CabinClass,
+    passengers = 1,
+    adults = 1,
+    children = 0,
+    seniors = 0,
+    isSmoking = false,
+  ): Promise<{
+    origin: string;
+    destination: string;
+    requested_date: string;
+    date_range: { min_date: string; max_date: string };
+    available_dates: Array<{
+      date: string;
+      day_of_week: string;
+      min_price: number;
+      has_direct: boolean;
+      available_itineraries_count: number;
+    }>;
+  }> {
+    const originScope = await this.referenceService.expandLocation(origin);
+    const destScope = await this.referenceService.expandLocation(destination);
+
+    const targetDate = new Date(`${dateStr}T00:00:00+07:00`);
+    const now = new Date();
+    const todayStr = localDateKey(now, 'Asia/Ho_Chi_Minh');
+    const today = new Date(`${todayStr}T00:00:00+07:00`);
+    const maxDate = new Date(today.getTime() + 329 * 86400000);
+
+    const results: Array<{
+      date: string;
+      day_of_week: string;
+      min_price: number;
+      has_direct: boolean;
+      available_itineraries_count: number;
+    }> = [];
+
+    const offsets = [-3, -2, -1, 1, 2, 3, -7, -6, -5, -4, 4, 5, 6, 7];
+    const checkedDates = new Set<string>();
+
+    for (const offset of offsets) {
+      const candDate = new Date(targetDate.getTime() + offset * 86400000);
+      if (candDate < today || candDate > maxDate) continue;
+
+      const candDateStr = localDateKey(candDate, 'Asia/Ho_Chi_Minh');
+      if (candDateStr === dateStr || checkedDates.has(candDateStr)) continue;
+      checkedDates.add(candDateStr);
+
+      // 1. Direct Flights
+      const directs = await this.findDirectFlights(
+        originScope.iata_codes,
+        destScope.iata_codes,
+        candDateStr,
+        undefined,
+        cabinClass,
+        isSmoking,
+        passengers,
+        adults,
+        children,
+        seniors,
+      );
+
+      // 2. Connecting Flights (if no direct or for coverage)
+      let connecting: any[] = [];
+      if (directs.length === 0) {
+        connecting = await this.findConnectingRoutes(
+          originScope.iata_codes,
+          destScope.iata_codes,
+          candDateStr,
+          passengers,
+          adults,
+          children,
+          seniors,
+          undefined,
+          cabinClass,
+        );
+      }
+
+      const validCount = directs.length + connecting.length;
+      if (validCount > 0) {
+        let minPrice = Infinity;
+        for (const d of directs) {
+          const p = d.total_party_price || d.base_price_per_adult || 0;
+          if (p > 0 && p < minPrice) minPrice = p;
+        }
+        for (const c of connecting) {
+          let partyTotal = 0;
+          const legs = c.legs || [c.leg1, c.leg2];
+          for (const leg of legs) {
+            const inv = leg.inventories?.find((i: any) => !cabinClass || i.cabin_class === cabinClass);
+            if (inv) partyTotal += inv.total_party_price || inv.base_price_per_adult || 0;
+          }
+          if (partyTotal > 0 && partyTotal < minPrice) {
+            minPrice = partyTotal;
+          }
+        }
+
+        const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+        results.push({
+          date: candDateStr,
+          day_of_week: dayNames[candDate.getDay()],
+          min_price: minPrice === Infinity ? 0 : minPrice,
+          has_direct: directs.length > 0,
+          available_itineraries_count: validCount,
+        });
+      }
+    }
+
+    results.sort((a, b) => a.date.localeCompare(b.date));
+    const maxDateStr = localDateKey(maxDate, 'Asia/Ho_Chi_Minh');
+    return {
+      origin,
+      destination,
+      requested_date: dateStr,
+      date_range: {
+        min_date: todayStr,
+        max_date: maxDateStr,
+      },
+      available_dates: results,
+    };
+  }
+
+  /**
+   * Phase B: Aircraft-specific seat map (A20N, A21N, B789, A359, B738, AT76).
+   * ZERO universal A321 fallback.
    */
   async getSeatMap(flightId: string) {
     const flight = await this.findById(flightId);
+    if (flight.is_bookable === false || (flight.operator && flight.operator !== 'APTECH_AIRLINES')) {
+      throw new BadRequestException(
+        'Seat map is only available for bookable Aptech Airlines flights.',
+      );
+    }
 
-    // Lấy danh sách ghế đã được đặt trong DB
+    // Lấy danh sách ghế đã được đặt trong DB từ Bookings
     const bookings = await this.bookingModel
       .find({
         'ticket_coupons.flight_id': flight._id,
@@ -1046,67 +1851,126 @@ export class FlightsService {
 
     const occupiedSet = new Set<string>();
     for (const b of bookings) {
-      for (const coupon of b.ticket_coupons) {
-        if (coupon.flight_id.toString() === flight._id.toString() && coupon.seat_code) {
+      for (const coupon of (b.ticket_coupons || [])) {
+        if (coupon.flight_id?.toString() === flight._id.toString() && coupon.seat_code) {
           occupiedSet.add(coupon.seat_code.toUpperCase());
         }
       }
     }
 
-    // Ghế chỉ bị chiếm khi có hành khách thực tế đã đặt chỗ trong Database
-    const columns = ['A', 'B', 'C', 'D', 'E', 'F'];
-    const totalRows = 31;
-    const exitRows = [12, 14];
-    const specialRows = [1, 2, 3, 4, 5];
-    const skippedRows = [13]; // Chuẩn hàng không quốc tế bỏ qua hàng 13
+    // Resolve real aircraft type
+    let aircraftType: string | null = null;
+    const modelCode = flight.aircraft?.model_code?.toUpperCase();
+    const modelName = flight.aircraft?.model_name;
+
+    if (modelCode && FLEET_LAYOUT_CATALOG[modelCode]) {
+      aircraftType = modelCode;
+    } else if (modelName) {
+      if (/A321/i.test(modelName)) aircraftType = 'A21N';
+      else if (/A320/i.test(modelName)) aircraftType = 'A20N';
+      else if (/787/i.test(modelName)) aircraftType = 'B789';
+      else if (/A350/i.test(modelName)) aircraftType = 'A359';
+      else if (/737/i.test(modelName)) aircraftType = 'B738';
+      else if (/ATR/i.test(modelName)) aircraftType = 'AT76';
+    }
+
+    let enrichedMap: any = null;
+    if (aircraftType && this.seatAllocationService) {
+      try {
+        enrichedMap = await this.seatAllocationService.getSeatMap(flight._id, aircraftType);
+      } catch (err: any) {
+        this.logger.error(
+          `Authoritative seat map and pricing resolution failed for flight ${flight._id}: ${err?.message || err}`,
+        );
+        throw new ServiceUnavailableException(
+          'Authoritative seat map and pricing are temporarily unavailable. Please try again later.',
+        );
+      }
+    }
 
     const rows: any[] = [];
 
-    for (let r = 1; r <= totalRows; r++) {
-      if (skippedRows.includes(r)) continue;
+    if (!aircraftType) {
+      return {
+        flight_id: flight._id,
+        flight_number: flight.flight_number,
+        route: `${flight.origin_iata} - ${flight.dest_iata}`,
+        aircraft_model: flight.aircraft?.model_name ?? null,
+        aircraft_known: false,
+        layout_available: false,
+        layout_notice: 'Aircraft model is not configured or recognized for this flight.',
+        departure_time: flight.scheduled_departure,
+        rows: [],
+      };
+    }
 
-      const isExit = exitRows.includes(r);
-      const isSpecial = specialRows.includes(r);
+    const layout = FLEET_LAYOUT_CATALOG[aircraftType];
 
-      const seats = columns.map((col) => {
-        const seatCode = `${r}${col}`;
-        let type: 'SPECIAL' | 'EXIT_ROW' | 'STANDARD' = 'STANDARD';
-        let typeLabel = 'Còn trống';
-        let fee = 0;
-        let cabinClass = 'ECONOMY';
+    for (const rConfig of layout.rows) {
+      const isExit = rConfig.is_exit_row ?? false;
+      const isSpecial = rConfig.cabin_class === CabinClass.BUSINESS || (rConfig.is_extra_legroom ?? false);
 
-        if (isSpecial) {
-          type = 'SPECIAL';
-          typeLabel = 'Đặc biệt';
-          fee = 150000; // 150.000đ (≈15 USD) — chỉ để tham khảo, hệ thống không thu thêm phí ghế
-          cabinClass = 'BUSINESS';
-        } else if (isExit) {
-          type = 'EXIT_ROW';
-          typeLabel = 'Hàng ghế gần lối thoát hiểm';
-          fee = 100000; // 100.000đ (≈10 USD) — chỉ để tham khảo, hệ thống không thu thêm phí ghế
-          cabinClass = 'ECONOMY';
+      const seats: any[] = [];
+      const columnGroups: any[][] = [];
+
+      for (const group of rConfig.column_groups) {
+        const groupSeats: any[] = [];
+        for (const col of group) {
+          const seatCode = `${rConfig.row_number}${col}`;
+          let isOccupied = occupiedSet.has(seatCode);
+          let fee = 0;
+          let type: 'SPECIAL' | 'EXIT_ROW' | 'STANDARD' = 'STANDARD';
+          let typeLabel = 'Còn trống';
+
+          if (isExit) {
+            type = 'EXIT_ROW';
+            typeLabel = 'Hàng ghế gần lối thoát hiểm';
+          } else if (isSpecial) {
+            type = 'SPECIAL';
+            typeLabel = rConfig.cabin_class === CabinClass.BUSINESS ? 'Thương gia' : 'Đặc biệt';
+          }
+
+          if (enrichedMap) {
+            const enrichedRow = enrichedMap.rows?.find((r: any) => r.row_number === rConfig.row_number);
+            if (enrichedRow) {
+              for (const grp of enrichedRow.column_groups) {
+                const enrichedSeat = grp.find((s: any) => s.seat_code === seatCode);
+                if (enrichedSeat) {
+                  if (enrichedSeat.status === 'OCCUPIED' || enrichedSeat.status === 'HELD' || enrichedSeat.status === 'BLOCKED') {
+                    isOccupied = true;
+                  }
+                  if (enrichedSeat.seat_fee !== undefined) {
+                    fee = enrichedSeat.seat_fee;
+                  }
+                }
+              }
+            }
+          }
+
+          const seatObj = {
+            seat_code: seatCode,
+            row: rConfig.row_number,
+            column: col,
+            type,
+            type_label: typeLabel,
+            cabin_class: rConfig.cabin_class,
+            fee,
+            is_occupied: isOccupied,
+            is_exit_row: isExit,
+            is_special: isSpecial,
+          };
+
+          seats.push(seatObj);
+          groupSeats.push(seatObj);
         }
-
-        const isOccupied = occupiedSet.has(seatCode);
-
-        return {
-          seat_code: seatCode,
-          row: r,
-          column: col,
-          type,
-          type_label: typeLabel,
-          cabin_class: cabinClass,
-          fee,
-          is_occupied: isOccupied,
-          is_exit_row: isExit,
-          is_special: isSpecial,
-        };
-      });
+        columnGroups.push(groupSeats);
+      }
 
       rows.push({
-        row_number: r,
+        row_number: rConfig.row_number,
         is_exit_row: isExit,
         is_special: isSpecial,
+        column_groups: columnGroups,
         seats,
       });
     }
@@ -1117,7 +1981,10 @@ export class FlightsService {
       route: `${flight.origin_iata} - ${flight.dest_iata}`,
       aircraft_model: flight.aircraft?.model_name ?? null,
       aircraft_known: !!flight.aircraft?.model_name,
-      layout_notice: 'This is an illustrative Airbus A321 layout (31 rows, 3-3, exit rows 12 and 14) used for every flight until a real cabin layout is configured.',
+      aircraft_type: aircraftType,
+      total_capacity: layout.total_capacity,
+      cabin_capacities: layout.cabin_capacities,
+      layout_notice: `Aircraft cabin layout for ${layout.model_name} (${layout.total_capacity} seats).`,
       departure_time: flight.scheduled_departure,
       legend: [
         { type: 'AVAILABLE', label: 'Còn trống', color: '#22c55e', bg: 'bg-green-500' },
@@ -1126,18 +1993,6 @@ export class FlightsService {
         { type: 'SPECIAL', label: 'Đặc biệt', color: '#ef4444', bg: 'bg-red-500' },
         { type: 'OCCUPIED', label: 'Đã bị chọn / không có', color: '#9ca3af', bg: 'bg-gray-400' },
       ],
-      notice: {
-        skyboss_benefit: 'Với vé Skyboss, quý khách được chọn chỗ ngồi miễn phí.',
-        exit_row_warning:
-          'Chúng tôi không đảm bảo cung cấp đúng chỗ ngồi lối thoát hiểm đã quý khách đặt trước và chỗ này có thể thay đổi mà không cần thông báo. Chỗ ngồi lối thoát hiểm (hàng ghế 12 và 14) chỉ có thể sắp xếp cho những hành khách người lớn và có khả năng hỗ trợ hành khách khác trong trường hợp khẩn cấp. Xin lưu ý rằng hành khách bị hạn chế về khả năng nghe nhìn, hành khách tàn tật hoặc hành khách đi kèm trẻ nhỏ không được phép ngồi chỗ này.',
-      },
-      layout: {
-        left_columns: ['A', 'B', 'C'],
-        right_columns: ['D', 'E', 'F'],
-        exit_rows: exitRows,
-        special_rows: specialRows,
-        skipped_rows: skippedRows,
-      },
       rows,
     };
   }
@@ -1355,16 +2210,46 @@ export class FlightsService {
       const distanceMiles = await this.greatCircleMiles(origin, dest);
 
       if (flight) {
-        flight.scheduled_departure = depTime;
-        flight.scheduled_arrival = arrTime;
-        flight.duration_minutes = durationMinutes;
+        // Strictly protect synthetic Aptech flights, manually modified flights, and Aptech operator flights
+        const isAptechOrManual =
+          flight.is_generated ||
+          flight.is_manually_modified ||
+          flight.flight_number.startsWith('APT') ||
+          flight.operator === 'APTECH_AIRLINES';
+
+        if (isAptechOrManual) {
+          this.logger.warn(
+            `Preserving Aptech operational flight ${flight.flight_number} from AirLabs sync mutation.`,
+          );
+          continue;
+        }
+
+        const hasActiveBookings = await this.bookingModel.exists({
+          'ticket_coupons.flight_id': flight._id,
+          status: { $in: ['BLOCKED', 'CONFIRMED'] },
+        });
+
+        if (!hasActiveBookings) {
+          flight.scheduled_departure = depTime;
+          flight.scheduled_arrival = arrTime;
+          flight.duration_minutes = durationMinutes;
+        }
+
         flight.status = flightStatus;
-        flight.delay_reason = delayReason;
-        flight.delay_minutes = delayMinutes;
-        flight.aircraft = aircraftData;
+        if (delayReason) flight.delay_reason = delayReason;
+        if (delayMinutes > 0) flight.delay_minutes = delayMinutes;
+        if (aircraftData) flight.aircraft = aircraftData;
         if (distanceMiles > 0) flight.distance_miles = distanceMiles;
+
+        // Requirement 4: Fix legacy inventory leak on external rows
+        flight.inventories = [];
+        flight.is_bookable = false;
+        flight.operator = (item.airline_iata || item.airline_icao || 'AIRLABS_EXTERNAL').toUpperCase();
+        flight.data_source = 'AIRLABS_EXTERNAL';
         await flight.save();
       } else {
+        // External airline schedules must NOT automatically become Aptech customer-bookable flights.
+        // Stored with empty inventories and is_bookable = false for reference/status lookup only.
         flight = new this.flightModel({
           flight_number: flightNumber,
           origin_iata: origin,
@@ -1378,7 +2263,13 @@ export class FlightsService {
           delay_reason: delayReason,
           delay_minutes: delayMinutes,
           aircraft: aircraftData,
-          inventories,
+          inventories: [], // Zero sellable inventory for external carriers
+          is_generated: false,
+          generated_source: 'AIRLABS_EXTERNAL',
+          data_source: 'AIRLABS_EXTERNAL',
+          is_manually_modified: false,
+          operator: (item.airline_iata || item.airline_icao || 'AIRLABS_EXTERNAL').toUpperCase(),
+          is_bookable: false,
         });
         await flight.save();
       }
@@ -1449,6 +2340,7 @@ export class FlightsService {
       'A321': 'Airbus A321',
       'A21N': 'Airbus A321neo',
       'A320': 'Airbus A320',
+      'A20N': 'Airbus A320neo',
       'A359': 'Airbus A350-900',
       'A350': 'Airbus A350',
       'B738': 'Boeing 737-800',

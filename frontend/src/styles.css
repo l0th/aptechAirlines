@@ -11,23 +11,23 @@
 @layer components {
   /* Buttons - Pill Shaped with Shadow Lift as specified in GUI Standards */
   .btn-gold {
-    @apply inline-flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold rounded-full px-6 py-3 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold rounded-full px-6 py-3 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-navy {
-    @apply inline-flex items-center justify-center gap-2 bg-[#0A2540] hover:bg-[#13395F] text-white font-semibold rounded-full px-5 py-2.5 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap bg-[#0A2540] hover:bg-[#13395F] text-white font-semibold rounded-full px-5 py-2.5 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-outline-navy {
-    @apply inline-flex items-center justify-center gap-2 border-2 border-[#0A2540] text-[#0A2540] hover:bg-slate-100 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap border-2 border-[#0A2540] text-[#0A2540] hover:bg-slate-100 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-outline-gold {
-    @apply inline-flex items-center justify-center gap-2 border-2 border-amber-500 text-amber-600 hover:bg-amber-50 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap border-2 border-amber-500 text-amber-600 hover:bg-amber-50 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 text-slate-700 hover:text-navy hover:bg-slate-100 font-medium rounded-full px-4 py-2 transition-all duration-150 disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap text-slate-700 hover:text-navy hover:bg-slate-100 font-medium rounded-full px-4 py-2 transition-all duration-150 disabled:opacity-50;
   }
 
   /* Luxury Card Style */

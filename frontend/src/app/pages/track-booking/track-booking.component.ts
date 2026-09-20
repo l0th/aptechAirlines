@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -159,7 +159,7 @@ interface TrackedPassengerView {
         <div class="card-luxury p-4 sm:p-6 shadow-md border-slate-200 mb-8">
           <form (ngSubmit)="handleSearch()" class="flex flex-col sm:flex-row gap-3">
             <div class="relative flex-1">
-              <app-icon name="search" class="w-5 h-5 text-slate-400 absolute left-4 top-3.5" />
+              <app-icon name="search" class="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 [(ngModel)]="searchCode"
@@ -184,6 +184,138 @@ interface TrackedPassengerView {
             </button>
           </form>
         </div>
+
+        <!-- Requirement 3.9: Authentication required to view ticket status -->
+        @if (!auth.isAuthenticated()) {
+          <div class="card-luxury p-6 sm:p-8 text-center border-slate-200 bg-white shadow-sm mb-8">
+            <div class="w-14 h-14 rounded-2xl bg-navy text-gold flex items-center justify-center mx-auto mb-4 border border-gold/30">
+              <app-icon name="lock" class="w-7 h-7 text-gold" />
+            </div>
+            <h3 class="text-base sm:text-lg font-bold text-navy">
+              {{ lang.isVietnamese() ? 'Đăng nhập để tra cứu chi tiết và quản lý vé' : 'Log In to View Trip Details & Manage Ticket' }}
+            </h3>
+            <p class="text-xs sm:text-sm text-slate-500 max-w-lg mx-auto mt-2 leading-relaxed">
+              {{ lang.isVietnamese()
+                ? 'Theo quy định ARS §3.9, hành khách cần đăng nhập tài khoản để tra cứu chi tiết mã đặt chỗ (PNR/BLK/CNF), xuất vé và thực hiện đổi/hủy vé.'
+                : 'Per ARS §3.9 standards, please log in to view detailed reservation information (PNR/BLK/CNF), display tickets, and manage changes or cancellations.' }}
+            </p>
+            <div class="flex flex-wrap items-center justify-center gap-3 mt-5">
+              <button
+                type="button"
+                (click)="authModal.open('LOGIN')"
+                class="btn-gold !py-2.5 !px-6 text-xs sm:text-sm font-bold"
+              >
+                <app-icon name="user" class="w-4 h-4" />
+                <span>{{ lang.t('nav.login') }}</span>
+              </button>
+              <button
+                type="button"
+                (click)="authModal.open('REGISTER')"
+                class="btn-outline-gold !py-2.5 !px-6 text-xs sm:text-sm font-bold"
+              >
+                <app-icon name="userplus" class="w-4 h-4" />
+                <span>{{ lang.t('nav.register') }}</span>
+              </button>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-center gap-1">
+              <span>{{ lang.isVietnamese() ? 'Bạn chỉ muốn tra cứu giờ cất/hạ cánh chuyến bay công khai?' : 'Looking for public flight arrival and departure schedules?' }}</span>
+              <a routerLink="/flight-lookup" class="text-gold font-bold hover:underline">
+                {{ lang.isVietnamese() ? 'Tra cứu chuyến bay §3.10' : 'Flight Lookup §3.10' }} &rarr;
+              </a>
+            </div>
+          </div>
+        }
+
+        <!-- Requirement 1.3.5: My Trips list for authenticated customers -->
+        @if (auth.isAuthenticated() && !bookingInfo()) {
+          <div class="mb-8 card-luxury p-5 sm:p-6 border-slate-200 shadow-sm bg-white">
+            <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-xl bg-amber-50 text-gold flex items-center justify-center border border-gold/30">
+                  <app-icon name="ticket" class="w-4 h-4 text-gold" />
+                </div>
+                <div>
+                  <h3 class="text-sm sm:text-base font-bold text-navy">
+                    {{ lang.isVietnamese() ? 'Chuyến bay đã đặt của bạn' : 'Your Booked Trips' }}
+                  </h3>
+                  <p class="text-[11px] text-slate-400">
+                    {{ lang.isVietnamese() ? 'Danh sách các vé và đặt chỗ liên kết với tài khoản của bạn' : 'List of tickets and reservations linked to your account' }}
+                  </p>
+                </div>
+              </div>
+              <span class="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full border border-slate-200">
+                {{ myTrips().length }} {{ lang.isVietnamese() ? 'đơn đặt vé' : 'bookings' }}
+              </span>
+            </div>
+
+            @if (loadingMyTrips()) {
+              <div class="py-6 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                <app-icon name="refreshcw" class="w-4 h-4 animate-spin text-gold" />
+                <span>{{ lang.isVietnamese() ? 'Đang tải danh sách vé...' : 'Loading your trips...' }}</span>
+              </div>
+            } @else if (!myTrips().length) {
+              <div class="py-6 text-center text-slate-400 text-xs">
+                {{ lang.isVietnamese() ? 'Bạn chưa có đặt chỗ nào. Hãy tìm kiếm chuyến bay để đặt vé!' : 'You have no bookings yet. Search flights to book a trip!' }}
+              </div>
+            } @else {
+              <div class="space-y-3">
+                @for (trip of myTrips(); track trip._id) {
+                  <div class="p-3.5 sm:p-4 rounded-2xl bg-slate-50 hover:bg-amber-50/40 border border-slate-200 hover:border-gold/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="flex items-start sm:items-center gap-3">
+                      <div class="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-navy font-mono font-bold text-xs shadow-xs">
+                        {{ trip.pnr_code || 'PNR' }}
+                      </div>
+                      <div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-bold text-xs sm:text-sm text-navy font-mono">
+                            {{ trip.confirmation_number || trip.blocking_number || trip.pnr_code }}
+                          </span>
+                          <span
+                            [ngClass]="trip.status === 'CONFIRMED' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : (trip.status === 'BLOCKED' ? 'bg-amber-100 text-amber-800 border-amber-200' : 'bg-rose-100 text-rose-800 border-rose-200')"
+                            class="text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider"
+                          >
+                            {{ trip.status }}
+                          </span>
+                          <span class="text-[10px] text-slate-500 font-medium px-2 py-0.5 rounded-full bg-slate-200/70">
+                            {{ trip.booking_type }}
+                          </span>
+                        </div>
+                        <div class="text-[11px] text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
+                          <span>{{ trip.passengers.length || 1 }} {{ lang.isVietnamese() ? 'hành khách' : 'passengers' }}</span>
+                          <span>•</span>
+                          <span class="font-semibold text-navy">{{ trip.total_amount | currencyFormat }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      (click)="quickTrack(trip.pnr_code || trip.confirmation_number || trip.blocking_number || '')"
+                      class="btn-gold !py-1.5 !px-4 text-xs font-semibold shrink-0"
+                    >
+                      <app-icon name="search" class="w-3.5 h-3.5" />
+                      <span>{{ lang.isVietnamese() ? 'Tra cứu vé' : 'View Details' }}</span>
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Back to My Trips Button when viewing a single booking -->
+        @if (auth.isAuthenticated() && bookingInfo()) {
+          <div class="mb-4">
+            <button
+              type="button"
+              (click)="clearTrack()"
+              class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-navy px-3 py-1.5 rounded-full bg-white border border-slate-200 shadow-xs hover:border-gold transition-all"
+            >
+              <app-icon name="arrowright" class="w-3.5 h-3.5 rotate-180" />
+              <span>{{ lang.isVietnamese() ? 'Quay lại danh sách vé của bạn' : 'Back to My Trips' }}</span>
+            </button>
+          </div>
+        }
 
         <!-- Empty state: đã tra cứu nhưng không còn kết quả -->
         @if (searched() && !loading() && !bookingInfo()) {
@@ -988,7 +1120,7 @@ interface TrackedPassengerView {
 export class TrackBookingComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(ApiService);
-  private readonly auth = inject(AuthService);
+  readonly auth = inject(AuthService);
   readonly authModal = inject(AuthModalService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
@@ -1005,6 +1137,46 @@ export class TrackBookingComponent implements OnInit {
   readonly trackResult = signal<TrackBookingEnvelope | null>(null);
   readonly submittingAction = signal(false);
   readonly actionMessage = signal('');
+
+  // Requirement 1.3.5: Customer "My Trips" list
+  readonly myTrips = signal<LocalBooking[]>([]);
+  readonly loadingMyTrips = signal(false);
+
+  constructor() {
+    effect(() => {
+      if (this.auth.isAuthenticated()) {
+        this.loadMyTrips();
+      } else {
+        this.myTrips.set([]);
+      }
+    });
+  }
+
+  loadMyTrips(): void {
+    if (!this.auth.isAuthenticated()) return;
+    this.loadingMyTrips.set(true);
+    this.api.getMyTrips().subscribe({
+      next: (trips) => {
+        this.loadingMyTrips.set(false);
+        this.myTrips.set((trips as unknown as LocalBooking[]) || []);
+      },
+      error: () => {
+        this.loadingMyTrips.set(false);
+      },
+    });
+  }
+
+  quickTrack(code: string): void {
+    this.searchCode = code;
+    this.handleSearch();
+  }
+
+  clearTrack(): void {
+    this.searchCode = '';
+    this.trackResult.set(null);
+    this.searched.set(false);
+    this.loadMyTrips();
+  }
 
   /** booking_info đã đọc từ envelope. */
   readonly bookingInfo = computed<LocalBooking | null>(
@@ -1273,6 +1445,16 @@ export class TrackBookingComponent implements OnInit {
     const code = (this.searchCode || '').trim().toUpperCase();
     this.searchCode = code;
 
+    if (!this.auth.isAuthenticated()) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Vui lòng đăng nhập để tra cứu chi tiết vé theo quy định Section 3.9.'
+          : 'Please log in to view ticket details per Section 3.9 security standards.',
+      );
+      this.authModal.open('LOGIN');
+      return;
+    }
+
     if (!code) {
       this.toast.warning(
         this.lang.isVietnamese()
@@ -1328,6 +1510,7 @@ export class TrackBookingComponent implements OnInit {
         if (env?.booking_info) this.trackResult.set(env);
         this.loading.set(false);
         this.searched.set(true);
+        this.loadMyTrips();
         if (successMessage) {
           this.actionMessage.set(successMessage);
           this.toast.success(successMessage);
@@ -1399,6 +1582,18 @@ export class TrackBookingComponent implements OnInit {
       return;
     }
     if (!this.requireLogin()) return;
+
+    // Requirement 1.3.4: Validate credit card format (12-19 digits, digits/hyphens/spaces)
+    const cardRaw = (this.confirmCardNumber || '').trim();
+    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
+    if (!cardRegex.test(cardRaw)) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)'
+          : 'Invalid credit card number (12–19 digits required)',
+      );
+      return;
+    }
 
     this.submittingAction.set(true);
     this.api
@@ -2086,6 +2281,41 @@ export class TrackBookingComponent implements OnInit {
   }
 
   private submitReschedulePayload(payload: any): void {
+    if (!payload.seat_requests) {
+      const flightIds: string[] = [];
+      if (payload.new_flight_id) flightIds.push(payload.new_flight_id);
+      if (payload.new_return_flight_id) flightIds.push(payload.new_return_flight_id);
+      if (payload.new_legs) {
+        payload.new_legs.forEach((l: any) => {
+          if (l.flight_id && !flightIds.includes(l.flight_id)) flightIds.push(l.flight_id);
+        });
+      }
+      if (payload.new_return_legs) {
+        payload.new_return_legs.forEach((l: any) => {
+          if (l.flight_id && !flightIds.includes(l.flight_id)) flightIds.push(l.flight_id);
+        });
+      }
+
+      const count = this.passengerCount();
+      const seatRequests: Array<{
+        passenger_index: number;
+        flight_id: string;
+        selection_type: 'AUTO' | 'CHOOSE';
+        seat_code?: string;
+      }> = [];
+
+      for (let pIdx = 0; pIdx < count; pIdx++) {
+        for (const fId of flightIds) {
+          seatRequests.push({
+            passenger_index: pIdx,
+            flight_id: fId,
+            selection_type: 'AUTO',
+          });
+        }
+      }
+      payload.seat_requests = seatRequests;
+    }
+
     this.api.rescheduleBooking(payload).subscribe({
       next: (res: any) => {
         // Response thật: { booking, price_difference, message }

@@ -2,6 +2,7 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
+import { AuthService } from '../../core/services/auth.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
@@ -84,15 +85,27 @@ interface DashboardBooking {
         </div>
 
         <div class="flex flex-wrap items-center gap-3">
-          <a routerLink="/admin/airlabs-sync" class="btn-gold text-xs !py-2 !px-4 font-bold">
-            <app-icon name="refreshcw" class="w-3.5 h-3.5" />
-            <span>{{ lang.t('admin.dashboard.syncAirLabs') }}</span>
-          </a>
+          @if (auth.isAdmin()) {
+            <a routerLink="/admin/airlabs-sync" class="btn-gold text-xs !py-2 !px-4 font-bold">
+              <app-icon name="refreshcw" class="w-3.5 h-3.5" />
+              <span>{{ lang.t('admin.dashboard.syncAirLabs') }}</span>
+            </a>
 
-          <a routerLink="/admin/flights" class="btn-navy text-xs !py-2 !px-4 font-bold">
-            <app-icon name="plus" class="w-3.5 h-3.5" />
-            <span>{{ lang.t('admin.dashboard.addFlightManual') }}</span>
-          </a>
+            <a routerLink="/admin/flights" class="btn-navy text-xs !py-2 !px-4 font-bold">
+              <app-icon name="plus" class="w-3.5 h-3.5" />
+              <span>{{ lang.t('admin.dashboard.addFlightManual') }}</span>
+            </a>
+          } @else {
+            <a routerLink="/admin/reservation-desk" class="btn-gold text-xs !py-2 !px-4 font-bold">
+              <app-icon name="usercheck" class="w-3.5 h-3.5" />
+              <span>{{ lang.t('admin.reservationDesk') }}</span>
+            </a>
+
+            <a routerLink="/admin/bookings" class="btn-navy text-xs !py-2 !px-4 font-bold">
+              <app-icon name="ticket" class="w-3.5 h-3.5" />
+              <span>{{ lang.t('admin.bookings') }}</span>
+            </a>
+          }
         </div>
       </div>
 
@@ -104,9 +117,11 @@ interface DashboardBooking {
             <span>{{ lang.t('admin.dashboard.recentSchedule') }}</span>
             <span class="text-[11px] font-semibold text-slate-400 normal-case">{{ lang.t('admin.dashboard.upcomingFlightsNotice') }}</span>
           </h3>
-          <a routerLink="/admin/flights" class="text-xs font-bold text-navy hover:text-gold transition-colors">
-            {{ lang.t('admin.dashboard.viewAll') }} &rarr;
-          </a>
+          @if (auth.isAdmin()) {
+            <a routerLink="/admin/flights" class="text-xs font-bold text-navy hover:text-gold transition-colors">
+              {{ lang.t('admin.dashboard.viewAll') }} &rarr;
+            </a>
+          }
         </div>
 
         <div class="overflow-x-auto">
@@ -160,6 +175,7 @@ interface DashboardBooking {
 })
 export class DashboardComponent implements OnInit {
   private readonly api = inject(ApiService);
+  readonly auth = inject(AuthService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
 

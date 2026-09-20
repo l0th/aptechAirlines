@@ -3,12 +3,75 @@ import {
   IsBoolean,
   IsEnum,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
+  Matches,
   ValidateNested,
+  ValidationArguments,
+  ValidationOptions,
+  registerDecorator,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BookingType, PassengerType } from './bookings.schema';
+import {
+  CREDIT_CARD_MESSAGE,
+  CREDIT_CARD_REGEX,
+} from '../common/validation.constants';
+
+/**
+ * Validates optional date of birth:
+ * - Empty or omitted is allowed (optional)
+ * - When supplied, requires strict YYYY-MM-DD
+ * - Rejects impossible calendar dates (e.g., 2026-02-30)
+ * - Rejects future dates
+ */
+export function isValidDateOfBirthString(val: any): boolean {
+  if (val === undefined || val === null || val === '') return true;
+  if (typeof val !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) return false;
+  const [yStr, mStr, dStr] = val.split('-');
+  const year = parseInt(yStr, 10);
+  const month = parseInt(mStr, 10);
+  const day = parseInt(dStr, 10);
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  const now = new Date();
+  const todayLocal = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const maxAllowedDate = todayLocal > todayUtc ? todayLocal : todayUtc;
+  if (date > maxAllowedDate) {
+    return false;
+  }
+  return true;
+}
+
+export function IsValidDateOfBirth(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isValidDateOfBirth',
+      target: object.constructor,
+      propertyName: propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, _args: ValidationArguments) {
+          return isValidDateOfBirthString(value);
+        },
+        defaultMessage(args: ValidationArguments) {
+          return `${args.property} must be a valid calendar date in YYYY-MM-DD format and cannot be in the future`;
+        },
+      },
+    });
+  };
+}
 
 export class PassengerInputDto {
   @IsString()
@@ -31,6 +94,7 @@ export class PassengerInputDto {
   nationality?: string;
 
   @IsOptional()
+  @IsValidDateOfBirth()
   date_of_birth?: string;
 
   @IsOptional()
@@ -39,6 +103,23 @@ export class PassengerInputDto {
 
   @IsOptional()
   seat_codes?: Record<string, string>;
+}
+
+export class SeatSelectionRequestDto {
+  @IsNotEmpty()
+  @IsNumber()
+  passenger_index: number;
+
+  @IsString()
+  @IsNotEmpty()
+  flight_id: string;
+
+  @IsEnum(['AUTO', 'CHOOSE'])
+  selection_type: 'AUTO' | 'CHOOSE';
+
+  @IsOptional()
+  @IsString()
+  seat_code?: string;
 }
 
 export class FlightLegSelectionDto {
@@ -78,7 +159,14 @@ export class CreateBookingDto {
   legs: FlightLegSelectionDto[];
 
   @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SeatSelectionRequestDto)
+  seat_requests?: SeatSelectionRequestDto[];
+
+  @IsOptional()
   @IsString()
+  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
   credit_card_number?: string;
 }
 
@@ -89,6 +177,7 @@ export class ConfirmTicketDto {
 
   @IsString()
   @IsNotEmpty()
+  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
   credit_card_number: string;
 }
 
@@ -130,7 +219,14 @@ export class RescheduleTicketDto {
   new_return_legs?: FlightLegSelectionDto[];
 
   @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SeatSelectionRequestDto)
+  seat_requests?: SeatSelectionRequestDto[];
+
+  @IsOptional()
   @IsString()
+  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
   credit_card_number?: string;
 }
 

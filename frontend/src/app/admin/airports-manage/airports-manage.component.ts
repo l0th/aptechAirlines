@@ -73,7 +73,7 @@ import { Airport, CountrySuggestion } from '../../core/models/airport.model';
       <!-- Search & Filter Bar -->
       <div class="card-luxury p-4 border-slate-200 flex items-center gap-3">
         <div class="relative flex-1 max-w-sm">
-          <app-icon name="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <app-icon name="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             [(ngModel)]="searchQuery"
@@ -421,7 +421,7 @@ import { Airport, CountrySuggestion } from '../../core/models/airport.model';
 
               <!-- Search country filter -->
               <div class="relative">
-                <app-icon name="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <app-icon name="search" class="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   [(ngModel)]="countrySearchQuery"

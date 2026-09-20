@@ -102,11 +102,11 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
 
                 @if (auth.isStaff()) {
                   <a
-                    routerLink="/admin"
+                    [routerLink]="auth.isClerk() ? '/admin/reservation-desk' : '/admin'"
                     class="p-2 bg-navy-dark hover:bg-gold hover:text-navy text-gold rounded-full transition-all"
-                    title="{{ lang.t('nav.adminPortal') }}"
+                    [title]="auth.isClerk() ? (lang.isVietnamese() ? 'Bàn đặt vé nhân viên' : 'Staff Reservation Desk') : lang.t('nav.adminPortal')"
                   >
-                    <app-icon name="settings" class="w-4 h-4" />
+                    <app-icon [name]="auth.isClerk() ? 'usercheck' : 'settings'" class="w-4 h-4" />
                   </a>
                 }
 
@@ -186,12 +186,12 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
             @if (auth.isAuthenticated()) {
               @if (auth.isStaff()) {
                 <a
-                  routerLink="/admin"
+                  [routerLink]="auth.isClerk() ? '/admin/reservation-desk' : '/admin'"
                   (click)="mobileMenuOpen.set(false)"
                   class="block px-4 py-2.5 rounded-2xl text-gold hover:bg-navy-light font-medium text-sm flex items-center gap-2"
                 >
-                  <app-icon name="settings" class="w-4 h-4" />
-                  {{ lang.t('nav.adminPortal') }}
+                  <app-icon [name]="auth.isClerk() ? 'usercheck' : 'settings'" class="w-4 h-4" />
+                  {{ auth.isClerk() ? (lang.isVietnamese() ? 'Bàn đặt vé nhân viên' : 'Staff Reservation Desk') : lang.t('nav.adminPortal') }}
                 </a>
               }
               <button
@@ -220,6 +220,7 @@ import { AuthModalComponent } from '../auth-modal/auth-modal.component';
     <!-- Auth Modal -->
     <app-auth-modal
       [isOpen]="authModal.isOpen()"
+      [mode]="authModal.mode()"
       (closeEvent)="authModal.close()"
     />
   `,

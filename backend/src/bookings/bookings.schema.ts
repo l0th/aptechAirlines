@@ -73,6 +73,23 @@ export class TicketCoupon {
   @Prop({ default: '' })
   seat_code?: string; // e.g. '12A', '14C'
 
+  @Prop({ type: String, enum: ['AUTO', 'CHOOSE'], default: 'AUTO' })
+  seat_selection_type?: 'AUTO' | 'CHOOSE';
+
+  @Prop({ default: 0, min: 0 })
+  seat_fee?: number;
+
+  @Prop({ default: 'VND' })
+  seat_fee_currency?: string;
+
+  @Prop({ type: Object, required: false })
+  seat_pricing_snapshot?: {
+    rule_ids: string[];
+    dimensions: string[];
+    flight_override: boolean;
+    final_fee: number;
+  };
+
   @Prop({ default: 'OUTBOUND' })
   leg_type: string; // OUTBOUND, INBOUND, or CONNECTING_LEG
 
@@ -99,6 +116,21 @@ export class PaymentTransaction {
 
   @Prop({ default: () => new Date() })
   created_at: Date;
+}
+
+@Schema({ _id: false })
+export class SeatSagaCommit {
+  @Prop({ required: true })
+  operation_id: string;
+
+  @Prop({ required: true, enum: ['CREATE', 'RESCHEDULE'] })
+  operation_type: 'CREATE' | 'RESCHEDULE';
+
+  @Prop({ required: true, enum: ['PENDING_FINALIZATION', 'COMPLETED'], default: 'PENDING_FINALIZATION' })
+  status: 'PENDING_FINALIZATION' | 'COMPLETED';
+
+  @Prop({ default: () => new Date() })
+  committed_at: Date;
 }
 
 @Schema({ timestamps: true })
@@ -137,6 +169,15 @@ export class Booking {
 
   @Prop({ required: true, default: 0 })
   total_amount: number;
+
+  @Prop({ required: true, default: 0 })
+  total_fare: number;
+
+  @Prop({ required: true, default: 0 })
+  total_seat_fees: number;
+
+  @Prop({ type: SeatSagaCommit, required: false })
+  seat_saga_commit?: SeatSagaCommit;
 
   @Prop({ required: true, default: 0 })
   total_miles_accrued: number;

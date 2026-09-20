@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { adminGuard } from './core/guards/auth.guard';
+import { staffGuard, adminOnlyGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
   // Client Portal
@@ -52,7 +52,7 @@ export const routes: Routes = [
   // Admin & Clerk Portal
   {
     path: 'admin',
-    canActivate: [adminGuard],
+    canActivate: [staffGuard],
     loadComponent: () =>
       import('./admin/admin-layout/admin-layout.component').then(
         (m) => m.AdminLayoutComponent,
@@ -72,6 +72,7 @@ export const routes: Routes = [
       },
       {
         path: 'flights',
+        canActivate: [adminOnlyGuard],
         loadComponent: () =>
           import('./admin/flights-manage/flights-manage.component').then(
             (m) => m.FlightsManageComponent,
@@ -79,6 +80,7 @@ export const routes: Routes = [
       },
       {
         path: 'airlabs-sync',
+        canActivate: [adminOnlyGuard],
         loadComponent: () =>
           import('./admin/airlabs-sync/airlabs-sync.component').then(
             (m) => m.AirlabsSyncComponent,
@@ -86,6 +88,7 @@ export const routes: Routes = [
       },
       {
         path: 'airports',
+        canActivate: [adminOnlyGuard],
         loadComponent: () =>
           import('./admin/airports-manage/airports-manage.component').then(
             (m) => m.AirportsManageComponent,
@@ -99,7 +102,15 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'reservation-desk',
+        loadComponent: () =>
+          import('./admin/reservation-desk/reservation-desk.component').then(
+            (m) => m.ReservationDeskComponent,
+          ),
+      },
+      {
         path: 'users',
+        canActivate: [adminOnlyGuard],
         loadComponent: () =>
           import('./admin/users-manage/users-manage.component').then(
             (m) => m.UsersManageComponent,
@@ -107,9 +118,25 @@ export const routes: Routes = [
       },
       {
         path: 'policies',
+        canActivate: [adminOnlyGuard],
         loadComponent: () =>
           import('./admin/policies-manage/policies-manage.component').then(
             (m) => m.PoliciesManageComponent,
+          ),
+      },
+      {
+        path: 'seat-operations',
+        loadComponent: () =>
+          import('./admin/seat-operations/seat-operations.component').then(
+            (m) => m.SeatOperationsComponent,
+          ),
+      },
+      {
+        path: 'seat-pricing',
+        canActivate: [adminOnlyGuard],
+        loadComponent: () =>
+          import('./admin/seat-pricing/seat-pricing.component').then(
+            (m) => m.SeatPricingComponent,
           ),
       },
     ],

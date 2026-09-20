@@ -134,6 +134,41 @@ export class ApiService {
     });
   }
 
+  getNearbyAvailability(params: {
+    origin: string;
+    destination: string;
+    date: string;
+    cabin_class?: string;
+    passengers?: number;
+    adults?: number;
+    children?: number;
+    seniors?: number;
+  }): Observable<{
+    origin: string;
+    destination: string;
+    requested_date: string;
+    date_range: { min_date: string; max_date: string };
+    available_dates: Array<{
+      date: string;
+      day_of_week: string;
+      has_direct: boolean;
+      has_connecting: boolean;
+      available_itineraries_count: number;
+      min_price: number;
+    }>;
+  }> {
+    let httpParams = new HttpParams()
+      .set('origin', params.origin)
+      .set('destination', params.destination)
+      .set('date', params.date);
+    if (params.cabin_class) httpParams = httpParams.set('cabin_class', params.cabin_class);
+    if (params.passengers) httpParams = httpParams.set('passengers', params.passengers.toString());
+    if (params.adults) httpParams = httpParams.set('adults', params.adults.toString());
+    if (params.children) httpParams = httpParams.set('children', params.children.toString());
+    if (params.seniors) httpParams = httpParams.set('seniors', params.seniors.toString());
+    return this.http.get<any>(`${this.baseUrl}/flights/nearby-availability`, { params: httpParams });
+  }
+
   lookupFlights(flightNumber: string, date: string): Observable<Flight[]> {
     const params = new HttpParams()
       .set('flight_number', flightNumber)
@@ -373,6 +408,12 @@ export class ApiService {
     passengers: any[];
     legs: any[];
     credit_card_number?: string;
+    seat_requests?: Array<{
+      passenger_index: number;
+      flight_id: string;
+      selection_type: 'AUTO' | 'CHOOSE';
+      seat_code?: string;
+    }>;
   }): Observable<Booking> {
     return this.http.post<Booking>(`${this.baseUrl}/bookings`, bookingData);
   }
@@ -393,6 +434,12 @@ export class ApiService {
     new_return_inventory_id?: string;
     new_return_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
     credit_card_number?: string;
+    seat_requests?: Array<{
+      passenger_index: number;
+      flight_id: string;
+      selection_type: 'AUTO' | 'CHOOSE';
+      seat_code?: string;
+    }>;
   }): Observable<Booking> {
     return this.http.post<Booking>(`${this.baseUrl}/bookings/reschedule`, data);
   }
@@ -403,6 +450,10 @@ export class ApiService {
 
   trackBooking(code: string): Observable<Booking> {
     return this.http.get<Booking>(`${this.baseUrl}/bookings/track/${encodeURIComponent(code)}`);
+  }
+
+  getMyTrips(): Observable<Booking[]> {
+    return this.http.get<Booking[]>(`${this.baseUrl}/bookings/my-trips`);
   }
 
   getBookings(filter?: { status?: BookingStatus; user_id?: string }): Observable<Booking[]> {
@@ -455,5 +506,54 @@ export class ApiService {
 
   deleteUser(id: string): Observable<{ message: string }> {
     return this.http.delete<{ message: string }>(`${this.baseUrl}/users/${id}`);
+  }
+
+  // ===================== SEAT ALLOCATION & PRICING =====================
+  getEnrichedSeatMap(flightId: string, aircraftType: string): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/seat-allocation/flight/${flightId}/map`, {
+      params: new HttpParams().set('aircraftType', aircraftType),
+    });
+  }
+
+  blockSeat(
+    flightId: string,
+    data: { seat_code: string; reason: string; aircraft_type: string; notes?: string },
+  ): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/seat-allocation/flight/${flightId}/block`, data);
+  }
+
+  unblockSeat(flightId: string, seatCode: string): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(`${this.baseUrl}/seat-allocation/flight/${flightId}/unblock`, {
+      seat_code: seatCode,
+    });
+  }
+
+  setSeatPriceOverride(
+    flightId: string,
+    data: { seat_code: string; override_fee: number; reason: string },
+  ): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/seat-allocation/flight/${flightId}/override-price`, data);
+  }
+
+  removeSeatPriceOverride(flightId: string, seatCode: string): Observable<{ message: string }> {
+    return this.http.delete<{ message: string }>(
+      `${this.baseUrl}/seat-allocation/flight/${flightId}/override-price/${seatCode}`,
+    );
+  }
+
+  getSeatPricingRules(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.baseUrl}/seat-allocation/pricing-rules`);
+  }
+
+  createSeatPricingRule(data: any): Observable<any> {
+    return this.http.post<any>(`${this.baseUrl}/seat-allocation/pricing-rules`, data);
+  }
+
+  updateSeatPricingRule(ruleId: string, data: any): Observable<any> {
+    return this.http.put<any>(`${this.baseUrl}/seat-allocation/pricing-rules/${ruleId}`, data);
+  }
+
+  deleteSeatPricingRule(ruleId: string): Observable<any> {
+    return this.http.delete<any>(`${this.baseUrl}/seat-allocation/pricing-rules/${ruleId}`);
   }
 }

@@ -36,7 +36,42 @@ export interface RouteNetworkSuggestion {
   transit_airport: string;
   leg1?: RouteNetworkLeg;
   leg2?: RouteNetworkLeg;
+  leg3?: RouteNetworkLeg;
   note?: string;
+}
+
+export interface ExternalNetworkItineraryLeg {
+  flight_number?: string;
+  airline_iata: string;
+  airline_icao?: string;
+  flight_iata?: string;
+  flight_icao?: string;
+  dep_iata: string;
+  arr_iata: string;
+  dep_datetime: string | Date;
+  arr_datetime: string | Date;
+  dep_time_local?: string;
+  arr_time_local?: string;
+  dep_time_utc?: string;
+  arr_time_utc?: string;
+  duration_minutes: number;
+  source_key: string;
+  cs_airline_iata?: string;
+  cs_flight_iata?: string;
+  cs_flight_number?: string;
+  aircraft_icao?: string;
+  days?: string[];
+  is_bookable?: boolean;
+}
+
+export interface ExternalNetworkItinerary {
+  route_type: 'DIRECT' | 'ONE_STOP' | 'TWO_STOP';
+  airports: string[];
+  stops: string[];
+  total_duration_minutes: number;
+  layover_minutes: number[];
+  legs: ExternalNetworkItineraryLeg[];
+  is_bookable?: boolean;
 }
 
 export interface ExtendedFlightResult extends FormattedFlightResult {
@@ -50,6 +85,15 @@ export interface ExtendedFlightSearchResult extends FlightSearchResult {
   origin_scope?: SearchScope;
   dest_scope?: SearchScope;
   route_network_suggestions?: RouteNetworkSuggestion[];
+  network_status?: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+  network_itineraries?: ExternalNetworkItinerary[];
+  network_coverage?: any;
+  network_discovery?: any;
+  return_route_network_suggestions?: RouteNetworkSuggestion[];
+  return_network_status?: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+  return_network_itineraries?: ExternalNetworkItinerary[];
+  return_network_coverage?: any;
+  return_network_discovery?: any;
   onward_flights: ExtendedFlightResult[];
   return_flights?: ExtendedFlightResult[];
 }
@@ -402,6 +446,147 @@ export function isValidCalendarDate(val: any): boolean {
               </div>
             }
 
+            <!-- ============ Requirement 1.3.1: Sort & Filter Toolbar ============ -->
+            <div class="card-luxury p-4 sm:p-5 mb-8 border-slate-200 bg-white shadow-xs">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <!-- Stops Filter -->
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-navy flex items-center gap-1.5 shrink-0">
+                    <app-icon name="filter" class="w-3.5 h-3.5 text-gold" />
+                    <span>{{ lang.isVietnamese() ? 'Hành trình:' : 'Stops:' }}</span>
+                  </span>
+                  <div class="inline-flex bg-slate-100 p-1 rounded-full border border-slate-200">
+                    <button
+                      type="button"
+                      (click)="setStopsFilter('ALL')"
+                      [class.bg-navy]="stopsFilter() === 'ALL'"
+                      [class.text-white]="stopsFilter() === 'ALL'"
+                      [class.shadow-xs]="stopsFilter() === 'ALL'"
+                      [class.text-slate-600]="stopsFilter() !== 'ALL'"
+                      class="px-3 py-1 text-xs font-semibold rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Tất cả' : 'All' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setStopsFilter('DIRECT')"
+                      [class.bg-navy]="stopsFilter() === 'DIRECT'"
+                      [class.text-white]="stopsFilter() === 'DIRECT'"
+                      [class.shadow-xs]="stopsFilter() === 'DIRECT'"
+                      [class.text-slate-600]="stopsFilter() !== 'DIRECT'"
+                      class="px-3 py-1 text-xs font-semibold rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Bay thẳng' : 'Direct' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setStopsFilter('CONNECTING')"
+                      [class.bg-navy]="stopsFilter() === 'CONNECTING'"
+                      [class.text-white]="stopsFilter() === 'CONNECTING'"
+                      [class.shadow-xs]="stopsFilter() === 'CONNECTING'"
+                      [class.text-slate-600]="stopsFilter() !== 'CONNECTING'"
+                      class="px-3 py-1 text-xs font-semibold rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Nối chuyến' : 'Connecting' }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Sort Control -->
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-navy flex items-center gap-1.5 shrink-0">
+                    <app-icon name="arrowupdown" class="w-3.5 h-3.5 text-gold" />
+                    <span>{{ lang.isVietnamese() ? 'Sắp xếp theo:' : 'Sort by:' }}</span>
+                  </span>
+                  <div class="inline-flex bg-slate-100 p-1 rounded-full border border-slate-200">
+                    <button
+                      type="button"
+                      (click)="setSortBy('departure')"
+                      [class.bg-gold]="sortBy() === 'departure'"
+                      [class.text-navy]="sortBy() === 'departure'"
+                      [class.font-bold]="sortBy() === 'departure'"
+                      [class.text-slate-600]="sortBy() !== 'departure'"
+                      class="px-3 py-1 text-xs rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Cất cánh sớm nhất' : 'Earliest departure' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setSortBy('price_asc')"
+                      [class.bg-gold]="sortBy() === 'price_asc'"
+                      [class.text-navy]="sortBy() === 'price_asc'"
+                      [class.font-bold]="sortBy() === 'price_asc'"
+                      [class.text-slate-600]="sortBy() !== 'price_asc'"
+                      class="px-3 py-1 text-xs rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Giá thấp nhất' : 'Lowest price' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="setSortBy('duration')"
+                      [class.bg-gold]="sortBy() === 'duration'"
+                      [class.text-navy]="sortBy() === 'duration'"
+                      [class.font-bold]="sortBy() === 'duration'"
+                      [class.text-slate-600]="sortBy() !== 'duration'"
+                      class="px-3 py-1 text-xs rounded-full transition-all"
+                    >
+                      {{ lang.isVietnamese() ? 'Thời gian ngắn nhất' : 'Shortest duration' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ============ Nearby Dates Availability Strip (Requirement 3.3.3 & Phase A) ============ -->
+            @if (loadingNearby()) {
+              <div class="card-luxury p-4 mb-6 border-amber-200 bg-amber-50/40 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                <app-icon name="refreshcw" class="w-4 h-4 animate-spin text-gold" />
+                <span>{{ lang.isVietnamese() ? 'Đang tìm kiếm lịch bay các ngày lân cận...' : 'Searching nearby dates availability...' }}</span>
+              </div>
+            } @else if (nearbyDates().length > 0) {
+              <div class="card-luxury p-5 mb-8 border-amber-300 bg-gradient-to-br from-white to-amber-50/50 shadow-sm">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                      <app-icon name="calendar" class="w-4 h-4 text-amber-700" />
+                    </div>
+                    <div>
+                      <h3 class="text-sm sm:text-base font-bold text-navy">
+                        {{ lang.isVietnamese() ? 'Chuyến bay khả dụng các ngày lân cận (±7 ngày)' : 'Available flights on nearby dates (±7 days)' }}
+                      </h3>
+                      <p class="text-[11px] text-slate-500">
+                        {{ lang.isVietnamese() ? 'Không có chuyến bay vào ngày đã chọn. Vui lòng chọn một ngày khả dụng dưới đây:' : 'No flights on selected date. Please select an available alternative date:' }}
+                      </p>
+                    </div>
+                  </div>
+                  <span class="text-xs font-semibold px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-200 self-start sm:self-auto">
+                    {{ nearbyDates().length }} {{ lang.isVietnamese() ? 'ngày có chuyến' : 'dates found' }}
+                  </span>
+                </div>
+
+                <div class="flex items-stretch gap-2.5 overflow-x-auto pb-2 pt-1">
+                  @for (nd of nearbyDates(); track nd.date) {
+                    <button
+                      type="button"
+                      (click)="selectNearbyDate(nd.date)"
+                      class="p-3 rounded-2xl bg-white border border-slate-200 hover:border-gold hover:shadow-md transition-all text-center flex flex-col items-center justify-between shrink-0 group min-w-[120px] focus:outline-none focus:ring-2 focus:ring-gold/50 cursor-pointer"
+                    >
+                      <span class="text-[11px] font-semibold text-slate-500 uppercase">{{ nd.day_of_week }}</span>
+                      <span class="text-sm font-black text-navy group-hover:text-gold transition-colors my-1">{{ nd.date }}</span>
+                      <span class="text-xs font-bold text-emerald-600">
+                        {{ nd.min_price ? (nd.min_price | currencyFormat) : '' }}
+                      </span>
+                      <span class="text-[10px] font-medium px-2 py-0.5 mt-1.5 rounded-full"
+                            [ngClass]="nd.has_direct ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'">
+                        {{ nd.has_direct ? (lang.isVietnamese() ? 'Bay thẳng' : 'Direct') : (lang.isVietnamese() ? 'Nối chuyến' : 'Connecting') }}
+                      </span>
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (stopsFilter() !== 'CONNECTING') {
             <!-- ============ Direct Outbound Flights Section ("Bay thẳng" - Task 2) ============ -->
             <div class="space-y-6 mb-12">
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
@@ -523,7 +708,7 @@ export function isValidCalendarDate(val: any): boolean {
                 </div>
 
                 <div class="space-y-4">
-                  @for (flight of results()?.return_flights ?? []; track flight.flight_id + flight.inventory_id) {
+                  @for (flight of sortedReturnFlights(); track flight.flight_id + flight.inventory_id) {
                     <ng-container
                       *ngTemplateOutlet="flightCard; context: { $implicit: flight, direction: 'RETURN' }"
                     />
@@ -531,9 +716,10 @@ export function isValidCalendarDate(val: any): boolean {
                 </div>
               </div>
             }
+            }
 
             <!-- ============ Return Connecting Routes Section ============ -->
-            @if (isRoundTrip && returnConnectingOptions().length) {
+            @if (stopsFilter() !== 'DIRECT' && isRoundTrip && returnConnectingOptions().length) {
               <div class="space-y-6 mb-12">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                   <div class="flex items-center gap-3">
@@ -560,12 +746,23 @@ export function isValidCalendarDate(val: any): boolean {
                 </div>
 
                 <div class="space-y-4">
-                  @for (opt of returnConnectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
+                  @for (opt of sortedReturnConnectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
                     <div class="card-luxury p-5 sm:p-6 border-amber-200/80 bg-gradient-to-br from-white to-amber-50/20">
 
                       <!-- Transit Header -->
                       <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
                         <div class="flex flex-wrap items-center gap-2">
+                          <!-- Single-selection radio indicator (§3.3.6.2/3.3.6.3) -->
+                          <div
+                            class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 cursor-pointer"
+                            [ngClass]="isConnectingSelected(opt, 'RETURN') ? 'border-gold bg-gold text-navy shadow-xs' : 'border-slate-300 bg-white hover:border-gold/60'"
+                            (click)="selectReturnConnectingRoute(opt)"
+                          >
+                            @if (isConnectingSelected(opt, 'RETURN')) {
+                              <div class="w-2 h-2 rounded-full bg-navy"></div>
+                            }
+                          </div>
+
                           <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full">
                             {{ lang.t('results.stopoverAt') }}{{ opt.route.transit_airport }}
                           </span>
@@ -726,7 +923,7 @@ export function isValidCalendarDate(val: any): boolean {
             }
 
             <!-- ============ Connecting Routes Section ("Nối chuyến" - Task 2) ============ -->
-            @if (connectingOptions().length) {
+            @if (stopsFilter() !== 'DIRECT' && connectingOptions().length) {
               <div class="space-y-6 mb-12">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
                   <div class="flex items-center gap-3">
@@ -753,12 +950,23 @@ export function isValidCalendarDate(val: any): boolean {
                 </div>
 
                 <div class="space-y-4">
-                  @for (opt of connectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
+                  @for (opt of sortedConnectingOptions(); track (getConnectingDepartureDate(opt) + '_' + opt.route.leg1.flight_id + '_' + opt.route.leg2.flight_id)) {
                     <div class="card-luxury p-5 sm:p-6 border-amber-200/80 bg-gradient-to-br from-white to-amber-50/20">
 
                       <!-- Transit Header -->
                       <div class="flex flex-wrap items-center justify-between gap-2 pb-4 mb-4 border-b border-slate-100">
                         <div class="flex flex-wrap items-center gap-2">
+                          <!-- Single-selection radio indicator (§3.3.6.2/3.3.6.3) -->
+                          <div
+                            class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 cursor-pointer"
+                            [ngClass]="isConnectingSelected(opt, 'ONWARD') ? 'border-gold bg-gold text-navy shadow-xs' : 'border-slate-300 bg-white hover:border-gold/60'"
+                            (click)="selectConnectingRoute(opt)"
+                          >
+                            @if (isConnectingSelected(opt, 'ONWARD')) {
+                              <div class="w-2 h-2 rounded-full bg-navy"></div>
+                            }
+                          </div>
+
                           <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full">
                             {{ lang.t('results.stopoverAt') }}{{ opt.route.transit_airport }}
                           </span>
@@ -918,6 +1126,123 @@ export function isValidCalendarDate(val: any): boolean {
               </div>
             }
 
+            <!-- ============ Outbound External Network Itineraries (AirLabs Discovery) ============ -->
+            @if (networkItineraries().length > 0) {
+              <div class="space-y-6 mb-12">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-sky-200 pb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0">
+                      <app-icon name="compass" class="w-5 h-5 text-sky-600" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h2 class="text-xl font-bold text-navy">
+                          {{ lang.t('results.externalRouteReference') }}
+                        </h2>
+                        <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          {{ lang.t('results.externalPartnerNetwork') }}
+                        </span>
+                      </div>
+                      <p class="text-xs text-amber-700 font-medium mt-0.5">
+                        {{ lang.t('results.externalRouteDisclaimer') }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs font-semibold text-slate-600 px-3 py-1 bg-slate-100 rounded-full border border-slate-200">
+                      {{ networkItineraries().length }} {{ lang.t('results.externalItinerariesCount') }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  @for (itin of networkItineraries(); track $index) {
+                    <div class="card-luxury p-5 sm:p-6 border-sky-300 bg-gradient-to-br from-white to-sky-50/30 shadow-sm">
+                      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2">
+                          @if (itin.stops.length === 0) {
+                            <span class="text-xs font-bold bg-emerald-700 text-white px-3 py-1 rounded-full">
+                              {{ lang.t('results.externalDirectRoute') }}
+                            </span>
+                          } @else if (itin.stops.length === 1) {
+                            <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                              <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                              <span>{{ lang.t('results.externalOneStop') }}: {{ itin.stops[0] }}</span>
+                            </span>
+                          } @else {
+                            <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                              <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                              <span>{{ lang.t('results.externalTwoStop') }}: {{ itin.stops.join(', ') }}</span>
+                            </span>
+                          }
+
+                          <span class="text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full">
+                            {{ lang.t('results.notBookableDirectly') }}
+                          </span>
+                        </div>
+                        <div class="text-xs text-slate-500 font-medium">
+                          {{ Math.floor(itin.total_duration_minutes / 60) }}h {{ itin.total_duration_minutes % 60 }}m
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-1 md:grid-cols-{{ itin.legs.length === 1 ? '1' : itin.legs.length === 2 ? '2' : '3' }} gap-4 mb-4">
+                        @for (leg of itin.legs; track $index; let lIdx = $index) {
+                          <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-xs text-slate-500 font-bold mb-2 pb-1 border-b border-slate-200/50">
+                              <span>{{ lang.t('results.leg1').replace('1', '' + (lIdx + 1)) }}</span>
+                              <span class="font-mono text-navy">{{ leg.flight_iata || leg.airline_iata }}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                              <div>
+                                <span class="text-base font-black text-navy">{{ leg.dep_time_local || (leg.dep_datetime | date: 'HH:mm') }}</span>
+                                <span class="text-xs font-bold text-slate-700 block">{{ leg.dep_iata }}</span>
+                              </div>
+                              <div class="flex flex-col items-center px-2">
+                                <span class="text-[10px] text-slate-400 font-medium">{{ leg.duration_minutes }}m</span>
+                                <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                              </div>
+                              <div class="text-right">
+                                <span class="text-base font-black text-navy">{{ leg.arr_time_local || (leg.arr_datetime | date: 'HH:mm') }}</span>
+                                <span class="text-xs font-bold text-slate-700 block">{{ leg.arr_iata }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        }
+                      </div>
+
+                      <div class="p-3 mb-3 bg-amber-50/80 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                        <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600 shrink-0" />
+                        <span class="font-medium">{{ lang.t('results.externalRouteDisclaimer') }}</span>
+                      </div>
+
+                      <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <span class="text-xs text-slate-500 italic">
+                          * {{ lang.t('results.notBookableDirectly') }}
+                        </span>
+                        <div class="flex items-center gap-2 self-end sm:self-auto">
+                          <input
+                            type="date"
+                            [value]="filterStartDate || departureDate"
+                            (change)="onSuggestionDateChange($event)"
+                            class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-gold font-medium"
+                          />
+                          <button
+                            type="button"
+                            (click)="searchDifferentDate()"
+                            class="btn-outline-gold !py-1.5 !px-3.5 text-xs font-bold flex items-center gap-1.5 shrink-0"
+                          >
+                            <app-icon name="calendar" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('results.checkOtherDate') }}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
             <!-- ============ Route-Network Suggestions Section (Task 3) ============ -->
             @if (routeNetworkSuggestions().length > 0) {
               <div class="space-y-6 mb-12">
@@ -957,10 +1282,10 @@ export function isValidCalendarDate(val: any): boolean {
                             <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
                             <span>{{ lang.t('results.transitAt') }}{{ sugg.transit_airport }}</span>
                           </span>
-                          @if (sugg.leg1?.airline_iata || sugg.leg2?.airline_iata) {
+                          @if (sugg.leg1?.airline_iata || sugg.leg2?.airline_iata || sugg.leg3?.airline_iata) {
                             <span class="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
                               {{ lang.t('results.operatedBy') }}
-                              {{ sugg.leg1?.airline_iata || sugg.leg2?.airline_iata }}
+                              {{ sugg.leg1?.airline_iata || sugg.leg2?.airline_iata || sugg.leg3?.airline_iata }}
                             </span>
                           }
                         </div>
@@ -969,8 +1294,8 @@ export function isValidCalendarDate(val: any): boolean {
                         </div>
                       </div>
 
-                      <!-- 2 Legs Display (dep -> transit -> arr) -->
-                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <!-- Legs Display (dep -> transit -> arr) -->
+                      <div class="grid grid-cols-1 md:grid-cols-{{ sugg.leg3 ? '3' : '2' }} gap-4 mb-4">
                         <!-- Leg 1 -->
                         <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
                           <div>
@@ -991,7 +1316,7 @@ export function isValidCalendarDate(val: any): boolean {
                               {{ lang.t('results.transit') }}
                             </span>
                             <div class="text-lg font-black text-navy mt-1">
-                              {{ sugg.transit_airport || sugg.leg1?.arr_iata }}
+                              {{ sugg.leg1?.arr_iata || sugg.transit_airport }}
                             </div>
                           </div>
                         </div>
@@ -1000,10 +1325,11 @@ export function isValidCalendarDate(val: any): boolean {
                         <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
                           <div>
                             <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                              {{ lang.t('results.transit') }}
+                              {{ lang.t('results.leg2') }}
+                              @if (sugg.leg2?.airline_iata) { ({{ sugg.leg2?.airline_iata }}) }
                             </span>
                             <div class="text-lg font-black text-navy mt-1">
-                              {{ sugg.transit_airport || sugg.leg2?.dep_iata }}
+                              {{ sugg.leg2?.dep_iata }}
                             </div>
                           </div>
                           <div class="flex flex-col items-center px-3">
@@ -1012,14 +1338,40 @@ export function isValidCalendarDate(val: any): boolean {
                           </div>
                           <div class="text-right">
                             <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                              {{ lang.t('results.leg2') }}
-                              @if (sugg.leg2?.airline_iata) { ({{ sugg.leg2?.airline_iata }}) }
+                              {{ sugg.leg3 ? lang.t('results.transit') : lang.t('results.leg2') }}
                             </span>
                             <div class="text-lg font-black text-navy mt-1">
-                              {{ sugg.leg2?.arr_iata || destination }}
+                              {{ sugg.leg2?.arr_iata }}
                             </div>
                           </div>
                         </div>
+
+                        <!-- Leg 3 -->
+                        @if (sugg.leg3) {
+                          <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
+                            <div>
+                              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                                {{ lang.t('results.leg3') }}
+                                @if (sugg.leg3.airline_iata) { ({{ sugg.leg3.airline_iata }}) }
+                              </span>
+                              <div class="text-lg font-black text-navy mt-1">
+                                {{ sugg.leg3.dep_iata }}
+                              </div>
+                            </div>
+                            <div class="flex flex-col items-center px-3">
+                              <span class="text-[10px] text-slate-400 font-medium mb-0.5">{{ lang.t('results.leg3') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                            </div>
+                            <div class="text-right">
+                              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                                {{ lang.t('results.leg3') }}
+                              </span>
+                              <div class="text-lg font-black text-navy mt-1">
+                                {{ sugg.leg3.arr_iata || destination }}
+                              </div>
+                            </div>
+                          </div>
+                        }
                       </div>
 
                       <!-- Verbatim Note in Highlighted Warning Box (Task 3) -->
@@ -1041,6 +1393,286 @@ export function isValidCalendarDate(val: any): boolean {
                           <input
                             type="date"
                             [value]="filterStartDate || departureDate"
+                            (change)="onSuggestionDateChange($event)"
+                            class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-gold font-medium"
+                          />
+                          <button
+                            type="button"
+                            (click)="searchDifferentDate()"
+                            class="btn-outline-gold !py-1.5 !px-3.5 text-xs font-bold flex items-center gap-1.5 shrink-0"
+                          >
+                            <app-icon name="calendar" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('results.checkOtherDate') }}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- ============ Return External Network Itineraries (AirLabs Discovery) ============ -->
+            @if (returnNetworkItineraries().length > 0) {
+              <div class="space-y-6 mb-12">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-sky-200 pb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0">
+                      <app-icon name="compass" class="w-5 h-5 text-sky-600" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h2 class="text-xl font-bold text-navy">
+                          {{ lang.t('results.returnRouteReference') }}
+                        </h2>
+                        <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          {{ lang.t('results.externalPartnerNetwork') }}
+                        </span>
+                      </div>
+                      <p class="text-xs text-amber-700 font-medium mt-0.5">
+                        {{ lang.t('results.externalRouteDisclaimer') }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs font-semibold text-slate-600 px-3 py-1 bg-slate-100 rounded-full border border-slate-200">
+                      {{ returnNetworkItineraries().length }} {{ lang.t('results.externalItinerariesCount') }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  @for (itin of returnNetworkItineraries(); track $index) {
+                    <div class="card-luxury p-5 sm:p-6 border-sky-300 bg-gradient-to-br from-white to-sky-50/30 shadow-sm">
+                      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2">
+                          @if (itin.stops.length === 0) {
+                            <span class="text-xs font-bold bg-emerald-700 text-white px-3 py-1 rounded-full">
+                              {{ lang.t('results.externalDirectRoute') }}
+                            </span>
+                          } @else if (itin.stops.length === 1) {
+                            <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                              <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                              <span>{{ lang.t('results.externalOneStop') }}: {{ itin.stops[0] }}</span>
+                            </span>
+                          } @else {
+                            <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                              <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                              <span>{{ lang.t('results.externalTwoStop') }}: {{ itin.stops.join(', ') }}</span>
+                            </span>
+                          }
+
+                          <span class="text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full">
+                            {{ lang.t('results.notBookableDirectly') }}
+                          </span>
+                        </div>
+                        <div class="text-xs text-slate-500 font-medium">
+                          {{ Math.floor(itin.total_duration_minutes / 60) }}h {{ itin.total_duration_minutes % 60 }}m
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-1 md:grid-cols-{{ itin.legs.length === 1 ? '1' : itin.legs.length === 2 ? '2' : '3' }} gap-4 mb-4">
+                        @for (leg of itin.legs; track $index; let lIdx = $index) {
+                          <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 flex flex-col justify-between">
+                            <div class="flex items-center justify-between text-xs text-slate-500 font-bold mb-2 pb-1 border-b border-slate-200/50">
+                              <span>{{ lang.t('results.leg1').replace('1', '' + (lIdx + 1)) }}</span>
+                              <span class="font-mono text-navy">{{ leg.flight_iata || leg.airline_iata }}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                              <div>
+                                <span class="text-base font-black text-navy">{{ leg.dep_time_local || (leg.dep_datetime | date: 'HH:mm') }}</span>
+                                <span class="text-xs font-bold text-slate-700 block">{{ leg.dep_iata }}</span>
+                              </div>
+                              <div class="flex flex-col items-center px-2">
+                                <span class="text-[10px] text-slate-400 font-medium">{{ leg.duration_minutes }}m</span>
+                                <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                              </div>
+                              <div class="text-right">
+                                <span class="text-base font-black text-navy">{{ leg.arr_time_local || (leg.arr_datetime | date: 'HH:mm') }}</span>
+                                <span class="text-xs font-bold text-slate-700 block">{{ leg.arr_iata }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        }
+                      </div>
+
+                      <div class="p-3 mb-3 bg-amber-50/80 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                        <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600 shrink-0" />
+                        <span class="font-medium">{{ lang.t('results.externalRouteDisclaimer') }}</span>
+                      </div>
+
+                      <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <span class="text-xs text-slate-500 italic">
+                          * {{ lang.t('results.notBookableDirectly') }}
+                        </span>
+                        <div class="flex items-center gap-2 self-end sm:self-auto">
+                          <input
+                            type="date"
+                            [value]="returnDate || departureDate"
+                            (change)="onSuggestionDateChange($event)"
+                            class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-gold font-medium"
+                          />
+                          <button
+                            type="button"
+                            (click)="searchDifferentDate()"
+                            class="btn-outline-gold !py-1.5 !px-3.5 text-xs font-bold flex items-center gap-1.5 shrink-0"
+                          >
+                            <app-icon name="calendar" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('results.checkOtherDate') }}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- ============ Return Route-Network Suggestions Section ============ -->
+            @if (returnRouteNetworkSuggestions().length > 0) {
+              <div class="space-y-6 mb-12">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200 shrink-0">
+                      <app-icon name="compass" class="w-5 h-5 text-sky-600" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <h2 class="text-xl font-bold text-navy">
+                          {{ lang.t('results.returnRouteNetworkSuggestions') }}
+                        </h2>
+                        <span class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          AirLabs Network
+                        </span>
+                      </div>
+                      <p class="text-xs text-slate-500 mt-0.5">
+                        {{ lang.t('results.routeNetworkNoSchedule') }}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-xs font-semibold text-slate-600 px-3 py-1 bg-slate-100 rounded-full border border-slate-200">
+                      {{ returnRouteNetworkSuggestions().length }} {{ lang.t('results.routeSuggestionsCount') }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="space-y-4">
+                  @for (sugg of returnRouteNetworkSuggestions(); track $index) {
+                    <div class="card-luxury p-5 sm:p-6 border-sky-200/80 bg-gradient-to-br from-white to-sky-50/20 shadow-sm">
+                      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-xs font-bold bg-navy text-white px-3 py-1 rounded-full flex items-center gap-1.5">
+                            <app-icon name="mappin" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('results.transitAt') }}{{ sugg.transit_airport }}</span>
+                          </span>
+                          @if (sugg.leg1?.airline_iata || sugg.leg2?.airline_iata || sugg.leg3?.airline_iata) {
+                            <span class="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                              {{ lang.t('results.operatedBy') }}
+                              {{ sugg.leg1?.airline_iata || sugg.leg2?.airline_iata || sugg.leg3?.airline_iata }}
+                            </span>
+                          }
+                        </div>
+                        <div class="text-xs text-slate-400 font-medium">
+                          {{ lang.t('results.noFixedSchedule') }}
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-1 md:grid-cols-{{ sugg.leg3 ? '3' : '2' }} gap-4 mb-4">
+                        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
+                          <div>
+                            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                              {{ lang.t('results.leg1') }}
+                              @if (sugg.leg1?.airline_iata) { ({{ sugg.leg1?.airline_iata }}) }
+                            </span>
+                            <div class="text-lg font-black text-navy mt-1">
+                              {{ sugg.leg1?.dep_iata || destination }}
+                            </div>
+                          </div>
+                          <div class="flex flex-col items-center px-3">
+                            <span class="text-[10px] text-slate-400 font-medium mb-0.5">{{ lang.t('results.leg1') }}</span>
+                            <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                          </div>
+                          <div class="text-right">
+                            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                              {{ lang.t('results.transit') }}
+                            </span>
+                            <div class="text-lg font-black text-navy mt-1">
+                              {{ sugg.leg1?.arr_iata || sugg.transit_airport }}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
+                          <div>
+                            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                              {{ lang.t('results.leg2') }}
+                              @if (sugg.leg2?.airline_iata) { ({{ sugg.leg2?.airline_iata }}) }
+                            </span>
+                            <div class="text-lg font-black text-navy mt-1">
+                              {{ sugg.leg2?.dep_iata }}
+                            </div>
+                          </div>
+                          <div class="flex flex-col items-center px-3">
+                            <span class="text-[10px] text-slate-400 font-medium mb-0.5">{{ lang.t('results.leg2') }}</span>
+                            <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                          </div>
+                          <div class="text-right">
+                            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                              {{ sugg.leg3 ? lang.t('results.transit') : lang.t('results.leg2') }}
+                            </span>
+                            <div class="text-lg font-black text-navy mt-1">
+                              {{ sugg.leg2?.arr_iata }}
+                            </div>
+                          </div>
+                        </div>
+
+                        @if (sugg.leg3) {
+                          <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 flex items-center justify-between">
+                            <div>
+                              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                                {{ lang.t('results.leg3') }}
+                                @if (sugg.leg3.airline_iata) { ({{ sugg.leg3.airline_iata }}) }
+                              </span>
+                              <div class="text-lg font-black text-navy mt-1">
+                                {{ sugg.leg3.dep_iata }}
+                              </div>
+                            </div>
+                            <div class="flex flex-col items-center px-3">
+                              <span class="text-[10px] text-slate-400 font-medium mb-0.5">{{ lang.t('results.leg3') }}</span>
+                              <app-icon name="arrowright" class="w-4 h-4 text-slate-400" />
+                            </div>
+                            <div class="text-right">
+                              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                                {{ lang.t('results.leg3') }}
+                              </span>
+                              <div class="text-lg font-black text-navy mt-1">
+                                {{ sugg.leg3.arr_iata || origin }}
+                              </div>
+                            </div>
+                          </div>
+                        }
+                      </div>
+
+                      @if (sugg.note) {
+                        <div class="p-3.5 mb-4 bg-amber-50 border border-amber-300 rounded-2xl text-amber-900 text-xs flex items-start gap-2.5 shadow-xs">
+                          <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                          <div class="flex-1 font-medium leading-relaxed whitespace-pre-line">
+                            {{ sugg.note }}
+                          </div>
+                        </div>
+                      }
+
+                      <div class="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <span class="text-xs text-slate-500 italic">
+                          * {{ lang.t('results.connectingNoSchedule') }}
+                        </span>
+                        <div class="flex items-center gap-2 self-end sm:self-auto">
+                          <input
+                            type="date"
+                            [value]="returnDate || departureDate"
                             (change)="onSuggestionDateChange($event)"
                             class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-700 focus:outline-none focus:border-gold font-medium"
                           />
@@ -1144,6 +1776,18 @@ export function isValidCalendarDate(val: any): boolean {
 
             <!-- Airline Branding & Flight Number -->
             <div class="flex items-center gap-3 shrink-0">
+              <!-- Single-selection radio indicator (§3.3.6.2/3.3.6.3) -->
+              <div
+                class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all shrink-0 cursor-pointer"
+                [ngClass]="isFlightSelected(flight, direction) ? 'border-gold bg-gold text-navy shadow-xs' : 'border-slate-300 bg-white hover:border-gold/60'"
+                [title]="isFlightSelected(flight, direction) ? lang.t('results.selected') : lang.t('results.selectSeatBtn')"
+                (click)="onSelectFlight(flight, direction)"
+              >
+                @if (isFlightSelected(flight, direction)) {
+                  <div class="w-2 h-2 rounded-full bg-navy"></div>
+                }
+              </div>
+
               <div class="w-11 h-11 rounded-2xl bg-navy text-gold flex items-center justify-center shadow-sm">
                 <app-icon name="plane" class="w-6 h-6" [class.rotate-180]="direction === 'RETURN'" />
               </div>
@@ -1320,13 +1964,53 @@ export class FlightResultsComponent implements OnInit {
   totalPassengers = 1;
   cabinClass = 'ECONOMY';
 
+  // Requirement 1.3.1: Sorting and stops filtering
+  readonly sortBy = signal<'departure' | 'price_asc' | 'duration'>('departure');
+  readonly stopsFilter = signal<'ALL' | 'DIRECT' | 'CONNECTING'>('ALL');
+
+  setSortBy(sort: 'departure' | 'price_asc' | 'duration'): void {
+    this.sortBy.set(sort);
+    this.directPage.set(1);
+  }
+
+  setStopsFilter(filter: 'ALL' | 'DIRECT' | 'CONNECTING'): void {
+    this.stopsFilter.set(filter);
+    this.directPage.set(1);
+  }
+
+  readonly sortedOnwardFlights = computed<ExtendedFlightResult[]>(() => {
+    const flights = [...(this.results()?.onward_flights ?? [])];
+    const sort = this.sortBy();
+    if (sort === 'price_asc') {
+      flights.sort((a, b) => (Number(a.total_party_price) || Number(a.base_price_per_adult) || 0) - (Number(b.total_party_price) || Number(b.base_price_per_adult) || 0));
+    } else if (sort === 'duration') {
+      flights.sort((a, b) => (Number(a.duration_minutes) || 0) - (Number(b.duration_minutes) || 0));
+    } else {
+      flights.sort((a, b) => new Date(a.scheduled_departure || a.departure_date).getTime() - new Date(b.scheduled_departure || b.departure_date).getTime());
+    }
+    return flights;
+  });
+
+  readonly sortedReturnFlights = computed<ExtendedFlightResult[]>(() => {
+    const flights = [...(this.results()?.return_flights ?? [])];
+    const sort = this.sortBy();
+    if (sort === 'price_asc') {
+      flights.sort((a, b) => (Number(a.total_party_price) || Number(a.base_price_per_adult) || 0) - (Number(b.total_party_price) || Number(b.base_price_per_adult) || 0));
+    } else if (sort === 'duration') {
+      flights.sort((a, b) => (Number(a.duration_minutes) || 0) - (Number(b.duration_minutes) || 0));
+    } else {
+      flights.sort((a, b) => new Date(a.scheduled_departure || a.departure_date).getTime() - new Date(b.scheduled_departure || b.departure_date).getTime());
+    }
+    return flights;
+  });
+
   // Task 4: Pagination of direct flight rows
   readonly directPage = signal(1);
   readonly directPageSize = signal(20);
   readonly directPageSizeOptions: number[] = [10, 20, 30, 50, 100];
 
   readonly paginatedOnwardFlights = computed<ExtendedFlightResult[]>(() => {
-    const flights = this.results()?.onward_flights ?? [];
+    const flights = this.sortedOnwardFlights();
     const page = this.directPage();
     const pageSize = this.directPageSize();
     const start = (page - 1) * pageSize;
@@ -1451,10 +2135,28 @@ export class FlightResultsComponent implements OnInit {
     return hints;
   });
 
+  protected readonly Math = Math;
+
   // Task 3: Route-network suggestions
   readonly routeNetworkSuggestions = computed<RouteNetworkSuggestion[]>(() => {
     const res = this.results();
     return Array.isArray(res?.route_network_suggestions) ? res!.route_network_suggestions! : [];
+  });
+
+  // External network discovery itineraries (Direct, 1-Stop, 2-Stop)
+  readonly networkItineraries = computed<ExternalNetworkItinerary[]>(() => {
+    const res = this.results();
+    return Array.isArray(res?.network_itineraries) ? res!.network_itineraries! : [];
+  });
+
+  readonly returnNetworkItineraries = computed<ExternalNetworkItinerary[]>(() => {
+    const res = this.results();
+    return Array.isArray(res?.return_network_itineraries) ? res!.return_network_itineraries! : [];
+  });
+
+  readonly returnRouteNetworkSuggestions = computed<RouteNetworkSuggestion[]>(() => {
+    const res = this.results();
+    return Array.isArray(res?.return_route_network_suggestions) ? res!.return_route_network_suggestions! : [];
   });
 
   suggestionSelectedDate = '';
@@ -1483,6 +2185,10 @@ export class FlightResultsComponent implements OnInit {
   // Task 1: City ambiguity chooser & nearest airport suggestions
   readonly originExactMatches = signal<Airport[]>([]);
   readonly destExactMatches = signal<Airport[]>([]);
+
+  // Requirement 3.3.3 & Phase A: Nearby dates availability (±7 days)
+  readonly nearbyDates = signal<any[]>([]);
+  readonly loadingNearby = signal<boolean>(false);
 
   // Task 4: Cancellation and refund policies
   readonly policies = signal<CancellationPolicy[]>([]);
@@ -1621,6 +2327,42 @@ export class FlightResultsComponent implements OnInit {
     });
   });
 
+  /** Phương án nối chuyến đã phân giải và sắp xếp theo tiêu chí người dùng. */
+  readonly sortedConnectingOptions = computed<ConnectingOption[]>(() => {
+    const list = [...this.connectingOptions()];
+    const sort = this.sortBy();
+    if (sort === 'price_asc') {
+      list.sort((a, b) => a.totalPartyPrice - b.totalPartyPrice);
+    } else if (sort === 'duration') {
+      list.sort((a, b) => (a.route.total_duration_minutes || 0) - (b.route.total_duration_minutes || 0));
+    } else {
+      list.sort((a, b) => {
+        const tA = new Date(a.leg1.departure || a.leg1.scheduled_departure_local || '').getTime();
+        const tB = new Date(b.leg1.departure || b.leg1.scheduled_departure_local || '').getTime();
+        return tA - tB;
+      });
+    }
+    return list;
+  });
+
+  /** Phương án nối chuyến chiều về đã phân giải và sắp xếp theo tiêu chí người dùng. */
+  readonly sortedReturnConnectingOptions = computed<ConnectingOption[]>(() => {
+    const list = [...this.returnConnectingOptions()];
+    const sort = this.sortBy();
+    if (sort === 'price_asc') {
+      list.sort((a, b) => a.totalPartyPrice - b.totalPartyPrice);
+    } else if (sort === 'duration') {
+      list.sort((a, b) => (a.route.total_duration_minutes || 0) - (b.route.total_duration_minutes || 0));
+    } else {
+      list.sort((a, b) => {
+        const tA = new Date(a.leg1.departure || a.leg1.scheduled_departure_local || '').getTime();
+        const tB = new Date(b.leg1.departure || b.leg1.scheduled_departure_local || '').getTime();
+        return tA - tB;
+      });
+    }
+    return list;
+  });
+
   ngOnInit(): void {
     // Task 4: Tải danh sách chính sách hủy vé một lần duy nhất
     this.loadPolicies();
@@ -1675,6 +2417,7 @@ export class FlightResultsComponent implements OnInit {
     this.loading.set(true);
     this.errorMessage.set('');
     this.results.set(null);
+    this.nearbyDates.set([]);
     this.directPage.set(1);
     this.selectedFlight.set(null);
     this.selectedReturnFlight.set(null);
@@ -1710,6 +2453,7 @@ export class FlightResultsComponent implements OnInit {
             this.toast.info(
               this.lang.t('results.toastNoFlightsQuery').replace('{origin}', this.origin).replace('{destination}', this.destination).replace('{date}', this.departureDate),
             );
+            this.loadNearbyAvailability();
           }
         },
         error: (err) => {
@@ -1723,6 +2467,49 @@ export class FlightResultsComponent implements OnInit {
           this.toast.error(message);
         },
       });
+  }
+
+  // Requirement 3.3.3 & Phase A: Nearby dates availability handler
+  loadNearbyAvailability(): void {
+    if (!this.origin || !this.destination || !this.departureDate) return;
+    this.loadingNearby.set(true);
+    this.api
+      .getNearbyAvailability({
+        origin: this.origin,
+        destination: this.destination,
+        date: this.departureDate,
+        cabin_class: this.cabinClass,
+        adults: this.adults,
+        children: this.children,
+        seniors: this.seniors,
+      })
+      .subscribe({
+        next: (res: any) => {
+          this.loadingNearby.set(false);
+          const dates = res?.available_dates || (Array.isArray(res) ? res : []);
+          this.nearbyDates.set(dates);
+        },
+        error: () => {
+          this.loadingNearby.set(false);
+          this.nearbyDates.set([]);
+        },
+      });
+  }
+
+  selectNearbyDate(dateStr: string): void {
+    if (!dateStr || !isValidCalendarDate(dateStr)) return;
+    this.departureDate = dateStr;
+    this.filterStartDate = dateStr;
+    this.filterEndDate = dateStr;
+    this.departureDateEnd.set('');
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        departure_date: dateStr,
+        departure_date_end: null,
+      },
+      queryParamsHandling: 'merge',
+    });
   }
 
   // ===================== Task 1: City Ambiguity & Nearest Suggestions =====================
@@ -1928,6 +2715,16 @@ export class FlightResultsComponent implements OnInit {
   isFlightSelected(flight: FormattedFlightResult, direction: FlightDirection): boolean {
     const current = direction === 'RETURN' ? this.selectedReturnFlight() : this.selectedFlight();
     return !!current && current.flight_id === flight.flight_id && current.inventory_id === flight.inventory_id;
+  }
+
+  isConnectingSelected(opt: ConnectingOption, direction: FlightDirection = 'ONWARD'): boolean {
+    const current = direction === 'RETURN' ? this.selectedReturnConnecting() : this.selectedConnecting();
+    return (
+      !!current &&
+      current.route.transit_airport === opt.route.transit_airport &&
+      current.leg1.flight_id === opt.leg1.flight_id &&
+      current.leg2.flight_id === opt.leg2.flight_id
+    );
   }
 
   onSelectFlight(flight: FormattedFlightResult, direction: FlightDirection): void {

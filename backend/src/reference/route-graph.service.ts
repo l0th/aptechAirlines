@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { RouteRef, RouteRefDocument, RouteSyncState, RouteSyncStateDocument } from './reference.schema';
+import {
+  RouteRef,
+  RouteRefDocument,
+  RouteSyncState,
+  RouteSyncStateDocument,
+  RouteSource,
+} from './reference.schema';
 
 export type RouteType = 'DIRECT' | 'ONE_STOP' | 'TWO_STOP';
 
@@ -84,7 +90,8 @@ export class RouteGraphService {
   ): Promise<RouteGraphResult> {
     const rawMaxStops = options?.maxStops !== undefined ? options.maxStops : 2;
     const maxStops = Math.max(0, Math.min(2, Math.floor(rawMaxStops)));
-    const providerSource = (options?.source?.trim().toLowerCase()) || 'airlabs';
+    const providerSource =
+      options?.source?.trim().toLowerCase() || 'airlabs';
 
     const cleanOrigins = Array.from(
       new Set((originIatas || []).map(s => s?.trim().toUpperCase()).filter(Boolean)),

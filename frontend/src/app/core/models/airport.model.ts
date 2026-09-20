@@ -51,6 +51,11 @@ export interface AirportSuggestion {
   city_name: string;
   country_code?: string;
   time_zone?: string;
+  is_serviced_directly?: boolean;
+  nearest_airport_code?: string;
+  distance_to_nearest_km?: number;
+  label_vi?: string;
+  label_en?: string;
 }
 
 export interface LocationSuggestResponse {

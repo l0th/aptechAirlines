@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
@@ -86,7 +87,7 @@ interface AdminItinerary {
 @Component({
   selector: 'app-bookings-manage',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, CurrencyFormatPipe, PaginationComponent],
+  imports: [CommonModule, FormsModule, RouterModule, IconComponent, CurrencyFormatPipe, PaginationComponent],
   template: `
     <div class="space-y-6">
       
@@ -97,8 +98,17 @@ interface AdminItinerary {
           <p class="text-xs text-slate-500">{{ lang.t('admin.bookings.subtitle') }}</p>
         </div>
 
-        @if (auth.isAdmin()) {
-          <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <a
+            routerLink="/admin/reservation-desk"
+            class="btn-gold text-xs !py-2 !px-4 font-bold inline-flex items-center gap-2"
+            [title]="lang.t('admin.bookings.newBookingBtn')"
+          >
+            <app-icon name="plus" class="w-3.5 h-3.5" />
+            <span>{{ lang.t('admin.bookings.newBookingBtn') }}</span>
+          </a>
+
+          @if (auth.isAdmin()) {
             <button
               type="button"
               (click)="runSchedulerJob('run-reminders')"
@@ -118,7 +128,7 @@ interface AdminItinerary {
               type="button"
               (click)="runSchedulerJob('run-expiry')"
               [disabled]="!!schedulerJob()"
-              class="btn-gold text-xs !py-2 !px-4 font-bold disabled:opacity-50"
+              class="btn-navy text-xs !py-2 !px-4 font-bold disabled:opacity-50"
               [title]="lang.t('admin.bookings.expiryJobTitle')"
             >
               @if (schedulerJob() === 'run-expiry') {
@@ -128,8 +138,8 @@ interface AdminItinerary {
               }
               <span>{{ lang.t('admin.bookings.runExpiry') }}</span>
             </button>
-          </div>
-        }
+          }
+        </div>
       </div>
 
       <!-- Filters -->
@@ -273,11 +283,22 @@ interface AdminItinerary {
                             type="button"
                             (click)="confirmTicket(b)"
                             [disabled]="submitting()"
-                            class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 transition-colors disabled:opacity-50"
+                            class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
                             [title]="lang.t('admin.bookings.confirmTicketTitle')"
                           >
                             <app-icon name="checkcircle2" class="w-4 h-4" />
                           </button>
+                        }
+
+                        @if (canReschedule(b)) {
+                          <a
+                            [routerLink]="['/admin/reservation-desk']"
+                            [queryParams]="{ booking: b._id }"
+                            class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors inline-flex items-center justify-center"
+                            [title]="lang.t('admin.bookings.rescheduleTitle')"
+                          >
+                            <app-icon name="calendar" class="w-4 h-4" />
+                          </a>
                         }
 
                         @if (canCancel(b)) {
@@ -285,7 +306,7 @@ interface AdminItinerary {
                             type="button"
                             (click)="cancelTicket(b)"
                             [disabled]="submitting()"
-                            class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors disabled:opacity-50"
+                            class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
                             [title]="lang.t('admin.bookings.cancelTicketTitle')"
                           >
                             <app-icon name="xcircle" class="w-4 h-4" />
@@ -295,7 +316,7 @@ interface AdminItinerary {
                         <button
                           type="button"
                           (click)="viewDetails(b)"
-                          class="p-1.5 hover:bg-slate-100 text-navy rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-slate-100 text-navy rounded-lg transition-colors inline-flex items-center justify-center"
                           [title]="lang.t('admin.bookings.viewDetailsTitle')"
                         >
                           <app-icon name="eye" class="w-4 h-4" />
@@ -331,7 +352,7 @@ interface AdminItinerary {
               <app-icon name="ticket" class="w-5 h-5 text-gold" />
               <span>{{ lang.t('admin.bookings.detailTitle') }}{{ sb.pnr_code }}</span>
             </h3>
-            <button (click)="selectedBooking.set(null)" class="text-slate-400 hover:text-slate-600">
+            <button (click)="selectedBooking.set(null)" class="text-slate-400 hover:text-slate-600 inline-flex items-center justify-center">
               <app-icon name="x" class="w-5 h-5" />
             </button>
           </div>
@@ -468,12 +489,22 @@ interface AdminItinerary {
                 <span>{{ lang.t('admin.bookings.confirmBtn') }}</span>
               </button>
             }
+            @if (canReschedule(sb)) {
+              <a
+                [routerLink]="['/admin/reservation-desk']"
+                [queryParams]="{ booking: sb._id }"
+                class="text-xs !py-2 !px-5 font-bold rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-all shadow-sm hover:shadow-md inline-flex items-center justify-center gap-2 whitespace-nowrap"
+              >
+                <app-icon name="calendar" class="w-3.5 h-3.5" />
+                <span>{{ lang.t('admin.bookings.rescheduleBtn') }}</span>
+              </a>
+            }
             @if (canCancel(sb)) {
               <button
                 type="button"
                 (click)="cancelTicket(sb)"
                 [disabled]="submitting()"
-                class="text-xs !py-2 !px-5 font-bold rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors disabled:opacity-50"
+                class="text-xs !py-2 !px-5 font-bold rounded-full bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-all shadow-sm hover:shadow-md disabled:opacity-50 inline-flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 <app-icon name="xcircle" class="w-3.5 h-3.5" />
                 <span>{{ lang.t('admin.bookings.cancelBtn') }}</span>
@@ -702,6 +733,10 @@ export class BookingsManageComponent implements OnInit {
     );
   }
 
+  canReschedule(b: AdminBooking | null): boolean {
+    return b?.status === BookingStatus.CONFIRMED;
+  }
+
   statusClass(status?: string): string {
     switch (status) {
       case BookingStatus.CONFIRMED:
@@ -762,11 +797,12 @@ export class BookingsManageComponent implements OnInit {
     const promptMsg = this.lang.isVietnamese() ? `Nhập số thẻ thanh toán để xác nhận vé ${blockingNumber} (12-19 chữ số):` : `Enter payment card number to confirm ticket ${blockingNumber} (12-19 digits):`;
     const rawCard = prompt(promptMsg, '');
     if (rawCard === null) return;
-    const creditCard = rawCard.replace(/[\s-]/g, '');
-    if (!/^\d{12,19}$/.test(creditCard)) {
+    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
+    if (!cardRegex.test(rawCard.trim())) {
       this.toast.error(this.lang.t('admin.bookings.invalidCardNumber'));
       return;
     }
+    const creditCard = rawCard.trim();
 
     this.submitting.set(true);
     this.api

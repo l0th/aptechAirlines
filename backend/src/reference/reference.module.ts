@@ -8,6 +8,8 @@ import { ReferenceController } from './reference.controller';
 import { Country, CountrySchema, City, CitySchema, RouteRef, RouteRefSchema, RouteSyncState, RouteSyncStateSchema } from './reference.schema';
 import { AirportsModule } from '../airports/airports.module';
 
+import { RouteCacheScheduler } from './route-cache.scheduler';
+
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -19,7 +21,7 @@ import { AirportsModule } from '../airports/airports.module';
     AirportsModule,
   ],
   controllers: [ReferenceController],
-  providers: [ReferenceService, RouteGraphService, RouteIndexMigrationService, RouteScheduleValidatorService],
-  exports: [ReferenceService, RouteGraphService, RouteIndexMigrationService, RouteScheduleValidatorService],
+  providers: [ReferenceService, RouteGraphService, RouteIndexMigrationService, RouteScheduleValidatorService, RouteCacheScheduler],
+  exports: [ReferenceService, RouteGraphService, RouteIndexMigrationService, RouteScheduleValidatorService, RouteCacheScheduler],
 })
 export class ReferenceModule {}

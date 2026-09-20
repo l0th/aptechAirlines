@@ -11,6 +11,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { MailModule } from './mail/mail.module';
 import { SeedModule } from './seed/seed.module';
 import { ReferenceModule } from './reference/reference.module';
+import { SeatAllocationModule } from './seat-allocation/seat-allocation.module';
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/airline_db'
     MailModule,
     SeedModule,
     ReferenceModule,
+    SeatAllocationModule,
   ],
 })
 export class AppModule {}

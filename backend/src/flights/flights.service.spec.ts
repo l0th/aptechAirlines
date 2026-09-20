@@ -5,7 +5,7 @@ import { Flight } from './flights.schema';
 import { Booking, BookingStatus } from '../bookings/bookings.schema';
 import { AirportsService } from '../airports/airports.service';
 import { BadRequestException } from '@nestjs/common';
-import { FlightStatus } from './flights.schema';
+import { FlightStatus, CabinClass } from './flights.schema';
 import { ReferenceService } from '../reference/reference.service';
 import { SearchFlightDto } from './flights.dto';
 import { validate } from 'class-validator';
@@ -26,6 +26,7 @@ describe('FlightsService', () => {
       findOne: jest.fn().mockReturnThis(),
       findOneAndUpdate: jest.fn(),
       sort: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
       exec: jest.fn(),
       findById: jest.fn().mockReturnThis(),
     };
@@ -208,49 +209,13 @@ describe('FlightsService', () => {
       expect(res.connecting_routes![0].transit_airport).toBe('DAD');
     });
 
-    it('integrates RouteGraphService and RouteScheduleValidatorService when available', async () => {
+    it('production DI: executes database connecting engine without invoking findPaths even when RouteGraph services are injected', async () => {
       const mockGraphService = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [
-            {
-              route_type: 'ONE_STOP',
-              airports: ['HAN', 'DAD', 'SGN'],
-              stops: ['DAD'],
-              legs: [
-                {
-                  dep_iata: 'HAN',
-                  arr_iata: 'DAD',
-                  services: [{ flight_number: 'VN1', dep_time: '08:00', arr_time: '09:15', days: ['mon'] }],
-                },
-                {
-                  dep_iata: 'DAD',
-                  arr_iata: 'SGN',
-                  services: [{ flight_number: 'VN2', dep_time: '10:15', arr_time: '11:30', days: ['mon'] }],
-                },
-              ],
-            },
-          ],
-          coverage: { complete: true, expanded_airports: ['HAN', 'DAD'], incomplete_airports: [], missing_sync_state_airports: [] },
-        }),
+        findPaths: jest.fn().mockResolvedValue({ paths: [] }),
       };
 
       const mockValidatorService = {
-        validatePaths: jest.fn().mockReturnValue({
-          itineraries: [
-            {
-              route_type: 'ONE_STOP',
-              airports: ['HAN', 'DAD', 'SGN'],
-              stops: ['DAD'],
-              total_duration_minutes: 210,
-              layover_minutes: [60],
-              legs: [
-                { flight_number: 'VN1', chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date('2026-10-01T08:00:00Z'), arr_datetime: new Date('2026-10-01T09:15:00Z') },
-                { flight_number: 'VN2', chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date('2026-10-01T10:15:00Z'), arr_datetime: new Date('2026-10-01T11:30:00Z') },
-              ],
-            },
-          ],
-          coverage: { complete: true, expanded_airports: ['HAN', 'DAD'], incomplete_airports: [], missing_sync_state_airports: [] },
-        }),
+        validatePaths: jest.fn().mockReturnValue({ itineraries: [] }),
       };
 
       const svc = new FlightsService(
@@ -272,7 +237,10 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-01T08:00:00Z'),
         scheduled_arrival: new Date('2026-10-01T09:15:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'i1', available_seats: 10, base_price: 500 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i1', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
       };
       const f2 = {
         _id: 'f2',
@@ -283,58 +251,82 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-01T10:15:00Z'),
         scheduled_arrival: new Date('2026-10-01T11:30:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'i2', available_seats: 10, base_price: 600 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i2', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 600 }],
       };
-      const wrongNumber = { ...f1, _id: 'wrong', flight_number: 'VN999' };
 
       flightModel.find = jest.fn().mockImplementation((query: any) => {
-        if (query.origin_iata === 'HAN' && query.dest_iata === 'DAD') {
-          return { exec: () => Promise.resolve([wrongNumber, f1]) };
-        }
-        if (query.origin_iata === 'DAD' && query.dest_iata === 'SGN') {
-          return { exec: () => Promise.resolve([f2]) };
-        }
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f1]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f2]) };
         return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
       });
       flightModel.exec.mockResolvedValue([]);
 
       const res = await svc.searchFlights({ origin: 'HAN', destination: 'SGN', departure_date: '2026-10-01' } as any);
-      expect(mockGraphService.findPaths).toHaveBeenCalled();
-      expect(mockValidatorService.validatePaths).toHaveBeenCalled();
-      expect(res.connecting_routes!.length).toBeGreaterThanOrEqual(1);
+      expect(mockGraphService.findPaths).not.toHaveBeenCalled();
+      expect(mockValidatorService.validatePaths).not.toHaveBeenCalled();
+      expect(res.connecting_routes!.length).toBe(1);
       expect(res.connecting_routes![0].transit_airport).toBe('DAD');
       expect(res.connecting_routes![0].legs[0].flight_number).toBe('VN1');
       expect(res.connecting_routes![0].legs[0].flight_id).toBe('f1');
-      expect(res.connecting_routes![0].coverage.complete).toBe(true);
     });
 
-    it('does not expose a graph itinerary when flight identity or exact schedule cannot be matched', async () => {
-      const graph = { findPaths: jest.fn().mockResolvedValue({ paths: [{}], coverage: { complete: true } }) };
-      const validator = {
-        validatePaths: jest.fn().mockReturnValue({
-          itineraries: [{
-            route_type: 'ONE_STOP', stops: ['DAD'], total_duration_minutes: 180, layover_minutes: [60],
-            legs: [
-              { flight_number: 'VN123', chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date('2026-10-01T08:00:00Z') },
-              { flight_number: 'VN456', chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date('2026-10-01T10:00:00Z') },
-            ],
-          }],
-          coverage: { complete: true },
-        }),
-      };
+    it('does not expose connecting routes when connecting flights have no available seats or are cancelled', async () => {
+      const graph = { findPaths: jest.fn().mockResolvedValue({ paths: [] }) };
+      const validator = { validatePaths: jest.fn().mockReturnValue({ itineraries: [] }) };
       const svc = new FlightsService(flightModel, bookingModel, airportsService, referenceService, usersService, graph as any, validator as any);
-      const wrong = {
-        _id: 'wrong', flight_number: 'VN999', origin_iata: 'HAN', dest_iata: 'DAD',
-        scheduled_departure: new Date('2026-10-01T09:00:00Z'), scheduled_arrival: new Date('2026-10-01T10:00:00Z'),
-        inventories: [{ _id: 'i1', available_seats: 10, base_price: 100 }],
-      };
-      flightModel.find.mockImplementation((query: any) => ({
-        sort: () => ({ exec: () => Promise.resolve([]) }),
-        exec: () => Promise.resolve(query.origin_iata === 'HAN' && query.dest_iata === 'DAD' ? [wrong] : []),
-      }));
 
-      const result = await svc.searchFlights({ origin: 'HAN', destination: 'SGN', departure_date: '2026-10-01' } as any);
-      expect(result.connecting_routes).toEqual([]);
+      const f1 = {
+        _id: 'f1',
+        flight_number: 'VN1',
+        origin_iata: 'HAN',
+        dest_iata: 'DAD',
+        departure_date: '2026-10-01',
+        scheduled_departure: new Date('2026-10-01T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-01T09:15:00Z'),
+        duration_minutes: 75,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i1', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
+      };
+      // Leg 2 has 0 seats available
+      const f2 = {
+        _id: 'f2',
+        flight_number: 'VN2',
+        origin_iata: 'DAD',
+        dest_iata: 'SGN',
+        departure_date: '2026-10-01',
+        scheduled_departure: new Date('2026-10-01T10:15:00Z'),
+        scheduled_arrival: new Date('2026-10-01T11:30:00Z'),
+        duration_minutes: 75,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i2', cabin_class: CabinClass.ECONOMY, available_seats: 0, base_price: 600 }],
+      };
+
+      flightModel.find.mockImplementation((query: any) => {
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f1]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f2]) };
+        return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
+      });
+
+      const result = await (svc as any).findConnectingRoutes(['HAN'], ['SGN'], '2026-10-01', 1, 1, 0, 0);
+      expect(result).toEqual([]);
+      expect(graph.findPaths).not.toHaveBeenCalled();
     });
 
     it('searches the return direction through the connecting pipeline independently', async () => {
@@ -354,18 +346,12 @@ describe('FlightsService', () => {
       expect(result.return_connecting_routes?.[0].legs).toEqual(['return']);
     });
 
-    it('proving internal routes cannot bypass Phase B/C when routeGraphService is present (legacy loop never reached)', async () => {
+    it('proves customer connecting search uses database flights and never calls RouteGraph findPaths', async () => {
       const mockGraphService = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [], // No path in AirLabs graph
-          coverage: { complete: true, expanded_airports: ['HAN'], incomplete_airports: [], missing_sync_state_airports: [] },
-        }),
+        findPaths: jest.fn().mockResolvedValue({ paths: [] }),
       };
       const mockValidatorService = {
-        validatePaths: jest.fn().mockReturnValue({
-          itineraries: [],
-          coverage: { complete: true, expanded_airports: ['HAN'], incomplete_airports: [], missing_sync_state_airports: [] },
-        }),
+        validatePaths: jest.fn().mockReturnValue({ itineraries: [] }),
       };
       const svc = new FlightsService(
         flightModel,
@@ -377,20 +363,34 @@ describe('FlightsService', () => {
         mockValidatorService as any,
       );
 
-      // In database, there exist internal flights that WOULD match legacy connecting loop
       const leg1 = {
-        _id: 'leg1', flight_number: 'INTERNAL1', origin_iata: 'HAN', dest_iata: 'DAD',
+        _id: 'leg1', flight_number: 'APT101', origin_iata: 'HAN', dest_iata: 'DAD',
         departure_date: '2026-10-01', scheduled_departure: new Date('2026-10-01T08:00:00Z'), scheduled_arrival: new Date('2026-10-01T09:00:00Z'),
-        inventories: [{ _id: 'inv1', available_seats: 10, base_price: 100 }],
+        operator: 'APTECH_AIRLINES', is_bookable: true, status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv1', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 100 }],
       };
-      flightModel.find.mockImplementation(() => ({
-        sort: () => ({ exec: () => Promise.resolve([]) }),
-        exec: () => Promise.resolve([leg1]),
-      }));
+      const leg2 = {
+        _id: 'leg2', flight_number: 'APT102', origin_iata: 'DAD', dest_iata: 'SGN',
+        departure_date: '2026-10-01', scheduled_departure: new Date('2026-10-01T10:30:00Z'), scheduled_arrival: new Date('2026-10-01T11:45:00Z'),
+        operator: 'APTECH_AIRLINES', is_bookable: true, status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv2', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 120 }],
+      };
+
+      flightModel.find.mockImplementation((query: any) => {
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([leg1]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([leg2]) };
+        return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
+      });
 
       const res = await svc.searchFlights({ origin: 'HAN', destination: 'SGN', departure_date: '2026-10-01' } as any);
-      expect(res.connecting_routes).toEqual([]);
-      expect(mockGraphService.findPaths).toHaveBeenCalled();
+      expect(mockGraphService.findPaths).not.toHaveBeenCalled();
+      expect(res.connecting_routes!.length).toBe(1);
+      expect(res.connecting_routes![0].transit_airport).toBe('DAD');
     });
 
     it('returns connecting routes even when direct flights exist when include_connecting: true', async () => {
@@ -478,6 +478,10 @@ describe('FlightsService', () => {
         origin_iata: 'HAN',
         dest_iata: 'SGN',
         scheduled_departure: new Date(),
+        aircraft: {
+          model_code: 'A20N',
+          model_name: 'Airbus A320neo',
+        },
       };
       flightModel.exec.mockResolvedValue(mockFlight);
 
@@ -493,9 +497,9 @@ describe('FlightsService', () => {
       const seat1A = row1.seats.find((s: any) => s.column === 'A');
       expect(seat1A.is_occupied).toBe(true);
 
-      // Row 1 Seat B should be empty
-      const seat1B = row1.seats.find((s: any) => s.column === 'B');
-      expect(seat1B.is_occupied).toBe(false);
+      // Row 1 Seat C should be empty
+      const seat1C = row1.seats.find((s: any) => s.column === 'C');
+      expect(seat1C.is_occupied).toBe(false);
       
       // Row 12 Seat F should be occupied
       const row12 = res.rows.find((r: any) => r.row_number === 12);
@@ -798,48 +802,9 @@ describe('FlightsService', () => {
     });
 
     // Tests I - M: Connecting Range Tests
-    it('Test I: Authoritative route-graph path: range 3 days, valid itinerary only on middle date -> included', async () => {
-      const mockGraph = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [
-            {
-              route_type: 'ONE_STOP',
-              airports: ['HAN', 'DAD', 'SGN'],
-              stops: ['DAD'],
-              legs: [
-                { dep_iata: 'HAN', arr_iata: 'DAD', services: [{ flight_number: 'VN10' }] },
-                { dep_iata: 'DAD', arr_iata: 'SGN', services: [{ flight_number: 'VN20' }] },
-              ],
-            },
-          ],
-          coverage: { complete: true, expanded_airports: ['HAN', 'DAD'], incomplete_airports: [], missing_sync_state_airports: [] },
-        }),
-      };
-
-      const mockValidator = {
-        validatePaths: jest.fn().mockImplementation((_graphRes: any, dateStr: string) => {
-          if (dateStr === '2026-10-02') {
-            return {
-              itineraries: [
-                {
-                  route_type: 'ONE_STOP',
-                  airports: ['HAN', 'DAD', 'SGN'],
-                  stops: ['DAD'],
-                  total_duration_minutes: 200,
-                  layover_minutes: [60],
-                  legs: [
-                    { flight_number: 'VN10', chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date('2026-10-02T08:00:00Z'), arr_datetime: new Date('2026-10-02T09:15:00Z') },
-                    { flight_number: 'VN20', chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date('2026-10-02T10:15:00Z'), arr_datetime: new Date('2026-10-02T11:30:00Z') },
-                  ],
-                },
-              ],
-              coverage: { complete: true },
-            };
-          }
-          return { itineraries: [], coverage: { complete: true } };
-        }),
-      };
-
+    it('Test I: Authoritative database path: range 3 days, valid itinerary only on middle date -> included', async () => {
+      const mockGraph = { findPaths: jest.fn() };
+      const mockValidator = { validatePaths: jest.fn() };
       const svc = new FlightsService(
         flightModel,
         bookingModel,
@@ -859,7 +824,10 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-02T08:00:00Z'),
         scheduled_arrival: new Date('2026-10-02T09:15:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'inv1', available_seats: 10, base_price: 500 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv1', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
       };
       const leg2Flight = {
         _id: 'fl20',
@@ -870,16 +838,20 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-02T10:15:00Z'),
         scheduled_arrival: new Date('2026-10-02T11:30:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'inv2', available_seats: 10, base_price: 600 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv2', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 600 }],
       };
 
       flightModel.find = jest.fn().mockImplementation((query: any) => {
-        if (query.origin_iata === 'HAN' && query.dest_iata === 'DAD') {
-          return { exec: () => Promise.resolve([leg1Flight]) };
-        }
-        if (query.origin_iata === 'DAD' && query.dest_iata === 'SGN') {
-          return { exec: () => Promise.resolve([leg2Flight]) };
-        }
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([leg1Flight]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([leg2Flight]) };
         return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
       });
       flightModel.exec.mockResolvedValue([]);
@@ -892,8 +864,8 @@ describe('FlightsService', () => {
         include_connecting: true,
       } as any);
 
-      expect(mockGraph.findPaths).toHaveBeenCalledTimes(1); // Checked ONCE
-      expect(mockValidator.validatePaths).toHaveBeenCalledTimes(3); // Enumerated all 3 dates
+      expect(mockGraph.findPaths).not.toHaveBeenCalled();
+      expect(mockValidator.validatePaths).not.toHaveBeenCalled();
       expect(res.connecting_routes!.length).toBe(1);
       expect(res.connecting_routes![0].departure_date).toBe('2026-10-02');
       expect(res.connecting_routes![0].legs[0].flight_number).toBe('VN10');
@@ -901,31 +873,8 @@ describe('FlightsService', () => {
     });
 
     it('Test J: Multiple valid connecting dates -> itineraries from each valid date are returned', async () => {
-      const mockGraph = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [{ route_type: 'ONE_STOP', stops: ['DAD'] }],
-          coverage: { complete: true },
-        }),
-      };
-
-      const mockValidator = {
-        validatePaths: jest.fn().mockImplementation((_graphRes: any, dateStr: string) => ({
-          itineraries: [
-            {
-              route_type: 'ONE_STOP',
-              stops: ['DAD'],
-              total_duration_minutes: 200,
-              layover_minutes: [60],
-              legs: [
-                { flight_number: `VN1_${dateStr}`, chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date(`${dateStr}T08:00:00Z`), arr_datetime: new Date(`${dateStr}T09:15:00Z`) },
-                { flight_number: `VN2_${dateStr}`, chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date(`${dateStr}T10:15:00Z`), arr_datetime: new Date(`${dateStr}T11:30:00Z`) },
-              ],
-            },
-          ],
-          coverage: { complete: true },
-        })),
-      };
-
+      const mockGraph = { findPaths: jest.fn() };
+      const mockValidator = { validatePaths: jest.fn() };
       const svc = new FlightsService(
         flightModel,
         bookingModel,
@@ -936,43 +885,49 @@ describe('FlightsService', () => {
         mockValidator as any,
       );
 
+      const makeFlights = (dateStr: string) => [
+        {
+          _id: `f_HAN_${dateStr}`,
+          flight_number: `VN1_${dateStr}`,
+          origin_iata: 'HAN',
+          dest_iata: 'DAD',
+          departure_date: dateStr,
+          scheduled_departure: new Date(`${dateStr}T08:00:00Z`),
+          scheduled_arrival: new Date(`${dateStr}T09:15:00Z`),
+          duration_minutes: 75,
+          operator: 'APTECH_AIRLINES',
+          is_bookable: true,
+          status: FlightStatus.SCHEDULED,
+          inventories: [{ _id: `i1_${dateStr}`, cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
+        },
+        {
+          _id: `f_DAD_${dateStr}`,
+          flight_number: `VN2_${dateStr}`,
+          origin_iata: 'DAD',
+          dest_iata: 'SGN',
+          departure_date: dateStr,
+          scheduled_departure: new Date(`${dateStr}T10:15:00Z`),
+          scheduled_arrival: new Date(`${dateStr}T11:30:00Z`),
+          duration_minutes: 75,
+          operator: 'APTECH_AIRLINES',
+          is_bookable: true,
+          status: FlightStatus.SCHEDULED,
+          inventories: [{ _id: `i2_${dateStr}`, cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
+        },
+      ];
+
+      const [han1, dad1] = makeFlights('2026-10-01');
+      const [han2, dad2] = makeFlights('2026-10-02');
+
       flightModel.find = jest.fn().mockImplementation((query: any) => {
-        if (query.origin_iata?.$in && query.dest_iata?.$in) {
-          return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
-        }
-        const isHan = query.origin_iata === 'HAN';
-        const flightNumber = isHan ? 'VN1_' : 'VN2_';
-        const depTimeStr = isHan ? '08:00:00Z' : '10:15:00Z';
-        const arrTimeStr = isHan ? '09:15:00Z' : '11:30:00Z';
-        const execFn = () =>
-          Promise.resolve([
-            {
-              _id: `f_${query.origin_iata}_2026-10-01`,
-              flight_number: `${flightNumber}2026-10-01`,
-              origin_iata: query.origin_iata,
-              dest_iata: query.dest_iata,
-              departure_date: '2026-10-01',
-              scheduled_departure: new Date(`2026-10-01T${depTimeStr}`),
-              scheduled_arrival: new Date(`2026-10-01T${arrTimeStr}`),
-              duration_minutes: 75,
-              inventories: [{ _id: 'i1', available_seats: 10, base_price: 500 }],
-            },
-            {
-              _id: `f_${query.origin_iata}_2026-10-02`,
-              flight_number: `${flightNumber}2026-10-02`,
-              origin_iata: query.origin_iata,
-              dest_iata: query.dest_iata,
-              departure_date: '2026-10-02',
-              scheduled_departure: new Date(`2026-10-02T${depTimeStr}`),
-              scheduled_arrival: new Date(`2026-10-02T${arrTimeStr}`),
-              duration_minutes: 75,
-              inventories: [{ _id: 'i2', available_seats: 10, base_price: 500 }],
-            },
-          ]);
-        return {
-          sort: () => ({ exec: execFn }),
-          exec: execFn,
-        };
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([han1, han2]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([dad1, dad2]) };
+        return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
       });
       flightModel.exec.mockResolvedValue([]);
 
@@ -984,6 +939,7 @@ describe('FlightsService', () => {
         include_connecting: true,
       } as any);
 
+      expect(mockGraph.findPaths).not.toHaveBeenCalled();
       expect(res.connecting_routes!.length).toBe(2);
       const dates = res.connecting_routes!.map((r: any) => r.departure_date);
       expect(dates).toContain('2026-10-01');
@@ -991,32 +947,8 @@ describe('FlightsService', () => {
     });
 
     it('Test K: Duplicate concrete leg combination is not returned twice after merging dates', async () => {
-      const mockGraph = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [{ route_type: 'ONE_STOP', stops: ['DAD'] }],
-          coverage: { complete: true },
-        }),
-      };
-
-      // Both dates return itineraries referencing the EXACT SAME concrete flight IDs
-      const mockValidator = {
-        validatePaths: jest.fn().mockImplementation((_graphRes: any, _dateStr: string) => ({
-          itineraries: [
-            {
-              route_type: 'ONE_STOP',
-              stops: ['DAD'],
-              total_duration_minutes: 200,
-              layover_minutes: [60],
-              legs: [
-                { flight_number: 'VN100', chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date('2026-10-01T08:00:00Z'), arr_datetime: new Date('2026-10-01T09:15:00Z') },
-                { flight_number: 'VN200', chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date('2026-10-01T10:15:00Z'), arr_datetime: new Date('2026-10-01T11:30:00Z') },
-              ],
-            },
-          ],
-          coverage: { complete: true },
-        })),
-      };
-
+      const mockGraph = { findPaths: jest.fn() };
+      const mockValidator = { validatePaths: jest.fn() };
       const svc = new FlightsService(
         flightModel,
         bookingModel,
@@ -1036,7 +968,10 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-01T08:00:00Z'),
         scheduled_arrival: new Date('2026-10-01T09:15:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'i1', available_seats: 10, base_price: 500 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i1', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
       };
       const f2 = {
         _id: 'f_same_2',
@@ -1047,12 +982,20 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-01T10:15:00Z'),
         scheduled_arrival: new Date('2026-10-01T11:30:00Z'),
         duration_minutes: 75,
-        inventories: [{ _id: 'i2', available_seats: 10, base_price: 500 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i2', cabin_class: CabinClass.ECONOMY, available_seats: 10, base_price: 500 }],
       };
 
       flightModel.find = jest.fn().mockImplementation((query: any) => {
-        if (query.origin_iata === 'HAN') return { exec: () => Promise.resolve([f1]) };
-        if (query.origin_iata === 'DAD') return { exec: () => Promise.resolve([f2]) };
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f1]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f2]) };
         return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
       });
       flightModel.exec.mockResolvedValue([]);
@@ -1065,37 +1008,13 @@ describe('FlightsService', () => {
         include_connecting: true,
       } as any);
 
+      expect(mockGraph.findPaths).not.toHaveBeenCalled();
       expect(res.connecting_routes!.length).toBe(1);
     });
 
     it('Test L: Overnight connection: first leg in range, second leg leaves after midnight -> accepted', async () => {
-      const mockGraph = {
-        findPaths: jest.fn().mockResolvedValue({
-          paths: [{ route_type: 'ONE_STOP', stops: ['DAD'] }],
-          coverage: { complete: true },
-        }),
-      };
-
-      // Leg 1: dep 2026-10-01 22:00, arr 23:30.
-      // Leg 2: dep 2026-10-02 01:30 (overnight next day, layover 120 mins).
-      const mockValidator = {
-        validatePaths: jest.fn().mockReturnValue({
-          itineraries: [
-            {
-              route_type: 'ONE_STOP',
-              stops: ['DAD'],
-              total_duration_minutes: 270,
-              layover_minutes: [120],
-              legs: [
-                { flight_number: 'VN_NIGHT1', chronology_basis: 'UTC', dep_iata: 'HAN', arr_iata: 'DAD', dep_datetime: new Date('2026-10-01T22:00:00Z'), arr_datetime: new Date('2026-10-01T23:30:00Z') },
-                { flight_number: 'VN_NIGHT2', chronology_basis: 'UTC', dep_iata: 'DAD', arr_iata: 'SGN', dep_datetime: new Date('2026-10-02T01:30:00Z'), arr_datetime: new Date('2026-10-02T03:00:00Z') },
-              ],
-            },
-          ],
-          coverage: { complete: true },
-        }),
-      };
-
+      const mockGraph = { findPaths: jest.fn() };
+      const mockValidator = { validatePaths: jest.fn() };
       const svc = new FlightsService(
         flightModel,
         bookingModel,
@@ -1115,7 +1034,10 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-01T22:00:00Z'),
         scheduled_arrival: new Date('2026-10-01T23:30:00Z'),
         duration_minutes: 90,
-        inventories: [{ _id: 'i1', available_seats: 5, base_price: 500 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i1', cabin_class: CabinClass.ECONOMY, available_seats: 5, base_price: 500 }],
       };
       const f2 = {
         _id: 'fn2',
@@ -1126,12 +1048,20 @@ describe('FlightsService', () => {
         scheduled_departure: new Date('2026-10-02T01:30:00Z'),
         scheduled_arrival: new Date('2026-10-02T03:00:00Z'),
         duration_minutes: 90,
-        inventories: [{ _id: 'i2', available_seats: 5, base_price: 600 }],
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'i2', cabin_class: CabinClass.ECONOMY, available_seats: 5, base_price: 600 }],
       };
 
       flightModel.find = jest.fn().mockImplementation((query: any) => {
-        if (query.origin_iata === 'HAN') return { exec: () => Promise.resolve([f1]) };
-        if (query.origin_iata === 'DAD') return { exec: () => Promise.resolve([f2]) };
+        const origins = Array.isArray(query.origin_iata?.$in)
+          ? query.origin_iata.$in
+          : typeof query.origin_iata === 'string'
+            ? [query.origin_iata]
+            : [];
+        if (origins.includes('HAN')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f1]) };
+        if (origins.includes('DAD')) return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([f2]) };
         return { sort: () => ({ exec: () => Promise.resolve([]) }), exec: () => Promise.resolve([]) };
       });
       flightModel.exec.mockResolvedValue([]);
@@ -1144,6 +1074,7 @@ describe('FlightsService', () => {
         include_connecting: true,
       } as any);
 
+      expect(mockGraph.findPaths).not.toHaveBeenCalled();
       expect(res.connecting_routes!.length).toBe(1);
       expect(res.connecting_routes![0].layover_minutes).toBe(120);
       expect(res.connecting_routes![0].legs[0].departure_date).toBe('2026-10-01');

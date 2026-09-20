@@ -20,14 +20,20 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               <app-icon name="plane" class="w-5 h-5 text-navy" />
             </div>
             <div>
-              <span class="font-bold text-white tracking-wider text-sm block">APTECH ADMIN</span>
-              <span class="text-[10px] text-amber-400 font-mono">{{ lang.isVietnamese() ? 'Quản Trị Hàng Không' : 'Aviation Administration' }}</span>
+              <span class="font-bold text-white tracking-wider text-sm block">
+                {{ auth.isClerk() ? 'APTECH DESK' : 'APTECH ADMIN' }}
+              </span>
+              <span class="text-[10px] text-amber-400 font-mono">
+                {{ auth.isClerk()
+                  ? (lang.isVietnamese() ? 'Bàn Làm Việc Nhân Viên' : 'Staff Console')
+                  : (lang.isVietnamese() ? 'Quản Trị Hàng Không' : 'Aviation Administration') }}
+              </span>
             </div>
           </div>
 
           <button
             (click)="sidebarOpen.set(!sidebarOpen())"
-            class="md:hidden text-slate-400 hover:text-white"
+            class="md:hidden text-slate-400 hover:text-white inline-flex items-center justify-center"
           >
             <app-icon [name]="sidebarOpen() ? 'x' : 'slidershorizontal'" class="w-5 h-5" />
           </button>
@@ -48,31 +54,14 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             <span>{{ lang.t('admin.dashboard') }}</span>
           </a>
 
+          <!-- Operational Staff Links: Reservation Desk & Bookings -->
           <a
-            routerLink="/admin/flights"
+            routerLink="/admin/reservation-desk"
             routerLinkActive="bg-gold text-navy font-bold shadow-md"
             class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
           >
-            <app-icon name="plane" class="w-4 h-4" />
-            <span>{{ lang.t('admin.flights') }}</span>
-          </a>
-
-          <a
-            routerLink="/admin/airlabs-sync"
-            routerLinkActive="bg-gold text-navy font-bold shadow-md"
-            class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
-          >
-            <app-icon name="refreshcw" class="w-4 h-4" />
-            <span>{{ lang.t('admin.airlabs') }}</span>
-          </a>
-
-          <a
-            routerLink="/admin/airports"
-            routerLinkActive="bg-gold text-navy font-bold shadow-md"
-            class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
-          >
-            <app-icon name="mappin" class="w-4 h-4" />
-            <span>{{ lang.t('admin.airports') }}</span>
+            <app-icon name="usercheck" class="w-4 h-4" />
+            <span>{{ lang.t('admin.reservationDesk') }}</span>
           </a>
 
           <a
@@ -85,29 +74,77 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           </a>
 
           <a
-            routerLink="/admin/users"
+            routerLink="/admin/seat-operations"
             routerLinkActive="bg-gold text-navy font-bold shadow-md"
             class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
           >
-            <app-icon name="users" class="w-4 h-4" />
-            <span>{{ lang.t('admin.users') }}</span>
+            <app-icon name="armchair" class="w-4 h-4" />
+            <span>{{ lang.t('admin.seatOperations') }}</span>
           </a>
 
-          <a
-            routerLink="/admin/policies"
-            routerLinkActive="bg-gold text-navy font-bold shadow-md"
-            class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
-          >
-            <app-icon name="shieldcheck" class="w-4 h-4" />
-            <span>{{ lang.t('admin.policies') }}</span>
-          </a>
+          <!-- Admin Management Links (ADMIN & SUPER_ADMIN only) -->
+          @if (auth.isAdmin()) {
+            <a
+              routerLink="/admin/flights"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="plane" class="w-4 h-4" />
+              <span>{{ lang.t('admin.flights') }}</span>
+            </a>
+
+            <a
+              routerLink="/admin/seat-pricing"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="tag" class="w-4 h-4" />
+              <span>{{ lang.t('admin.seatPricing') }}</span>
+            </a>
+
+            <a
+              routerLink="/admin/airlabs-sync"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="refreshcw" class="w-4 h-4" />
+              <span>{{ lang.t('admin.airlabs') }}</span>
+            </a>
+
+            <a
+              routerLink="/admin/airports"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="mappin" class="w-4 h-4" />
+              <span>{{ lang.t('admin.airports') }}</span>
+            </a>
+
+            <a
+              routerLink="/admin/users"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="users" class="w-4 h-4" />
+              <span>{{ lang.t('admin.users') }}</span>
+            </a>
+
+            <a
+              routerLink="/admin/policies"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="shieldcheck" class="w-4 h-4" />
+              <span>{{ lang.t('admin.policies') }}</span>
+            </a>
+          }
         </nav>
 
         <!-- Sidebar Bottom Footer -->
         <div class="p-4 border-t border-navy-light/40 space-y-2">
           <a
             routerLink="/"
-            class="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-gold transition-colors"
+            class="w-full inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-gold transition-colors whitespace-nowrap"
           >
             <app-icon name="arrowright" class="w-4 h-4 rotate-180" />
             <span>{{ lang.t('admin.backClient') }}</span>
@@ -115,7 +152,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
 
           <button
             (click)="auth.logout()"
-            class="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-900/30 transition-colors"
+            class="w-full inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-900/30 transition-colors whitespace-nowrap"
           >
             <app-icon name="logout" class="w-4 h-4" />
             <span>{{ lang.t('nav.logout') }}</span>
@@ -135,7 +172,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             <button
               type="button"
               (click)="lang.toggleLang()"
-              class="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1.5"
+              class="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
               [title]="lang.isVietnamese() ? 'Chuyển sang Tiếng Anh' : 'Switch to Vietnamese'"
             >
               <!-- GUI Standards: 100% icon vector Lucide, không dùng emoji -->

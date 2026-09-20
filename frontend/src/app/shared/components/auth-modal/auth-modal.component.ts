@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../../core/services/auth.service';
 import { LanguageService } from '../../../core/services/language.service';
 import { ToastService } from '../../services/toast.service';
+import { AuthModalMode } from '../../services/auth-modal.service';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
@@ -61,7 +62,7 @@ import { IconComponent } from '../icon/icon.component';
                 <div>
                   <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabel') }}</label>
                   <div class="relative">
-                    <app-icon name="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                    <app-icon name="user" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
                       [(ngModel)]="loginUsername"
@@ -76,7 +77,7 @@ import { IconComponent } from '../icon/icon.component';
                 <div>
                   <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.passwordLabel') }}</label>
                   <div class="relative">
-                    <app-icon name="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                    <app-icon name="lock" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="password"
                       [(ngModel)]="loginPassword"
@@ -99,153 +100,160 @@ import { IconComponent } from '../icon/icon.component';
                     <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
                     <span>{{ lang.t('common.loading') }}</span>
                   } @else {
-                    <app-icon name="logout" class="w-4 h-4 rotate-180" />
-                    <span>{{ lang.t('nav.login') }}</span>
+                    <app-icon name="login" class="w-4 h-4" />
+                    <span>{{ lang.t('auth.submitLogin') }}</span>
                   }
                 </button>
               </form>
             } @else {
               <!-- Register Form -->
-              <form (ngSubmit)="handleRegister()" class="space-y-3">
-                <div class="grid grid-cols-2 gap-2">
+              <form (ngSubmit)="handleRegister()" class="space-y-3.5">
+                <div class="grid grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('booking.lastName') }}</label>
-                    <input
-                      type="text"
-                      [(ngModel)]="regLastName"
-                      name="lastName"
-                      required
-                      [placeholder]="lang.t('auth.lastNamePlaceholder')"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('booking.firstName') }}</label>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.firstNameLabel') }} *</label>
                     <input
                       type="text"
                       [(ngModel)]="regFirstName"
                       name="firstName"
                       required
                       [placeholder]="lang.t('auth.firstNamePlaceholder')"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.lastNameLabel') }} *</label>
+                    <input
+                      type="text"
+                      [(ngModel)]="regLastName"
+                      name="lastName"
+                      required
+                      [placeholder]="lang.t('auth.lastNamePlaceholder')"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabelOnly') }}</label>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.usernameLabel') }} *</label>
+                  <div class="relative">
+                    <app-icon name="user" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
                       [(ngModel)]="regUsername"
-                      name="username"
+                      name="regUsername"
                       required
-                      placeholder="nguyenvanan"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                      [placeholder]="lang.t('auth.usernamePlaceholder')"
+                      class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">Email</label>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.emailLabel') }} *</label>
+                  <div class="relative">
+                    <app-icon name="mail" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="email"
                       [(ngModel)]="regEmail"
-                      name="email"
+                      name="regEmail"
                       required
-                      placeholder="an.nguyen@example.com"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                      [placeholder]="lang.t('auth.emailPlaceholder')"
+                      class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.passwordLabelOnly') }}</label>
-                  <input
-                    type="password"
-                    [(ngModel)]="regPassword"
-                    name="password"
-                    required
-                    [placeholder]="lang.t('auth.passwordMin')"
-                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                  />
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.passwordLabel') }} *</label>
+                  <div class="relative">
+                    <app-icon name="lock" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="password"
+                      [(ngModel)]="regPassword"
+                      name="regPassword"
+                      required
+                      [placeholder]="lang.t('auth.passwordPlaceholder')"
+                      class="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
+                    />
+                  </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.phone') }}</label>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.phoneLabel') }} *</label>
                     <input
                       type="tel"
                       [(ngModel)]="regPhone"
-                      name="phone"
+                      name="regPhone"
                       required
-                      placeholder="0912345678"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                      [placeholder]="lang.t('auth.phonePlaceholder')"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                   <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.sex') }}</label>
-                    <select
-                      [(ngModel)]="regSex"
-                      name="sex"
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.ageLabel') }} *</label>
+                    <input
+                      type="number"
+                      [(ngModel)]="regAge"
+                      name="regAge"
                       required
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                    >
-                      <option value="MALE">{{ lang.t('profile.male') }}</option>
-                      <option value="FEMALE">{{ lang.t('profile.female') }}</option>
-                      <option value="OTHER">{{ lang.t('profile.other') }}</option>
-                    </select>
+                      min="1"
+                      max="120"
+                      [placeholder]="lang.t('auth.agePlaceholder')"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
+                    />
                   </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-2">
+                <div class="grid grid-cols-2 gap-3">
                   <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.age') }}</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      [(ngModel)]="regAge"
-                      name="age"
-                      required
-                      placeholder="25"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                    />
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.genderLabel') }}</label>
+                    <select
+                      [(ngModel)]="regSex"
+                      name="regSex"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
+                    >
+                      <option value="MALE">{{ lang.t('auth.genderMale') }}</option>
+                      <option value="FEMALE">{{ lang.t('auth.genderFemale') }}</option>
+                      <option value="OTHER">{{ lang.t('auth.genderOther') }}</option>
+                    </select>
                   </div>
                   <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.creditCard') }}</label>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.preferredCardLabel') }} *</label>
                     <input
                       type="text"
                       [(ngModel)]="regCard"
-                      name="creditCard"
+                      name="regCard"
                       required
-                      placeholder="1234 5678 9012 3456"
-                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                      [placeholder]="lang.t('auth.preferredCardPlaceholder')"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('profile.address') }}</label>
+                  <label class="block text-xs font-semibold text-slate-600 mb-1">{{ lang.t('auth.addressLabel') }} *</label>
                   <input
                     type="text"
                     [(ngModel)]="regAddress"
-                    name="address"
+                    name="regAddress"
                     required
-                    [placeholder]="lang.t('profile.addressPlaceholder')"
-                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    [placeholder]="lang.t('auth.addressPlaceholder')"
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-gold/50 focus:border-gold transition-all"
                   />
                 </div>
 
                 <button
                   type="submit"
                   [disabled]="loading()"
-                  class="btn-gold w-full mt-3"
+                  class="btn-gold w-full mt-3 !py-2.5 text-xs font-bold"
                 >
                   @if (loading()) {
                     <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
                     <span>{{ lang.t('common.loading') }}</span>
                   } @else {
-                    <app-icon name="usercheck" class="w-4 h-4" />
-                    <span>{{ lang.t('nav.register') }}</span>
+                    <app-icon name="userplus" class="w-4 h-4" />
+                    <span>{{ lang.t('auth.submitRegister') }}</span>
                   }
                 </button>
               </form>
@@ -258,6 +266,7 @@ import { IconComponent } from '../icon/icon.component';
 })
 export class AuthModalComponent implements OnChanges {
   @Input() isOpen = false;
+  @Input() mode: AuthModalMode = 'LOGIN';
   @Output() closeEvent = new EventEmitter<void>();
 
   readonly auth = inject(AuthService);
@@ -287,12 +296,14 @@ export class AuthModalComponent implements OnChanges {
     if (changes['isOpen']?.currentValue === true && !changes['isOpen']?.previousValue) {
       this.resetForm();
       this.focusFirstInput();
+    } else if (changes['mode'] && changes['mode'].currentValue) {
+      this.isRegister.set(changes['mode'].currentValue === 'REGISTER');
     }
   }
 
-  // Clear form state to prevent stale credentials or tab selection from persisting
+  // Clear form state to prevent stale credentials while respecting requested mode
   private resetForm(): void {
-    this.isRegister.set(false);
+    this.isRegister.set(this.mode === 'REGISTER');
     this.loginUsername = '';
     this.loginPassword = '';
     this.regUsername = '';
@@ -358,6 +369,49 @@ export class AuthModalComponent implements OnChanges {
       !this.regCard?.trim()
     ) {
       this.toast.warning(this.lang.t('auth.registerEmpty'));
+      return;
+    }
+
+    // Requirement 1.3.4: Password length >= 6
+    if (this.regPassword.length < 6) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Mật khẩu phải có ít nhất 6 ký tự'
+          : 'Password must be at least 6 characters',
+      );
+      return;
+    }
+
+    // Requirement 1.3.4: Valid email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(this.regEmail.trim())) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Địa chỉ email không đúng định dạng'
+          : 'Invalid email address format',
+      );
+      return;
+    }
+
+    // Requirement 1.3.4: Valid phone number format
+    const phoneRegex = /^(?=(?:\D*\d){7,15}\D*$)\+?[0-9\s().-]+$/;
+    if (!phoneRegex.test(this.regPhone.trim())) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Số điện thoại không hợp lệ (cần từ 7–15 chữ số)'
+          : 'Invalid phone number (7–15 digits required)',
+      );
+      return;
+    }
+
+    // Requirement 1.3.4: Valid credit card format
+    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
+    if (!cardRegex.test(this.regCard.trim())) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)'
+          : 'Invalid credit card number (12–19 digits required)',
+      );
       return;
     }
 

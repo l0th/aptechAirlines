@@ -21,6 +21,8 @@ out/
 mongo-data/
 *.db
 *.sqlite
+data/
+backend/data/
 
 # IDE & Editor configs
 .idea/

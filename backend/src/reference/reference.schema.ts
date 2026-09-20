@@ -47,6 +47,11 @@ export class City {
 }
 export const CitySchema = SchemaFactory.createForClass(City);
 
+export enum RouteSource {
+  APTECH_INTERNAL = 'aptech_internal',
+  AIRLABS = 'airlabs',
+}
+
 export type RouteRefDocument = RouteRef & Document;
 @Schema({ timestamps: true, autoIndex: false })
 export class RouteRef {
@@ -119,7 +124,7 @@ export class RouteRef {
   @Prop({ default: false })
   has_schedule?: boolean;
 
-  @Prop({ default: 'airlabs' })
+  @Prop({ default: 'aptech_internal' })
   source?: string;
 
   @Prop({ default: Date.now })
@@ -135,13 +140,14 @@ export const RouteRefSchema = SchemaFactory.createForClass(RouteRef);
 RouteRefSchema.set('autoIndex', false);
 RouteRefSchema.index({ source_key: 1 }, { unique: true, sparse: true });
 RouteRefSchema.index({ dep_iata: 1, arr_iata: 1 });
+RouteRefSchema.index({ source: 1, dep_iata: 1, arr_iata: 1 });
 RouteRefSchema.index({ dep_iata: 1, synced_at: 1 });
 RouteRefSchema.index({ dep_iata: 1, sync_generation: 1 });
 
 export type RouteSyncStateDocument = RouteSyncState & Document;
 @Schema({ timestamps: true })
 export class RouteSyncState {
-  @Prop({ required: true, unique: true, uppercase: true, trim: true })
+  @Prop({ required: true, uppercase: true, trim: true })
   dep_iata: string;
 
   @Prop({ default: 'airlabs' })
@@ -175,3 +181,4 @@ export class RouteSyncState {
   last_error?: string;
 }
 export const RouteSyncStateSchema = SchemaFactory.createForClass(RouteSyncState);
+RouteSyncStateSchema.index({ dep_iata: 1, source: 1 }, { unique: true });

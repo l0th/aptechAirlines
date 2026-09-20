@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Types } from 'mongoose';
 import { BookingsService } from './bookings.service';
 import { getModelToken } from '@nestjs/mongoose';
 import { Booking } from './bookings.schema';
@@ -9,6 +10,9 @@ import { BadRequestException, ForbiddenException, InternalServerErrorException }
 import { BookingStatus, BookingType, PassengerType } from './bookings.schema';
 import { UserRole } from '../users/users.schema';
 import { getBookingWindowLimits } from '../common/pricing.util';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { PassengerInputDto } from './bookings.dto';
 
 describe('BookingsService', () => {
   let service: BookingsService;
@@ -25,12 +29,14 @@ describe('BookingsService', () => {
       };
     };
     bookingModel.findOne = jest.fn().mockReturnThis();
+    bookingModel.updateOne = jest.fn().mockResolvedValue({ acknowledged: true });
     bookingModel.exec = jest.fn();
 
     flightsService = {
       findById: jest.fn(),
       reserveSeats: jest.fn(),
       updateAvailableSeats: jest.fn(),
+      restoreSeatsWithSaga: jest.fn().mockResolvedValue(true),
     };
 
     usersService = {
@@ -752,12 +758,20 @@ describe('BookingsService', () => {
         passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'A', last_name: 'B' }],
         booking_type: 'ONE_WAY',
         ticket_coupons: [{ leg_type: 'OUTBOUND', flight_id: 'f1', inventory_id: 'i1', fare_paid: 100, seat_code: '1A' }],
-        payment_transactions: [],
+        payment_transactions: [
+          {
+            transaction_type: 'PAYMENT',
+            amount: 100,
+            card_masked: '**** **** **** 4242',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          },
+        ],
         save: jest.fn(),
       };
       bookingModel.exec.mockResolvedValue(mockBooking);
 
-      mockUser = { _id: 'user1', sky_miles: 5000 };
+      mockUser = { _id: 'user1', sky_miles: 5000, preferred_credit_card: '4111222233334242' };
       usersService.findById.mockResolvedValue(mockUser);
       usersService.setSkyMiles = jest.fn().mockResolvedValue(mockUser);
 
@@ -845,15 +859,17 @@ describe('BookingsService', () => {
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 1);
     });
 
-    it('4. booking.save fails -> old seats restored (restoreSeatsForCouponsStrict called, which calls updateAvailableSeats with -passengerCount ONCE per unique leg)', async () => {
+    it('4. booking.save fails -> old seats untouched because old seats are never released pre-commit', async () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
       await expect(
         service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
-      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', -1);
+      const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
+      expect(oldSeatCalls.length).toBe(0);
+      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 1);
     });
 
-    it('5. 2 passengers, 2 coupons same leg, save fails -> rollback restores -2 exactly ONCE (not -2 twice = -4)', async () => {
+    it('5. 2 passengers, 2 coupons same leg, save fails -> old seats untouched, new seats released for all passengers', async () => {
       mockBooking.passengers.push({ passenger_type: PassengerType.ADULT, first_name: 'C', last_name: 'D' });
       mockBooking.ticket_coupons.push({ leg_type: 'OUTBOUND', flight_id: 'f1', inventory_id: 'i1', fare_paid: 100, seat_code: '1B' });
       mockBooking.save.mockRejectedValue(new Error('DB error'));
@@ -862,9 +878,9 @@ describe('BookingsService', () => {
         service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
 
-      const restoreCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1' && c[1] === 'i1' && c[2] < 0);
-      expect(restoreCalls.length).toBe(1);
-      expect(restoreCalls[0]).toEqual(['f1', 'i1', -2]);
+      const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
+      expect(oldSeatCalls.length).toBe(0);
+      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 2);
     });
 
     it('6. SkyMiles positive delta (one-way longer distance) -> addSkyMiles called with correct delta', async () => {
@@ -1195,8 +1211,8 @@ describe('BookingsService', () => {
       expect(res.booking.status).toBe(BookingStatus.CONFIRMED);
       expect(flightsService.reserveSeats).toHaveBeenCalledWith('f_new1', 'inv_new1', 1);
       expect(flightsService.reserveSeats).toHaveBeenCalledWith('f_new2', 'inv_new2', 1);
-      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1);
-      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 1);
+      expect(flightsService.restoreSeatsWithSaga).toHaveBeenCalledWith('f1', 'i1', 1, expect.any(Object));
+      expect(flightsService.restoreSeatsWithSaga).toHaveBeenCalledWith('f2', 'i2', 1, expect.any(Object));
       expect(res.message).toContain('Đổi vé nối chuyến thành công');
       expect(res.booking.total_miles_accrued).toBe(1000);
     });
@@ -1381,10 +1397,9 @@ describe('BookingsService', () => {
         ],
       } as any)).rejects.toThrow('booking write failed');
 
-      for (const call of [['f1', 'i1', 1], ['f2', 'i2', 1], ['f1', 'i1', -1], ['f2', 'i2', -1], ['n1', 'ni1', 1], ['n2', 'ni2', 1]]) {
-        expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith(...call);
-      }
-      expect(flightsService.updateAvailableSeats).toHaveBeenCalledTimes(6);
+      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('n1', 'ni1', 1);
+      expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('n2', 'ni2', 1);
+      expect(flightsService.updateAvailableSeats).toHaveBeenCalledTimes(2);
       expect(mockBooking.ticket_coupons.map((coupon: any) => coupon.flight_id)).toEqual(['f1', 'f2']);
     });
 
@@ -1606,13 +1621,12 @@ describe('BookingsService', () => {
       // SkyMiles restored
       expect(usersService.setSkyMiles).toHaveBeenCalledWith('user1', 5000);
 
-      // Exact seat mutations: old outbound restored (f1/i1, f2/i2), new legs released (n1/ni1, n2/ni2)
+      // Exact seat mutations: old outbound untouched (not released pre-commit), new legs released (n1/ni1, n2/ni2)
       // Return (f3/i3) unchanged direction should NOT be adjusted
       const seatCalls = flightsService.updateAvailableSeats.mock.calls;
       const seatCallArgs = seatCalls.map((c: any) => `${c[0]}/${c[1]}/${c[2] > 0 ? '+' : '-'}${Math.abs(c[2])}`);
-      // Old outbound restored (positive = re-reserve seats for old coupons)
-      expect(seatCallArgs).toContainEqual(expect.stringContaining('f1/i1'));
-      expect(seatCallArgs).toContainEqual(expect.stringContaining('f2/i2'));
+      // Old outbound was never touched pre-commit
+      expect(seatCallArgs.filter((s: string) => s.includes('f1/i1') || s.includes('f2/i2'))).toHaveLength(0);
       // New legs released (positive = release reserved seats)
       expect(seatCallArgs).toContainEqual(expect.stringContaining('n1/ni1'));
       expect(seatCallArgs).toContainEqual(expect.stringContaining('n2/ni2'));
@@ -1990,6 +2004,35 @@ describe('BookingsService', () => {
       expect(res).toBeDefined();
       expect(res.booking.status).toBe(BookingStatus.CONFIRMED);
       expect(flightsService.reserveSeats).toHaveBeenCalledWith('f_valid', 'i_val', 1);
+    });
+
+    it('46. reschedule charge with priceDiff > 0 and no card -> rejects with BadRequestException', async () => {
+      mockUser.preferred_credit_card = undefined;
+      await expect(
+        service.rescheduleTicket({
+          confirmation_number: 'CNF',
+          new_flight_id: 'f2',
+          new_inventory_id: 'i2',
+        } as any),
+      ).rejects.toThrow('Payment card is required for reschedule fare difference.');
+    });
+
+    it('47. reschedule refund with priceDiff < 0 -> uses original payment card_masked as destination', async () => {
+      flightsService.findById.mockImplementation((id: string) => {
+        if (id === 'f1') return Promise.resolve(F1());
+        return Promise.resolve(mkFlight('f2', 'FL2', 500, futureDate, futureArrival, 'SGN', 'HAN', [{ _id: 'i2', id: 'i2', available_seats: 10, base_price: 50 }]));
+      });
+      mockBooking.total_amount = 200;
+      const res = await service.rescheduleTicket({
+        confirmation_number: 'CNF',
+        new_flight_id: 'f2',
+        new_inventory_id: 'i2',
+      } as any);
+
+      expect(res.price_difference).toBeLessThan(0);
+      const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'RESCHEDULE_REFUND');
+      expect(refundTx).toBeDefined();
+      expect(refundTx.card_masked).toBe('**** **** **** 4242');
     });
   });
 
@@ -2434,10 +2477,150 @@ describe('BookingsService', () => {
         );
       });
 
+      it('Section 3.9 security: rejects customer A trying to track or manage customer B booking by cancellation_number', async () => {
+        mockBooking.user_id = 'customerB';
+        mockBooking.cancellation_number = 'CAN-123456';
+        bookingModel.exec.mockResolvedValueOnce(mockBooking);
+
+        await expect(
+          service.assertOwnership('CAN-123456', 'customerA', UserRole.CUSTOMER),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(bookingModel.findOne).toHaveBeenCalledWith({
+          $or: [
+            { blocking_number: 'CAN-123456' },
+            { confirmation_number: 'CAN-123456' },
+            { pnr_code: 'CAN-123456' },
+            { cancellation_number: 'CAN-123456' },
+          ],
+        });
+      });
+
+      it('Section 3.9 security: allows owner to track their own cancelled booking by cancellation_number', async () => {
+        mockBooking.user_id = 'customerA';
+        mockBooking.cancellation_number = 'CAN-123456';
+        bookingModel.exec.mockResolvedValueOnce(mockBooking);
+
+        await expect(
+          service.assertOwnership('CAN-123456', 'customerA', UserRole.CUSTOMER),
+        ).resolves.toBeUndefined();
+      });
+
+      it('Section 3.9 security: allows staff roles (CLERK, ADMIN, SUPER_ADMIN) to bypass ownership by cancellation_number', async () => {
+        mockBooking.user_id = 'customerB';
+        mockBooking.cancellation_number = 'CAN-123456';
+
+        await expect(
+          service.assertOwnership('CAN-123456', 'clerk-user', UserRole.CLERK),
+        ).resolves.toBeUndefined();
+        await expect(
+          service.assertOwnership('CAN-123456', 'admin-user', UserRole.ADMIN),
+        ).resolves.toBeUndefined();
+        await expect(
+          service.assertOwnership('CAN-123456', 'superadmin-user', UserRole.SUPER_ADMIN),
+        ).resolves.toBeUndefined();
+      });
+
       it('allows unknown booking through assertOwnership so service layer raises NotFoundException', async () => {
         bookingModel.exec.mockResolvedValueOnce(null);
         await expect(service.assertOwnership('NONEXISTENT', 'user1', UserRole.CUSTOMER)).resolves.toBeUndefined();
       });
+    });
+  });
+
+  describe('findAll (My Trips / customer queries)', () => {
+    it('filters bookings by userId when provided', async () => {
+      const mockChain = {
+        sort: jest.fn().mockReturnThis(),
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([{ _id: 'b1', pnr_code: 'PNR1' }]),
+      };
+      bookingModel.find = jest.fn().mockReturnValueOnce(mockChain);
+
+      const validId = '507f1f77bcf86cd799439011';
+      const result = await service.findAll(undefined, validId);
+
+      expect(bookingModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: new Types.ObjectId(validId) }),
+      );
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('PassengerInputDto date_of_birth validation (Requirement 1.3.4)', () => {
+    const basePassenger = {
+      first_name: 'Nguyen',
+      last_name: 'Van An',
+      passenger_type: PassengerType.ADULT,
+    };
+
+    it('DOB omitted -> valid', async () => {
+      const dto = plainToInstance(PassengerInputDto, { ...basePassenger });
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+
+    it('DOB empty string -> valid (optional field)', async () => {
+      const dto = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '' });
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+
+    it('valid DOB -> valid', async () => {
+      const dto = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '1995-05-20' });
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+
+    it('malformed format -> rejected', async () => {
+      const dto1 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: 'not-a-date' });
+      const errors1 = await validate(dto1);
+      expect(errors1.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      const dto2 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '1995/05/20' });
+      const errors2 = await validate(dto2);
+      expect(errors2.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      const dto3 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '1995-5-20' });
+      const errors3 = await validate(dto3);
+      expect(errors3.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+    });
+
+    it('impossible date -> rejected', async () => {
+      // 2026-02-30 (February 30th does not exist)
+      const dto1 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '2026-02-30' });
+      const errors1 = await validate(dto1);
+      expect(errors1.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      // 2023-02-29 (2023 is not a leap year)
+      const dto2 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '2023-02-29' });
+      const errors2 = await validate(dto2);
+      expect(errors2.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      // 2026-04-31 (April has only 30 days)
+      const dto3 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '2026-04-31' });
+      const errors3 = await validate(dto3);
+      expect(errors3.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      // Invalid month
+      const dto4 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '2026-13-10' });
+      const errors4 = await validate(dto4);
+      expect(errors4.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+    });
+
+    it('future date -> rejected', async () => {
+      // Future year
+      const dto1 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: '2099-01-01' });
+      const errors1 = await validate(dto1);
+      expect(errors1.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
+
+      // Tomorrow / future date
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 2);
+      const futureStr = tomorrow.toISOString().slice(0, 10);
+      const dto2 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: futureStr });
+      const errors2 = await validate(dto2);
+      expect(errors2.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
     });
   });
 });

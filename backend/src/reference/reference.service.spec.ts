@@ -39,13 +39,19 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
     };
 
     countryModel = {
-      find: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+      find: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
       findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
       findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
     };
 
     cityModel = {
-      find: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+      find: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }),
+        exec: jest.fn().mockResolvedValue([]),
+      }),
       findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
       findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) }),
     };
@@ -1267,6 +1273,154 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
       expect(res.matched_kind).toBe('none');
       expect(res.using_nearest_airport).toBe(false);
       expect(res.nearest_suggestion).toBeUndefined();
+    });
+
+    it('Country expansion with includeUnserviced: true returns all reference airports (serviced + unserviced)', async () => {
+      airportModel.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(null) });
+      countryModel.findOne.mockImplementation((q: any) => {
+        const matchesUSA = q.$or?.some((cond: any) => cond.code === 'USA' || cond.code3 === 'USA');
+        if (matchesUSA) {
+          return { exec: jest.fn().mockResolvedValue({ code: 'US', code3: 'USA', name: 'United States', name_vi: 'Mỹ' }) };
+        }
+        return { exec: jest.fn().mockResolvedValue(null) };
+      });
+
+      airportModel.find.mockImplementation((filter: any) => {
+        if (filter.country_code === 'US') {
+          if (filter.is_serviced_directly === true) {
+            // Only serviced airports
+            return {
+              exec: jest.fn().mockResolvedValue([
+                { iata_code: 'LAX', is_serviced_directly: true },
+                { iata_code: 'SFO', is_serviced_directly: true },
+                { iata_code: 'JFK', is_serviced_directly: true },
+              ]),
+            };
+          }
+          // All reference airports including unserviced
+          return {
+            exec: jest.fn().mockResolvedValue([
+              { iata_code: 'LAX', is_serviced_directly: true },
+              { iata_code: 'SFO', is_serviced_directly: true },
+              { iata_code: 'JFK', is_serviced_directly: true },
+              { iata_code: 'ORD', is_serviced_directly: false },
+              { iata_code: 'SEA', is_serviced_directly: false },
+            ]),
+          };
+        }
+        return { exec: jest.fn().mockResolvedValue([]) };
+      });
+
+      // Regular concrete search (no option / default)
+      const concreteRes = await service.expandLocation('USA');
+      expect(concreteRes.iata_codes).toEqual(['LAX', 'SFO', 'JFK']);
+      expect(concreteRes.matched_kind).toBe('country');
+
+      // Network discovery with includeUnserviced: true
+      const networkRes = await service.expandLocation('USA', { includeUnserviced: true });
+      expect(networkRes.iata_codes).toEqual(['LAX', 'SFO', 'JFK', 'ORD', 'SEA']);
+      expect(networkRes.matched_kind).toBe('country');
+    });
+  });
+
+  describe('10. Global Autocomplete with Unserved Reference Airports & Internal Source Isolation', () => {
+    it('suggest() returns both serviced and unserved airports, exposing nearest hub info and VI/EN labels', async () => {
+      const mockAirports = [
+        {
+          iata_code: 'HOI',
+          airport_name: 'Hoi An Heliport',
+          city_name: 'Hoi An',
+          country_code: 'VN',
+          time_zone: 'Asia/Ho_Chi_Minh',
+          is_serviced_directly: false,
+          nearest_airport_code: 'DAD',
+          distance_to_nearest_km: 30,
+        },
+        {
+          iata_code: 'DAD',
+          airport_name: 'Da Nang International Airport',
+          city_name: 'Da Nang',
+          country_code: 'VN',
+          time_zone: 'Asia/Ho_Chi_Minh',
+          is_serviced_directly: true,
+          nearest_airport_code: '',
+          distance_to_nearest_km: 0,
+        },
+      ];
+
+      airportModel.find.mockImplementation(() => ({
+        limit: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue(mockAirports),
+        }),
+        exec: jest.fn().mockResolvedValue(mockAirports),
+      }));
+
+      const res = await service.suggest('Hoi An');
+      expect(res.airports.length).toBe(2);
+
+      // Directly serviced DAD should be ranked before unserviced HOI
+      expect(res.airports[0].iata_code).toBe('DAD');
+      expect(res.airports[0].is_serviced_directly).toBe(true);
+
+      // Unserviced HOI is present, clearly exposed as not directly serviced, with nearest info
+      const hoi = res.airports.find((a) => a.iata_code === 'HOI');
+      expect(hoi).toBeDefined();
+      expect(hoi!.is_serviced_directly).toBe(false);
+      expect(hoi!.nearest_airport_code).toBe('DAD');
+      expect(hoi!.distance_to_nearest_km).toBe(30);
+      expect(hoi!.label_vi).toContain('Gần DAD (30 km)');
+      expect(hoi!.label_en).toContain('Near DAD (30 km)');
+    });
+
+    it('findRouteNetworkConnections enforces source=aptech_internal and excludes AirLabs branding', async () => {
+      const mockLeg1 = {
+        airline_iata: 'APT',
+        dep_iata: 'HAN',
+        arr_iata: 'HKG',
+        source: 'aptech_internal',
+      };
+      const mockLeg2 = {
+        airline_iata: 'APT',
+        dep_iata: 'HKG',
+        arr_iata: 'LAX',
+        source: 'aptech_internal',
+      };
+
+      routeRefModel.find.mockImplementation((q: any) => {
+        // Assert source isolation is strictly enforced
+        expect(q.source).toBe('aptech_internal');
+        if (q.dep_iata?.$in?.includes('HAN')) {
+          return { lean: () => ({ exec: () => Promise.resolve([mockLeg1]) }) };
+        }
+        if (q.dep_iata?.$in?.includes('HKG')) {
+          return { lean: () => ({ exec: () => Promise.resolve([mockLeg2]) }) };
+        }
+        return { lean: () => ({ exec: () => Promise.resolve([]) }) };
+      });
+
+      const connections = await service.findRouteNetworkConnections(['HAN'], ['LAX']);
+      expect(connections.length).toBe(1);
+      expect(connections[0].transit_airport).toBe('HKG');
+      expect(connections[0].leg1.dep_iata).toBe('HAN');
+      expect(connections[0].leg2.arr_iata).toBe('LAX');
+      expect(connections[0].note).toContain('Aptech Airlines');
+      expect(connections[0].note).not.toContain('AirLabs');
+    });
+
+    it('RouteSyncState allows coexistence of airlabs and aptech_internal for the same dep_iata', async () => {
+      // Demonstrates schema compound index requirement { dep_iata: 1, source: 1 }
+      const states = [
+        { dep_iata: 'HAN', source: 'airlabs', complete: true },
+        { dep_iata: 'HAN', source: 'aptech_internal', complete: true },
+      ];
+
+      routeSyncStateModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(states),
+      });
+
+      const result = await routeSyncStateModel.find({ dep_iata: 'HAN' }).exec();
+      expect(result.length).toBe(2);
+      expect(result.map((s: any) => s.source).sort()).toEqual(['airlabs', 'aptech_internal']);
     });
   });
 });
