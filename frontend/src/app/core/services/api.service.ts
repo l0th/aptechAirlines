@@ -1,11 +1,22 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of, forkJoin } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 import {
   Flight,
   FlightSearchResult,
   SeatMapResponse,
   FlightStatus,
+  AirLabsRouteRef,
+  CommercialAircraftLayout,
+  CommercialScheduleTemplate,
+  CommercializeRoutePayload,
+  UpdateCommercialTemplatePayload,
+  MaterializeTemplatePayload,
+  MaterializeTemplateResponse,
+  AirportRoutesSyncResponse,
+  AirLabsRoutesListResponse,
+  CommercialTemplatesListResponse,
 } from '../models/flight.model';
 import {
   Airport,
@@ -557,5 +568,133 @@ export class ApiService {
 
   deleteSeatPricingRule(ruleId: string): Observable<any> {
     return this.http.delete<any>(`${this.baseUrl}/seat-allocation/pricing-rules/${ruleId}`);
+  }
+
+  // ===================== AIRLABS COMMERCIAL OPERATIONS =====================
+
+  syncRoutesForAirport(depIata: string, limit = 200): Observable<AirportRoutesSyncResponse> {
+    const cleanDep = (depIata || '').trim().toUpperCase();
+    let params = new HttpParams().set('dep_iata', cleanDep);
+    if (limit) {
+      params = params.set('limit', limit.toString());
+    }
+    return this.http.post<AirportRoutesSyncResponse>(
+      `${this.baseUrl}/reference/sync-routes`,
+      {},
+      { params },
+    );
+  }
+
+  getAirLabsRoutes(query?: {
+    dep_iata?: string;
+    arr_iata?: string;
+    has_schedule?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Observable<AirLabsRoutesListResponse> {
+    let params = new HttpParams();
+    if (query?.dep_iata) params = params.set('dep_iata', query.dep_iata.trim().toUpperCase());
+    if (query?.arr_iata) params = params.set('arr_iata', query.arr_iata.trim().toUpperCase());
+    if (query?.has_schedule !== undefined) params = params.set('has_schedule', query.has_schedule.toString());
+    if (query?.limit !== undefined) params = params.set('limit', query.limit.toString());
+    if (query?.offset !== undefined) params = params.set('offset', query.offset.toString());
+
+    return this.http.get<AirLabsRoutesListResponse>(`${this.baseUrl}/flights/airlabs-routes`, { params });
+  }
+
+  getAirLabsRouteBySourceKey(sourceKey: string): Observable<AirLabsRouteRef> {
+    return this.http.get<AirLabsRouteRef>(
+      `${this.baseUrl}/flights/airlabs-routes/${encodeURIComponent(sourceKey)}`,
+    );
+  }
+
+  getCommercialAircraftLayouts(): Observable<CommercialAircraftLayout[]> {
+    return this.http.get<CommercialAircraftLayout[]>(
+      `${this.baseUrl}/flights/commercial-aircraft-layouts`,
+    );
+  }
+
+  commercializeAirLabsRoute(payload: CommercializeRoutePayload): Observable<CommercialScheduleTemplate> {
+    return this.http.post<CommercialScheduleTemplate>(
+      `${this.baseUrl}/flights/commercialize-airlabs-route`,
+      payload,
+    );
+  }
+
+  getCommercialTemplates(query?: {
+    is_active?: boolean;
+    origin_iata?: string;
+    dest_iata?: string;
+    limit?: number;
+    offset?: number;
+  }): Observable<CommercialTemplatesListResponse> {
+    let params = new HttpParams();
+    if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
+    if (query?.origin_iata) params = params.set('origin_iata', query.origin_iata.trim().toUpperCase());
+    if (query?.dest_iata) params = params.set('dest_iata', query.dest_iata.trim().toUpperCase());
+    if (query?.limit !== undefined) params = params.set('limit', query.limit.toString());
+    if (query?.offset !== undefined) params = params.set('offset', query.offset.toString());
+
+    return this.http.get<CommercialTemplatesListResponse>(
+      `${this.baseUrl}/flights/commercial-templates`,
+      { params },
+    );
+  }
+
+  fetchAllCommercialTemplates(): Observable<CommercialScheduleTemplate[]> {
+    const pageSize = 200;
+    return this.getCommercialTemplates({ limit: pageSize, offset: 0 }).pipe(
+      switchMap((firstPage) => {
+        const total = firstPage.total;
+        const accumulated = [...firstPage.items];
+        if (accumulated.length >= total || firstPage.items.length === 0) {
+          return of(accumulated);
+        }
+
+        const remainingRequests: Observable<CommercialTemplatesListResponse>[] = [];
+        for (let offset = pageSize; offset < total; offset += pageSize) {
+          remainingRequests.push(this.getCommercialTemplates({ limit: pageSize, offset }));
+        }
+
+        return forkJoin(remainingRequests).pipe(
+          map((subsequentPages) => {
+            for (const page of subsequentPages) {
+              accumulated.push(...page.items);
+            }
+            return accumulated;
+          }),
+        );
+      }),
+    );
+  }
+
+  updateCommercialTemplate(
+    id: string,
+    payload: UpdateCommercialTemplatePayload,
+  ): Observable<CommercialScheduleTemplate> {
+    return this.http.patch<CommercialScheduleTemplate>(
+      `${this.baseUrl}/flights/commercial-templates/${encodeURIComponent(id)}`,
+      payload,
+    );
+  }
+
+  toggleCommercialTemplateStatus(
+    id: string,
+    isActive: boolean,
+  ): Observable<CommercialScheduleTemplate> {
+    return this.http.patch<CommercialScheduleTemplate>(
+      `${this.baseUrl}/flights/commercial-templates/${encodeURIComponent(id)}/status`,
+      { is_active: isActive },
+    );
+  }
+
+  materializeCommercialTemplate(
+    id: string,
+    payload: MaterializeTemplatePayload,
+  ): Observable<MaterializeTemplateResponse> {
+    return this.http.post<MaterializeTemplateResponse>(
+      `${this.baseUrl}/flights/commercial-templates/${encodeURIComponent(id)}/materialize`,
+      payload,
+    );
   }
 }

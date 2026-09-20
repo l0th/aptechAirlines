@@ -289,6 +289,16 @@ export class FlightsController {
     );
   }
 
+  @Get('commercial-aircraft-layouts')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async getCommercialAircraftLayouts() {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.getCommercialAircraftLayouts();
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.flightsService.findById(id);

@@ -16,7 +16,7 @@ import {
   UpdateCommercialTemplateDto,
 } from './airlabs-commercial.dto';
 import { CabinClass } from './flights.schema';
-import { getAircraftLayout } from '../seat-allocation/fleet-layout.catalog';
+import { getAircraftLayout, FLEET_LAYOUT_CATALOG } from '../seat-allocation/fleet-layout.catalog';
 import { utcOffsetMinutes } from '../common/timezone.util';
 
 const DAY_NAME_TO_ISO: Record<string, number> = {
@@ -627,13 +627,34 @@ export class AirlabsCommercialService {
       template.base_price_economy = dto.base_price_economy;
     }
     if (dto.base_price_business !== undefined) {
-      template.base_price_business = dto.base_price_business;
+      if (dto.base_price_business === null) {
+        if (typeof (template as any).set === 'function') {
+          (template as any).set('base_price_business', undefined);
+        }
+        (template as any).base_price_business = undefined;
+      } else {
+        template.base_price_business = dto.base_price_business;
+      }
     }
     if (dto.base_price_club !== undefined) {
-      template.base_price_club = dto.base_price_club;
+      if (dto.base_price_club === null) {
+        if (typeof (template as any).set === 'function') {
+          (template as any).set('base_price_club', undefined);
+        }
+        (template as any).base_price_club = undefined;
+      } else {
+        template.base_price_club = dto.base_price_club;
+      }
     }
     if (dto.base_price_first !== undefined) {
-      template.base_price_first = dto.base_price_first;
+      if (dto.base_price_first === null) {
+        if (typeof (template as any).set === 'function') {
+          (template as any).set('base_price_first', undefined);
+        }
+        (template as any).base_price_first = undefined;
+      } else {
+        template.base_price_first = dto.base_price_first;
+      }
     }
     if (dto.is_active !== undefined) {
       template.is_active = dto.is_active;
@@ -681,5 +702,25 @@ export class AirlabsCommercialService {
     }
 
     return this.flightGeneratorService.generateForTemplate(template, startDateStr, daysAhead);
+  }
+
+  /**
+   * Authoritative commercial aircraft layout metadata derived from FLEET_LAYOUT_CATALOG.
+   * Exposes physical capacities and supported cabins without internal row definitions.
+   */
+  getCommercialAircraftLayouts(): Array<{
+    aircraft_type: string;
+    model_name: string;
+    total_capacity: number;
+    cabin_capacities: Record<string, number>;
+    supported_cabins: string[];
+  }> {
+    return Object.values(FLEET_LAYOUT_CATALOG).map((layout) => ({
+      aircraft_type: layout.aircraft_type,
+      model_name: layout.model_name,
+      total_capacity: layout.total_capacity,
+      cabin_capacities: layout.cabin_capacities,
+      supported_cabins: Object.keys(layout.cabin_capacities),
+    }));
   }
 }

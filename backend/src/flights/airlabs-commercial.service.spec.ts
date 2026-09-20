@@ -113,8 +113,20 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
       }
       const doc: any = {
         ...found,
+        set: jest.fn().mockImplementation(function (k: string, v: any) {
+          if (v === undefined) {
+            delete this[k];
+          } else {
+            this[k] = v;
+          }
+          return this;
+        }),
         save: jest.fn().mockImplementation(async function () {
-          mockTemplates.set(this.template_id, { ...this });
+          const toSave = { ...this };
+          delete toSave.save;
+          delete toSave.exec;
+          delete toSave.set;
+          mockTemplates.set(this.template_id, toSave);
           return this;
         }),
       };

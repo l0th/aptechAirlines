@@ -85,6 +85,15 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           <!-- Admin Management Links (ADMIN & SUPER_ADMIN only) -->
           @if (auth.isAdmin()) {
             <a
+              routerLink="/admin/commercial-flights"
+              routerLinkActive="bg-gold text-navy font-bold shadow-md"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
+            >
+              <app-icon name="planetakeoff" class="w-4 h-4" />
+              <span>{{ lang.t('admin.commercial') }}</span>
+            </a>
+
+            <a
               routerLink="/admin/flights"
               routerLinkActive="bg-gold text-navy font-bold shadow-md"
               class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"

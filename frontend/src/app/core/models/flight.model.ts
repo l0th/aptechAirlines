@@ -58,6 +58,27 @@ export interface Flight {
   time_zone_diff_minutes?: number;
   created_at?: string;
   updated_at?: string;
+  // Provenance & Deterministic Schedule Identity
+  template_id?: string;
+  operating_date?: string;
+  is_generated?: boolean;
+  generated_source?: string;
+  is_manually_modified?: boolean;
+  operator?: string;
+  is_bookable?: boolean;
+  data_source?: string;
+  commercial_template_id?: string;
+  source_type?: string;
+  source_route_key?: string;
+  source_service_key?: string;
+  source_airline_iata?: string;
+  source_airline_icao?: string;
+  source_flight_iata?: string;
+  source_flight_icao?: string;
+  source_flight_number?: string;
+  source_aircraft_icao?: string;
+  source_duration_minutes?: number;
+  source_synced_at?: string;
 }
 
 /**
@@ -221,4 +242,161 @@ export interface SeatMapResponse {
     skipped_rows: number[];
   };
   rows: SeatRow[];
+}
+
+/** Authoritative commercial aircraft layout metadata from backend */
+export interface CommercialAircraftLayout {
+  aircraft_type: string;
+  model_name: string;
+  total_capacity: number;
+  cabin_capacities: Record<string, number>;
+  supported_cabins: string[];
+}
+
+/** AirLabs RouteRef schema mirror */
+export interface AirLabsRouteRef {
+  source_key: string;
+  airline_iata?: string;
+  airline_icao?: string;
+  flight_number?: string;
+  flight_iata?: string;
+  flight_icao?: string;
+  cs_airline_iata?: string;
+  cs_flight_iata?: string;
+  cs_flight_number?: string;
+  dep_iata: string;
+  dep_icao?: string;
+  dep_time?: string;
+  dep_time_utc?: string;
+  dep_terminals?: string[];
+  arr_iata: string;
+  arr_icao?: string;
+  arr_time?: string;
+  arr_time_utc?: string;
+  arr_terminals?: string[];
+  duration?: number;
+  days?: string[]; // Provider string[] e.g. ["1", "2", "3", "4", "5", "6", "7"]
+  aircraft_icao?: string;
+  has_schedule?: boolean;
+  source?: string;
+  synced_at?: string;
+  airlabs_updated?: string;
+  sync_generation?: string;
+}
+
+/** Aptech Commercial ScheduleTemplate schema mirror */
+export interface CommercialScheduleTemplate {
+  _id?: string;
+  template_id: string;
+  flight_number: string;
+  origin_iata: string;
+  dest_iata: string;
+  std_dep_time?: string;
+  std_arr_time?: string;
+  days_of_week: number[]; // 1=Mon ... 7=Sun
+  aircraft_type: string;
+  cabin_classes: CabinClass[];
+  base_price_economy: number;
+  base_price_business?: number;
+  base_price_club?: number;
+  base_price_first?: number;
+  is_active: boolean;
+  commercial_inventories?: Array<{
+    cabin_class: CabinClass;
+    allocated_seats: number;
+  }>;
+  source_type: string;
+  source_route_key?: string;
+  source_service_key?: string;
+  source_airline_iata?: string;
+  source_airline_icao?: string;
+  source_flight_iata?: string;
+  source_flight_icao?: string;
+  source_flight_number?: string;
+  source_aircraft_icao?: string;
+  source_dep_time_utc?: string;
+  source_arr_time_utc?: string;
+  source_duration_minutes?: number;
+  source_synced_at?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Mirror of CommercializeRouteDto */
+export interface CommercializeRoutePayload {
+  source_key: string;
+  aptech_flight_number: string;
+  aircraft_type: string;
+  base_price_economy: number;
+  base_price_business?: number;
+  base_price_club?: number;
+  base_price_first?: number;
+  cabin_classes?: CabinClass[];
+  inventories?: Array<{
+    cabin_class: CabinClass;
+    allocated_seats: number;
+  }>;
+}
+
+/** Mirror of UpdateCommercialTemplateDto */
+export interface UpdateCommercialTemplatePayload {
+  flight_number?: string;
+  aircraft_type?: string;
+  base_price_economy?: number;
+  base_price_business?: number | null;
+  base_price_club?: number | null;
+  base_price_first?: number | null;
+  cabin_classes?: CabinClass[];
+  is_active?: boolean;
+  inventories?: Array<{
+    cabin_class: CabinClass;
+    allocated_seats: number;
+  }>;
+}
+
+/** Mirror of MaterializeTemplateDto */
+export interface MaterializeTemplatePayload {
+  days_ahead?: number;
+  start_date?: string;
+}
+
+/** Mirror of GenerationStats */
+export interface MaterializeTemplateResponse {
+  total_days: number;
+  start_date: string;
+  end_date: string;
+  templates_count: number;
+  total_operations: number;
+  inserted_count: number;
+  matched_count: number;
+  skipped_existing: number;
+  duration_ms: number;
+}
+
+/** Mirror of syncRoutesForAirport response */
+export interface AirportRoutesSyncResponse {
+  dep_iata: string;
+  updated: number;
+  records_seen: number;
+  pages: number;
+  truncated: boolean;
+  complete: boolean;
+  sync_generation?: string;
+  next_offset?: number;
+}
+
+/** AirLabs routes list response with pagination */
+export interface AirLabsRoutesListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: AirLabsRouteRef[];
+}
+
+/** Commercial templates list response with pagination */
+export interface CommercialTemplatesListResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: CommercialScheduleTemplate[];
 }

@@ -79,6 +79,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'commercial-flights',
+        canActivate: [adminOnlyGuard],
+        loadComponent: () =>
+          import('./admin/commercial-flights/commercial-flights.component').then(
+            (m) => m.CommercialFlightsComponent,
+          ),
+      },
+      {
         path: 'airlabs-sync',
         canActivate: [adminOnlyGuard],
         loadComponent: () =>

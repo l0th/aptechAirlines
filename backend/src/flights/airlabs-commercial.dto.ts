@@ -10,6 +10,7 @@ import {
   Min,
   Max,
   Matches,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -86,25 +87,28 @@ export class UpdateCommercialTemplateDto {
   @IsNotEmpty()
   aircraft_type?: string;
 
-  @IsOptional()
+  @ValidateIf((_, val) => val !== undefined)
   @IsNumber()
   @Min(0)
   base_price_economy?: number;
 
   @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined)
   @IsNumber()
   @Min(0)
-  base_price_business?: number;
+  base_price_business?: number | null;
 
   @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined)
   @IsNumber()
   @Min(0)
-  base_price_club?: number;
+  base_price_club?: number | null;
 
   @IsOptional()
+  @ValidateIf((_, val) => val !== null && val !== undefined)
   @IsNumber()
   @Min(0)
-  base_price_first?: number;
+  base_price_first?: number | null;
 
   @IsOptional()
   @IsArray()

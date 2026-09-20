@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
@@ -22,7 +23,7 @@ const FLIGHT_FORM_DEFAULTS = {
 @Component({
   selector: 'app-flights-manage',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, CurrencyFormatPipe, PaginationComponent],
+  imports: [CommonModule, FormsModule, RouterModule, IconComponent, CurrencyFormatPipe, PaginationComponent],
   template: `
     <div class="space-y-6">
       
@@ -114,6 +115,7 @@ const FLIGHT_FORM_DEFAULTS = {
               <tr>
                 <th class="py-3.5 px-4">{{ lang.t('admin.dashboard.flightNumber') }}</th>
                 <th class="py-3.5 px-4">{{ lang.t('admin.dashboard.route') }}</th>
+                <th class="py-3.5 px-4">{{ lang.t('admin.flights.colProvenance') }}</th>
                 <th class="py-3.5 px-4">{{ lang.isVietnamese() ? 'Ngày bay' : 'Flight Date' }}</th>
                 <th class="py-3.5 px-4">{{ lang.isVietnamese() ? 'Giờ cất cánh' : 'Departure Time' }}</th>
                 <th class="py-3.5 px-4">{{ lang.isVietnamese() ? 'Hạng vé & Giá' : 'Cabin & Fare' }}</th>
@@ -124,14 +126,14 @@ const FLIGHT_FORM_DEFAULTS = {
             <tbody class="divide-y divide-slate-100 font-medium bg-white">
               @if (loading()) {
                 <tr>
-                  <td colspan="7" class="text-center py-12 text-slate-400">
+                  <td colspan="8" class="text-center py-12 text-slate-400">
                     <app-icon name="refreshcw" class="w-6 h-6 animate-spin mx-auto text-gold mb-2" />
                     {{ lang.isVietnamese() ? 'Đang tải dữ liệu chuyến bay...' : 'Loading flights data...' }}
                   </td>
                 </tr>
               } @else if (!flights().length) {
                 <tr>
-                  <td colspan="7" class="text-center py-12 text-slate-400">
+                  <td colspan="8" class="text-center py-12 text-slate-400">
                     {{ lang.isVietnamese() ? 'Không tìm thấy chuyến bay nào phù hợp.' : 'No matching flights found.' }}
                   </td>
                 </tr>
@@ -149,6 +151,17 @@ const FLIGHT_FORM_DEFAULTS = {
                       </div>
                       <span class="text-[10px] text-slate-400">{{ formatAircraftDisplay(fl.aircraft) }}</span>
                       <span class="text-[10px] text-slate-400 block">{{ fl.duration_minutes }} {{ lang.t('lookup.min') }} • {{ fl.distance_miles }} {{ lang.t('nav.miles') }}</span>
+                    </td>
+                    <td class="py-3.5 px-4">
+                      <span
+                        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border whitespace-nowrap"
+                        [ngClass]="getProvenanceBadgeClass(fl)"
+                      >
+                        {{ getProvenanceLabel(fl) }}
+                      </span>
+                      @if (fl.operator) {
+                        <span class="text-[10px] text-slate-400 block mt-0.5 font-mono">{{ fl.operator }}</span>
+                      }
                     </td>
                     <td class="py-3.5 px-4 text-slate-600">
                       {{ fl.departure_date | date: 'dd/MM/yyyy' }}
@@ -317,6 +330,33 @@ const FLIGHT_FORM_DEFAULTS = {
           </div>
 
           <form (ngSubmit)="saveFlightForm()" class="space-y-4 text-xs">
+            @if (!editingId()) {
+              <div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+                <app-icon name="alerttriangle" class="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div class="space-y-1 text-slate-700 flex-1">
+                  <h4 class="font-bold text-amber-900 text-xs">
+                    {{ lang.t('admin.flights.manualWarningTitle') }}
+                  </h4>
+                  <p class="text-[11px] leading-relaxed text-amber-800">
+                    {{ lang.t('admin.flights.manualWarningDesc') }}
+                  </p>
+                  <p class="text-[11px] leading-relaxed text-slate-600">
+                    {{ lang.t('admin.flights.customerInvariantNotice') }}
+                  </p>
+                  <div class="pt-1.5">
+                    <a
+                      routerLink="/admin/commercial-flights"
+                      (click)="showFlightModal.set(false)"
+                      class="btn-navy text-xs !py-1.5 !px-4 font-bold"
+                    >
+                      <app-icon name="planetakeoff" class="w-3.5 h-3.5" />
+                      <span>{{ lang.t('admin.flights.goToCommercial') }}</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            }
+
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('lookup.flightNumber') }}</label>
@@ -703,6 +743,38 @@ export class FlightsManageComponent implements OnInit {
       return `${aircraft.model_name} (${aircraft.registration})`;
     }
     return aircraft.model_name;
+  }
+
+  getProvenanceLabel(fl: Flight): string {
+    if (fl.data_source === 'AIRLABS_COMMERCIALIZED') {
+      return this.lang.t('admin.flights.badgeCommercial');
+    }
+    if (fl.data_source === 'AIRLABS_EXTERNAL') {
+      return this.lang.t('admin.flights.badgeExternal');
+    }
+    if (fl.data_source === 'INTERNAL_GENERATED' && fl.is_generated === true && fl.generated_source === 'seed_schedule_330') {
+      return this.lang.t('admin.flights.badgeLegacy');
+    }
+    if (fl.data_source === 'INTERNAL_GENERATED' && fl.is_generated !== true) {
+      return this.lang.t('admin.flights.badgeManual');
+    }
+    return this.lang.t('admin.flights.badgeUnknown');
+  }
+
+  getProvenanceBadgeClass(fl: Flight): string {
+    if (fl.data_source === 'AIRLABS_COMMERCIALIZED') {
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    }
+    if (fl.data_source === 'AIRLABS_EXTERNAL') {
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    }
+    if (fl.data_source === 'INTERNAL_GENERATED' && fl.is_generated === true && fl.generated_source === 'seed_schedule_330') {
+      return 'bg-slate-100 text-slate-600 border-slate-200';
+    }
+    if (fl.data_source === 'INTERNAL_GENERATED' && fl.is_generated !== true) {
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    }
+    return 'bg-slate-100 text-slate-500 border-slate-200';
   }
 
   delayText(reason?: string | null, minutes?: number | null): string {
