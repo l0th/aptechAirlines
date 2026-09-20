@@ -86,9 +86,9 @@ interface DashboardBooking {
 
         <div class="flex flex-wrap items-center gap-3">
           @if (auth.isAdmin()) {
-            <a routerLink="/admin/airlabs-sync" class="btn-gold text-xs !py-2 !px-4 font-bold">
-              <app-icon name="refreshcw" class="w-3.5 h-3.5" />
-              <span>{{ lang.t('admin.dashboard.syncAirLabs') }}</span>
+            <a routerLink="/admin/commercial-flights" class="btn-gold text-xs !py-2 !px-4 font-bold">
+              <app-icon name="planetakeoff" class="w-3.5 h-3.5" />
+              <span>{{ lang.t('admin.commercial') }}</span>
             </a>
 
             <a routerLink="/admin/flights" class="btn-navy text-xs !py-2 !px-4 font-bold">

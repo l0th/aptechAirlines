@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
@@ -15,6 +16,9 @@ import {
   UpdateCommercialTemplatePayload,
   MaterializeTemplateResponse,
   CabinClass,
+  CommercialNetworkDiscoveryResponse,
+  CommercialNetworkItinerary,
+  CommercialNetworkLeg,
 } from '../../core/models/flight.model';
 
 @Component({
@@ -35,16 +39,6 @@ import {
           <p class="text-xs text-slate-500 mt-1 max-w-2xl">
             {{ lang.t('admin.commercial.subtitle') }}
           </p>
-        </div>
-
-        <div class="flex items-center gap-2.5 flex-wrap">
-          <a
-            routerLink="/admin/airlabs-sync"
-            class="btn-outline-navy text-xs !py-2.5 !px-4 font-semibold inline-flex items-center gap-2"
-          >
-            <app-icon name="refreshcw" class="w-4 h-4" />
-            <span>{{ lang.t('admin.commercial.rawSyncLink') }}</span>
-          </a>
         </div>
       </div>
 
@@ -128,6 +122,15 @@ import {
       <div class="flex items-center gap-3 border-b border-slate-200 pb-3 flex-wrap">
         <button
           type="button"
+          (click)="activeTab.set('discovery')"
+          [class]="activeTab() === 'discovery' ? 'btn-navy text-xs !py-2 !px-4 shadow-md' : 'btn-ghost text-xs !py-2 !px-4 text-slate-600 hover:text-navy'"
+        >
+          <app-icon name="search" class="w-4 h-4" />
+          <span>{{ lang.t('admin.commercial.tabDiscovery') }}</span>
+        </button>
+
+        <button
+          type="button"
           (click)="activeTab.set('routes')"
           [class]="activeTab() === 'routes' ? 'btn-navy text-xs !py-2 !px-4 shadow-md' : 'btn-ghost text-xs !py-2 !px-4 text-slate-600 hover:text-navy'"
         >
@@ -145,7 +148,397 @@ import {
         </button>
       </div>
 
-      <!-- TAB 1: AirLabs Route Network & Commercialization -->
+      <!-- TAB 1: Network Discovery -->
+      @if (activeTab() === 'discovery') {
+        <div class="space-y-6">
+
+          <!-- Search Form Card -->
+          <div class="card-luxury p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 class="text-sm font-black text-navy uppercase tracking-wider flex items-center gap-2">
+                  <app-icon name="search" class="w-4 h-4 text-gold" />
+                  <span>{{ lang.t('admin.commercial.discoveryTitle') }}</span>
+                </h2>
+                <p class="text-xs text-slate-500 mt-0.5">
+                  {{ lang.t('admin.commercial.discoveryDesc') }}
+                </p>
+              </div>
+            </div>
+
+            <form (ngSubmit)="searchNetworkDiscovery()" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+              <!-- Origin Input -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                  {{ lang.t('admin.commercial.discOrigin') }} *
+                </label>
+                <div class="relative">
+                  <app-icon name="planetakeoff" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    [ngModel]="discOrigin()"
+                    (ngModelChange)="discOrigin.set($event)"
+                    name="disc_origin"
+                    required
+                    placeholder="VD: HAN, Hanoi, Vietnam..."
+                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
+                  />
+                </div>
+              </div>
+
+              <!-- Destination Input -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                  {{ lang.t('admin.commercial.discDest') }} *
+                </label>
+                <div class="relative">
+                  <app-icon name="planelanding" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    [ngModel]="discDestination()"
+                    (ngModelChange)="discDestination.set($event)"
+                    name="disc_dest"
+                    required
+                    placeholder="VD: SGN, Tokyo, Germany..."
+                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
+                  />
+                </div>
+              </div>
+
+              <!-- Departure Date -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                  {{ lang.t('admin.commercial.discDate') }} *
+                </label>
+                <div class="relative">
+                  <app-icon name="calendar" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="date"
+                    [ngModel]="discDepartureDate()"
+                    (ngModelChange)="discDepartureDate.set($event)"
+                    name="disc_date"
+                    required
+                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
+                  />
+                </div>
+              </div>
+
+              <!-- Max Stops -->
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                  {{ lang.t('admin.commercial.discMaxStops') }}
+                </label>
+                <div class="relative">
+                  <select
+                    [ngModel]="discMaxStops()"
+                    (ngModelChange)="discMaxStops.set($event === '' ? null : +$event)"
+                    name="disc_stops"
+                    class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
+                  >
+                    <option [ngValue]="null">{{ lang.t('admin.commercial.stopsAny') }}</option>
+                    <option [ngValue]="0">{{ lang.t('admin.commercial.stopsDirect') }}</option>
+                    <option [ngValue]="1">{{ lang.t('admin.commercial.stops1') }}</option>
+                    <option [ngValue]="2">{{ lang.t('admin.commercial.stops2') }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Submit Button -->
+              <div>
+                <button
+                  type="submit"
+                  [disabled]="isDiscovering() || !discOrigin().trim() || !discDestination().trim() || !discDepartureDate().trim()"
+                  class="w-full btn-gold text-xs !py-2.5 font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50"
+                >
+                  @if (isDiscovering()) {
+                    <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                    <span>{{ lang.t('admin.commercial.discovering') }}</span>
+                  } @else {
+                    <app-icon name="search" class="w-4 h-4" />
+                    <span>{{ lang.t('admin.commercial.btnDiscover') }}</span>
+                  }
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Error Display -->
+          @if (discoveryError()) {
+            <div class="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl flex items-start gap-3 text-xs">
+              <app-icon name="alerttriangle" class="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+              <div>
+                <span class="font-bold block">{{ lang.t('admin.commercial.discError') }}</span>
+                <p>{{ discoveryError() }}</p>
+              </div>
+            </div>
+          }
+
+          <!-- Discovery Response -->
+          @if (discoveryResponse(); as resp) {
+            <!-- Scope & Coverage Card -->
+            <div class="card-luxury p-4 space-y-3 bg-slate-50/50">
+              <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                <span class="text-xs font-bold text-navy uppercase tracking-wider flex items-center gap-2">
+                  <app-icon name="compass" class="w-4 h-4 text-gold" />
+                  <span>{{ lang.t('admin.commercial.scopeCoverage') }}</span>
+                </span>
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-semibold text-slate-500">
+                    {{ lang.t('admin.commercial.colStatus') }}:
+                  </span>
+                  @if (resp.coverage.complete) {
+                    <span class="badge-emerald text-[10px] px-2 py-0.5 rounded-full font-bold">{{ lang.t('admin.commercial.coverageComplete') }}</span>
+                  } @else {
+                    <span class="badge-amber text-[10px] px-2 py-0.5 rounded-full font-bold">{{ lang.t('admin.commercial.coverageIncomplete') }}</span>
+                  }
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                <!-- Origin Scope -->
+                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
+                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.scopeOriginAirports') }}</span>
+                  <p class="font-mono text-navy font-bold text-sm">{{ resp.origin_scope.query }} ({{ resp.origin_scope.label }})</p>
+                  <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.origin_scope.iata_codes.join(', ')">
+                    {{ lang.t('admin.commercial.scopeResolvedIatas') }}: {{ resp.origin_scope.iata_codes.join(', ') }}
+                  </p>
+                </div>
+
+                <!-- Destination Scope -->
+                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
+                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.scopeDestAirports') }}</span>
+                  <p class="font-mono text-navy font-bold text-sm">{{ resp.destination_scope.query }} ({{ resp.destination_scope.label }})</p>
+                  <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.destination_scope.iata_codes.join(', ')">
+                    {{ lang.t('admin.commercial.scopeResolvedIatas') }}: {{ resp.destination_scope.iata_codes.join(', ') }}
+                  </p>
+                </div>
+
+                <!-- Parameters & Network Coverage -->
+                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
+                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.discSearchScope') }}</span>
+                  <p class="text-[11px] text-slate-700">
+                    {{ lang.t('admin.commercial.discDate') }}: <strong class="font-mono text-navy">{{ resp.departure_date }}</strong>
+                  </p>
+                  <p class="text-[11px] text-slate-700">
+                    {{ lang.t('admin.commercial.discMaxStops') }}: <strong class="font-mono text-navy">{{ resp.max_stops }}</strong>
+                  </p>
+                  @if (resp.coverage.expanded_airports.length > 0) {
+                    <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.coverage.expanded_airports.join(', ')">
+                      {{ lang.t('admin.commercial.coverageExpanded') }}: {{ resp.coverage.expanded_airports.join(', ') }}
+                    </p>
+                  }
+                  @if (resp.coverage.missing_sync_state_airports.length > 0) {
+                    <p class="text-[11px] text-amber-700 font-mono truncate" [title]="resp.coverage.missing_sync_state_airports.join(', ')">
+                      {{ lang.t('admin.commercial.coverageMissingSync') }}: {{ resp.coverage.missing_sync_state_airports.join(', ') }}
+                    </p>
+                  }
+                </div>
+              </div>
+            </div>
+
+            <!-- Status Warnings / Banners -->
+            @if (resp.status === 'NO_ROUTE_FOUND') {
+              <div class="card-luxury p-8 text-center space-y-3">
+                <app-icon name="compass" class="w-10 h-10 text-slate-300 mx-auto" />
+                <h3 class="text-sm font-bold text-navy">{{ lang.t('admin.commercial.statusNoRoute') }}</h3>
+                <p class="text-xs text-slate-500 max-w-md mx-auto">
+                  {{ lang.t('admin.commercial.statusNoRouteHelp') }}
+                </p>
+              </div>
+            }
+
+            @if (resp.status === 'NETWORK_DATA_INCOMPLETE') {
+              <div class="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-3 text-xs text-amber-900">
+                <app-icon name="alerttriangle" class="w-5 h-5 text-gold shrink-0 mt-0.5" />
+                <div class="space-y-1">
+                  <p class="font-bold text-amber-950">{{ lang.t('admin.commercial.statusIncomplete') }}</p>
+                  <p class="text-amber-800">{{ lang.t('admin.commercial.statusIncompleteHelp') }}</p>
+                </div>
+              </div>
+            }
+
+            <!-- Itineraries List -->
+            @if (resp.itineraries.length > 0) {
+              <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-bold text-navy flex items-center gap-2">
+                    <app-icon name="plane" class="w-4 h-4 text-gold" />
+                    <span>{{ lang.t('admin.commercial.statusFound').replace('{count}', String(resp.itineraries.length)) }}</span>
+                  </h3>
+                </div>
+
+                @for (itin of resp.itineraries; track itinTrackKey(itin); let itinIdx = $index) {
+                  @let allCommercialized = isItineraryFullyCommercialized(itin);
+                  @let uncommercializedCount = getUncommercializedLegsCount(itin);
+
+                  <div class="card-luxury p-5 space-y-4 hover:border-gold/50 transition-all">
+                    <!-- Itinerary Header -->
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                      <div class="flex items-center gap-3 flex-wrap">
+                        <span class="text-base font-black text-navy font-mono">
+                          #{{ itinIdx + 1 }}. {{ itin.airports[0] }} → {{ itin.airports[itin.airports.length - 1] }}
+                        </span>
+
+                        @if (itin.route_type === 'DIRECT') {
+                          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            {{ lang.t('admin.commercial.itineraryDirect') }}
+                          </span>
+                        } @else {
+                          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                            {{ lang.t('admin.commercial.itineraryConnecting').replace('{stops}', String(itin.stops.length)) }}
+                            @if (itin.stops.length > 0) {
+                              <span class="font-normal font-mono text-[9px] ml-1">({{ itin.stops.join(' → ') }})</span>
+                            }
+                          </span>
+                        }
+
+                        <span class="text-xs text-slate-500 flex items-center gap-1 font-mono">
+                          <app-icon name="clock" class="w-3.5 h-3.5 text-slate-400" />
+                          <span>{{ formatDuration(itin.total_duration_minutes) }}</span>
+                        </span>
+                      </div>
+
+                      <!-- Itinerary Actions Header -->
+                      <div class="flex items-center gap-2 flex-wrap">
+                        @if (allCommercialized) {
+                          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 border border-emerald-300 text-emerald-700">
+                            <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-emerald-600" />
+                            <span>{{ lang.t('admin.commercial.allLegsCommercialized') }}</span>
+                          </span>
+                          <button
+                            type="button"
+                            (click)="openMaterializeItineraryModal(itin)"
+                            class="btn-navy text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1.5 shadow-sm"
+                          >
+                            <app-icon name="calendar" class="w-3.5 h-3.5" />
+                            <span>{{ lang.t('admin.commercial.btnMaterializeItinerary') }}</span>
+                          </button>
+                        } @else {
+                          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-50 border border-amber-300 text-amber-800">
+                            <app-icon name="info" class="w-3.5 h-3.5 text-gold" />
+                            <span>{{ lang.t('admin.commercial.legsPendingCommercialization').replace('{count}', String(uncommercializedCount)) }}</span>
+                          </span>
+                          <button
+                            type="button"
+                            (click)="startItineraryCommercializeQueue(itin)"
+                            class="btn-gold text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1.5 shadow-sm"
+                          >
+                            <app-icon name="slidershorizontal" class="w-3.5 h-3.5" />
+                            <span>{{ lang.t('admin.commercial.btnCommercializeQueue').replace('{count}', String(uncommercializedCount)) }}</span>
+                          </button>
+                        }
+                      </div>
+                    </div>
+
+                    <!-- Legs Timeline -->
+                    <div class="space-y-3">
+                      @for (leg of itin.legs; track leg.source_key; let legIdx = $index) {
+                        @let matchedTpl = templateMapByRouteKey().get(leg.source_key);
+                        @let isComm = isLegCommercialized(leg);
+
+                        <!-- Leg Item Card -->
+                        <div class="p-4 rounded-xl border transition-all" [class]="isComm ? 'bg-emerald-50/20 border-emerald-200' : 'bg-slate-50/60 border-slate-200'">
+                          <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                            <!-- Leg Details -->
+                            <div class="space-y-1.5">
+                              <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-xs font-black text-navy uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200">
+                                  {{ lang.t('admin.commercial.legNum').replace('{num}', String(legIdx + 1)) }}
+                                </span>
+                                <span class="font-mono text-sm font-bold text-navy">
+                                  {{ leg.dep_iata }} → {{ leg.arr_iata }}
+                                </span>
+                                @if (leg.airline_iata || leg.flight_iata) {
+                                  <span class="text-xs font-semibold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                    {{ leg.airline_iata }} {{ leg.flight_number || leg.flight_iata }}
+                                  </span>
+                                }
+                                @if (leg.aircraft_icao) {
+                                  <span class="text-xs font-mono text-slate-500">
+                                    ({{ leg.aircraft_icao }})
+                                  </span>
+                                }
+                              </div>
+
+                              <div class="flex items-center gap-4 text-xs text-slate-600 flex-wrap">
+                                <span>
+                                  <strong>UTC:</strong> <span class="font-mono">{{ leg.dep_time_utc || 'N/A' }} → {{ leg.arr_time_utc || 'N/A' }}</span>
+                                </span>
+                                @if (leg.duration_minutes) {
+                                  <span>
+                                    <strong>{{ lang.t('admin.commercial.colDuration') }}:</strong> {{ leg.duration_minutes }} {{ lang.t('admin.commercial.minsUnit') }}
+                                  </span>
+                                }
+                                @if (leg.days && leg.days.length > 0) {
+                                  <span class="text-[11px] text-slate-500">
+                                    <strong>{{ lang.t('admin.commercial.operatingDaysLabel') }}</strong> {{ formatDays(leg.days) }}
+                                  </span>
+                                }
+                              </div>
+                            </div>
+
+                            <!-- Leg Commercial Status & Actions -->
+                            <div class="flex items-center gap-2 self-end md:self-center">
+                              @if (isComm && matchedTpl) {
+                                @let flNum = matchedTpl.flight_number;
+                                @let isAct = matchedTpl.is_active;
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold" [class]="isAct ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'">
+                                  <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-emerald-600" />
+                                  <span class="font-mono">{{ flNum }}</span>
+                                  <span class="text-[10px] font-normal">({{ isAct ? lang.t('admin.commercial.statusActive') : lang.t('admin.commercial.statusInactive') }})</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  (click)="viewTemplateByFlightNumber(flNum)"
+                                  class="btn-ghost text-xs !py-1.5 !px-3 text-navy hover:text-gold border border-slate-200"
+                                >
+                                  <span>{{ lang.t('admin.commercial.actionViewTemplate') }}</span>
+                                </button>
+                              } @else {
+                                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
+                                  {{ lang.t('admin.commercial.statusAvailable') }}
+                                </span>
+                                <button
+                                  type="button"
+                                  [disabled]="loadingLegSourceKey() === leg.source_key"
+                                  (click)="openCommercializeDrawerForLeg(leg)"
+                                  class="btn-gold text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1 shadow-sm disabled:opacity-60"
+                                >
+                                  @if (loadingLegSourceKey() === leg.source_key) {
+                                    <app-icon name="refreshcw" class="w-3.5 h-3.5 animate-spin" />
+                                    <span>{{ lang.t('admin.commercial.loadingRouteRef') }}</span>
+                                  } @else {
+                                    <app-icon name="slidershorizontal" class="w-3.5 h-3.5" />
+                                    <span>{{ lang.t('admin.commercial.btnCommercializeLeg') }}</span>
+                                  }
+                                </button>
+                              }
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Layover Indicator -->
+                        @if (legIdx < itin.legs.length - 1) {
+                          <div class="flex items-center gap-2 pl-4 text-xs font-medium text-slate-500 py-0.5">
+                            <app-icon name="hourglass" class="w-3.5 h-3.5 text-gold" />
+                            <span>
+                              {{ lang.t('admin.commercial.layoverAt')
+                                  .replace('{airport}', leg.arr_iata)
+                                  .replace('{mins}', String(itin.layover_minutes[legIdx] || 0)) }}
+                            </span>
+                          </div>
+                        }
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          }
+        </div>
+      }
+
+      <!-- TAB 2: AirLabs Route Catalog -->
       @if (activeTab() === 'routes') {
         <div class="space-y-4">
 
@@ -676,10 +1069,28 @@ import {
                 <app-icon name="plane" class="w-5 h-5 text-gold" />
                 <span>{{ lang.t('admin.commercial.drawerCommercializeTitle') }}</span>
               </h3>
-              <button (click)="commercializingRoute.set(null)" class="text-slate-400 hover:text-slate-600">
+              <button (click)="closeCommercializeDrawer()" class="text-slate-400 hover:text-slate-600">
                 <app-icon name="x" class="w-5 h-5" />
               </button>
             </div>
+
+            <!-- Step banner when guided multi-leg commercialization queue is active -->
+            @if (commercializeQueue(); as queue) {
+              <div class="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900">
+                <app-icon name="slidershorizontal" class="w-4 h-4 text-gold shrink-0" />
+                <div class="space-y-0.5">
+                  <span class="font-bold text-amber-950">
+                    {{ lang.t('admin.commercial.queueStep')
+                        .replace('{current}', String(queue.currentIndex + 1))
+                        .replace('{total}', String(queue.legs.length))
+                        .replace('{route}', r.dep_iata + ' → ' + r.arr_iata) }}
+                  </span>
+                  <p class="text-[11px] text-amber-800">
+                    {{ lang.t('admin.commercial.queueAutoAdvance') }}
+                  </p>
+                </div>
+              </div>
+            }
 
             <!-- Read-only Source Summary Banner -->
             <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
@@ -878,7 +1289,7 @@ import {
           <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
             <button
               type="button"
-              (click)="commercializingRoute.set(null)"
+              (click)="closeCommercializeDrawer()"
               class="btn-ghost text-xs"
             >
               {{ lang.t('common.cancel') }}
@@ -893,7 +1304,11 @@ import {
               @if (submittingCommercialize()) {
                 <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
               }
-              <span>{{ lang.t('admin.commercial.btnCreateTemplate') }}</span>
+              <span>
+                {{ commercializeQueue() && commercializeQueue()!.currentIndex + 1 < commercializeQueue()!.legs.length
+                    ? lang.t('admin.commercial.btnCreateAndNextLeg').replace('{next}', String(commercializeQueue()!.currentIndex + 2)).replace('{total}', String(commercializeQueue()!.legs.length))
+                    : lang.t('admin.commercial.btnCreateTemplate') }}
+              </span>
             </button>
           </div>
         </div>
@@ -1268,15 +1683,278 @@ import {
         </div>
       </div>
     }
+
+    <!-- MODAL: Materialize Entire Itinerary (All Legs) -->
+    @if (itineraryMaterializing(); as itin) {
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/60 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white rounded-3xl shadow-2xl max-w-xl w-full border border-slate-100 overflow-hidden space-y-4 p-6">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-gold/20 flex items-center justify-center text-navy font-bold">
+                <app-icon name="calendar" class="w-5 h-5 text-gold" />
+              </div>
+              <div>
+                <h3 class="text-sm font-bold text-navy">
+                  {{ lang.t('admin.commercial.materializeItineraryTitle') }}
+                </h3>
+                <p class="text-xs text-slate-500">
+                  {{ itin.airports[0] }} → {{ itin.airports[itin.airports.length - 1] }} ({{ itin.legs.length }} {{ lang.t('admin.commercial.legsUnit') }})
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              (click)="closeMaterializeItineraryModal()"
+              [disabled]="submittingItineraryMaterialize()"
+              class="p-1 rounded-lg text-slate-400 hover:text-navy hover:bg-slate-100"
+            >
+              <app-icon name="x" class="w-5 h-5" />
+            </button>
+          </div>
+
+          <p class="text-xs text-slate-600 leading-relaxed">
+            {{ lang.t('admin.commercial.materializeItineraryDesc') }}
+          </p>
+
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block font-medium text-slate-600 mb-1.5">
+                {{ lang.t('admin.commercial.horizonPreset') }}
+              </label>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                @for (preset of [30, 90, 180, 330]; track preset) {
+                  <button
+                    type="button"
+                    (click)="itineraryMaterializeDays.set(preset)"
+                    [class]="itineraryMaterializeDays() === preset ? 'btn-navy text-xs !py-2 font-bold shadow-sm' : 'btn-outline-navy text-xs !py-2 font-medium'"
+                  >
+                    {{ preset }} {{ lang.t('admin.commercial.daysUnit') }}
+                  </button>
+                }
+              </div>
+            </div>
+
+            <div>
+              <label class="block font-medium text-slate-600 mb-1">
+                {{ lang.t('admin.commercial.customDaysLabel') }}
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="330"
+                step="1"
+                [ngModel]="itineraryMaterializeDays()"
+                (ngModelChange)="itineraryMaterializeDays.set(+$event)"
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
+              />
+              @if (!isItineraryMaterializeDaysValid()) {
+                <p class="text-rose-600 text-[11px] mt-1">
+                  {{ lang.t('admin.commercial.customDaysInvalid') }}
+                </p>
+              }
+            </div>
+
+            <div>
+              <label class="block font-medium text-slate-600 mb-1">
+                {{ lang.t('admin.commercial.customStartDate') }}
+              </label>
+              <input
+                type="date"
+                [ngModel]="itineraryMaterializeStartDate()"
+                (ngModelChange)="itineraryMaterializeStartDate.set($event)"
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
+              />
+            </div>
+          </div>
+
+          <!-- Progress List per Leg -->
+          @if (itineraryMaterializeProgress().length > 0) {
+            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+              <span class="font-bold text-slate-700 block">
+                {{ lang.t('admin.commercial.matProgressPerLeg') }}
+              </span>
+              @for (item of itineraryMaterializeProgress(); track item.legIndex) {
+                <div class="p-2.5 bg-white rounded-xl border border-slate-100 space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <span class="font-mono font-bold text-navy">
+                      {{ lang.t('admin.commercial.legNum').replace('{num}', String(item.legIndex + 1)) }}: {{ item.flightNumber }}
+                    </span>
+                    <div>
+                      @if (item.status === 'PENDING') {
+                        <span class="text-slate-400 font-medium text-[11px]">{{ lang.t('admin.commercial.statusPending') }}</span>
+                      } @else if (item.status === 'RUNNING') {
+                        <span class="text-blue-600 font-bold text-[11px] inline-flex items-center gap-1">
+                          <app-icon name="refreshcw" class="w-3.5 h-3.5 animate-spin" />
+                          <span>{{ lang.t('admin.commercial.statusRunning') }}</span>
+                        </span>
+                      } @else if (item.status === 'SUCCESS') {
+                        <span class="text-emerald-600 font-bold text-[11px] inline-flex items-center gap-1">
+                          <app-icon name="checkcircle2" class="w-3.5 h-3.5" />
+                          <span>{{ lang.t('admin.commercial.legStatsSummary').replace('{inserted}', String(item.stats?.inserted_count || 0)).replace('{matched}', String(item.stats?.matched_count || 0)) }}</span>
+                        </span>
+                      } @else if (item.status === 'ERROR') {
+                        <span class="text-rose-600 font-bold text-[11px] inline-flex items-center gap-1">
+                          <app-icon name="xcircle" class="w-3.5 h-3.5" />
+                          <span>{{ item.error || 'Error' }}</span>
+                        </span>
+                      }
+                    </div>
+                  </div>
+
+                  @if (item.status === 'SUCCESS' && item.stats; as st) {
+                    <details class="mt-1 p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px]">
+                      <summary class="cursor-pointer font-bold text-navy select-none flex items-center gap-1">
+                        <span>{{ lang.t('admin.commercial.routeDetailsView') }}</span>
+                      </summary>
+                      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono pt-2 text-slate-700">
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statInserted') }}</span>
+                          <strong class="text-emerald-600">{{ st.inserted_count }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statMatched') }}</span>
+                          <strong class="text-navy">{{ st.matched_count }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statSkipped') }}</span>
+                          <strong>{{ st.skipped_existing }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalOps') }}</span>
+                          <strong>{{ st.total_operations }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalDays') }}</span>
+                          <strong>{{ st.total_days }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTemplatesCount') }}</span>
+                          <strong>{{ st.templates_count }}</strong>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statStartDate') }}</span>
+                          <span>{{ st.start_date }}</span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statEndDate') }}</span>
+                          <span>{{ st.end_date }}</span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statDuration') }}</span>
+                          <span>{{ st.duration_ms }}ms</span>
+                        </div>
+                      </div>
+                    </details>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          <!-- Summary Stats -->
+          @if (itineraryMaterializeSummary(); as sum) {
+            <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-2">
+              <div class="flex items-center gap-2 font-bold text-emerald-800">
+                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
+                <span>{{ lang.t('admin.commercial.statHeader') }}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2 font-mono text-center">
+                <div class="p-2 bg-white rounded-lg border border-emerald-100">
+                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.statInserted') }}</span>
+                  <strong class="text-emerald-600 text-sm">+{{ sum.totalInserted }}</strong>
+                </div>
+                <div class="p-2 bg-white rounded-lg border border-emerald-100">
+                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.statMatched') }}</span>
+                  <strong class="text-navy text-sm">{{ sum.totalMatched }}</strong>
+                </div>
+                <div class="p-2 bg-white rounded-lg border border-emerald-100">
+                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.legsCompleted') }}</span>
+                  <strong class="text-slate-800 text-sm">{{ sum.completedCount }}/{{ itin.legs.length }}</strong>
+                </div>
+              </div>
+            </div>
+          }
+
+          <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              (click)="closeMaterializeItineraryModal()"
+              [disabled]="submittingItineraryMaterialize()"
+              class="btn-ghost text-xs !py-2 !px-4"
+            >
+              <span>{{ lang.t('admin.commercial.btnClose') }}</span>
+            </button>
+            <button
+              type="button"
+              (click)="executeItineraryMaterialize()"
+              [disabled]="submittingItineraryMaterialize() || !isItineraryMaterializeDaysValid()"
+              class="btn-gold text-xs !py-2 !px-5 font-bold inline-flex items-center gap-2"
+            >
+              @if (submittingItineraryMaterialize()) {
+                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                <span>{{ lang.t('admin.commercial.btnMaterializing') }}</span>
+              } @else if (hasItineraryMaterializeErrors()) {
+                <app-icon name="refreshcw" class="w-4 h-4" />
+                <span>{{ lang.t('admin.commercial.btnRetryFailedLegs') }}</span>
+              } @else {
+                <app-icon name="calendar" class="w-4 h-4" />
+                <span>{{ lang.t('admin.commercial.btnExecuteMaterialize') }}</span>
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    }
   `,
 })
 export class CommercialFlightsComponent implements OnInit {
   readonly api = inject(ApiService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
+  protected readonly String = String;
 
   // Tabs
-  activeTab = signal<'routes' | 'templates'>('routes');
+  activeTab = signal<'discovery' | 'routes' | 'templates'>('discovery');
+
+  // TAB 1: Network Discovery
+  discOrigin = signal<string>('HAN');
+  discDestination = signal<string>('SGN');
+  discDepartureDate = signal<string>(new Date().toISOString().slice(0, 10));
+  discMaxStops = signal<number | null>(null);
+  isDiscovering = signal<boolean>(false);
+  discoveryResponse = signal<CommercialNetworkDiscoveryResponse | null>(null);
+  discoveryError = signal<string | null>(null);
+
+  // Guided Multi-Leg Commercialization Queue
+  loadingLegSourceKey = signal<string | null>(null);
+  commercializeQueue = signal<{
+    itineraryKey: string;
+    legs: CommercialNetworkLeg[];
+    currentIndex: number;
+  } | null>(null);
+
+  // Materialize Itinerary Modal
+  itineraryMaterializing = signal<CommercialNetworkItinerary | null>(null);
+  itineraryMaterializeDays = signal<number>(30);
+  itineraryMaterializeStartDate = signal<string>('');
+  submittingItineraryMaterialize = signal<boolean>(false);
+  hasItineraryMaterializeErrors = computed(() => {
+    return this.itineraryMaterializeProgress().some((p) => p.status === 'ERROR');
+  });
+  itineraryMaterializeProgress = signal<
+    Array<{
+      legIndex: number;
+      flightNumber: string;
+      status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'ERROR';
+      stats?: MaterializeTemplateResponse;
+      error?: string;
+    }>
+  >([]);
+  itineraryMaterializeSummary = signal<{
+    totalInserted: number;
+    totalMatched: number;
+    completedCount: number;
+  } | null>(null);
 
   // KPI & Global Catalog
   templates = signal<CommercialScheduleTemplate[]>([]);
@@ -1504,17 +2182,27 @@ export class CommercialFlightsComponent implements OnInit {
   }
 
   // ===================== COMMERCIALIZATION WORKFLOW =====================
-  openCommercializeDrawer(r: AirLabsRouteRef): void {
+  generateSuggestedFlightNumber(sourceFlightStr: string, queueOffset: number = 0): string {
+    const digits = (sourceFlightStr || '').replace(/\D/g, '');
+    let num = digits ? parseInt(digits, 10) : 100;
+    if (isNaN(num) || num <= 0) num = 100;
+    num += queueOffset;
+
+    const existingFlightNumbers = new Set(this.templates().map((t) => t.flight_number.toUpperCase()));
+    while (existingFlightNumbers.has(`APT${num}`)) {
+      num++;
+    }
+    return `APT${num}`;
+  }
+
+  openCommercializeDrawer(r: AirLabsRouteRef, queueIndex: number = -1): void {
     this.commercializingRoute.set(r);
     this.formMaterializeImmediately.set(false);
     this.formIncompatibleCabins.set([]);
     this.formOvercapacityDetails.set([]);
 
-    // Section 10 Suggestion rule:
-    // If source flight contains usable digits, suggest APT + digits.
-    // If no usable digits, use "APT" or blank. Do NOT use Math.random().
-    const digits = (r.flight_number || r.flight_iata || '').replace(/\D/g, '');
-    const aptNumber = digits ? `APT${digits}` : 'APT';
+    const offset = queueIndex >= 0 ? queueIndex : 0;
+    const aptNumber = this.generateSuggestedFlightNumber(r.flight_number || r.flight_iata || '', offset);
     this.formFlightNumber.set(aptNumber);
 
     // Select first aircraft layout by default (or A21N)
@@ -1543,6 +2231,11 @@ export class CommercialFlightsComponent implements OnInit {
       this.formIncompatibleCabins.set([]);
       this.formOvercapacityDetails.set([]);
     }
+  }
+
+  closeCommercializeDrawer(): void {
+    this.commercializeQueue.set(null);
+    this.commercializingRoute.set(null);
   }
 
   getIncompatibleCabinsString(cabins: CabinClass[]): string {
@@ -1707,38 +2400,63 @@ export class CommercialFlightsComponent implements OnInit {
           'success',
         );
 
-        // Refresh template catalog
+        // Update template catalog immediately & trigger reactive status across discovery
+        this.templates.update((list) => [...list, createdTemplate]);
         this.refreshTemplatesCatalog();
+
+        const proceedAfterMaterialize = () => {
+          const q = this.commercializeQueue();
+          if (q) {
+            let nextIndex = q.currentIndex + 1;
+            while (nextIndex < q.legs.length && this.isLegCommercialized(q.legs[nextIndex])) {
+              nextIndex++;
+            }
+            if (nextIndex < q.legs.length) {
+              this.commercializeQueue.set({ ...q, currentIndex: nextIndex });
+              this.submittingCommercialize.set(false);
+              this.openCommercializeDrawerForLeg(q.legs[nextIndex], nextIndex);
+              return;
+            } else {
+              this.toast.show(
+                this.lang.t('admin.commercial.queueComplete').replace('{total}', String(q.legs.length)),
+                'success',
+              );
+              this.commercializeQueue.set(null);
+              this.submittingCommercialize.set(false);
+              this.commercializingRoute.set(null);
+              return;
+            }
+          }
+          this.submittingCommercialize.set(false);
+          this.commercializingRoute.set(null);
+          if (this.activeTab() !== 'discovery') {
+            this.activeTab.set('templates');
+          }
+        };
 
         // Optional Sequential Step 2: Materialize immediately
         if (this.formMaterializeImmediately()) {
           this.api.materializeCommercialTemplate(createdTemplate.template_id, { days_ahead: 30 }).subscribe({
             next: (matRes) => {
-              this.submittingCommercialize.set(false);
-              this.commercializingRoute.set(null);
               this.toast.show(
                 this.lang.t('admin.commercial.materializeSuccess')
                   .replace('{inserted}', matRes.inserted_count.toString())
                   .replace('{matched}', matRes.matched_count.toString()),
                 'success',
               );
-              this.activeTab.set('templates');
+              proceedAfterMaterialize();
             },
             error: (matErr) => {
-              this.submittingCommercialize.set(false);
-              this.commercializingRoute.set(null);
               // Partial success resilience: preserve template and guide admin
               this.toast.show(
                 `${this.lang.t('admin.commercial.partialMaterializeWarn')} (${matErr?.error?.message || this.lang.t('admin.commercial.errorMaterializeGeneric')})`,
                 'warning',
               );
-              this.activeTab.set('templates');
+              proceedAfterMaterialize();
             },
           });
         } else {
-          this.submittingCommercialize.set(false);
-          this.commercializingRoute.set(null);
-          this.activeTab.set('templates');
+          proceedAfterMaterialize();
         }
       },
       error: (err) => {
@@ -2096,5 +2814,232 @@ export class CommercialFlightsComponent implements OnInit {
   formatCurrency(val?: number): string {
     if (val === undefined || val === null || isNaN(val)) return '-';
     return `${val.toLocaleString('vi-VN')} ₫`;
+  }
+
+  // ===================== TAB 1: NETWORK DISCOVERY =====================
+  searchNetworkDiscovery(): void {
+    const origin = this.discOrigin().trim();
+    const dest = this.discDestination().trim();
+    const date = this.discDepartureDate().trim();
+
+    if (!origin || !dest || !date) {
+      return;
+    }
+
+    this.isDiscovering.set(true);
+    this.discoveryError.set(null);
+    this.discoveryResponse.set(null);
+
+    this.api
+      .discoverCommercialNetwork({
+        origin,
+        destination: dest,
+        departure_date: date,
+        max_stops: this.discMaxStops() ?? undefined,
+      })
+      .subscribe({
+        next: (resp) => {
+          this.isDiscovering.set(false);
+          this.discoveryResponse.set(resp);
+        },
+        error: (err) => {
+          this.isDiscovering.set(false);
+          this.discoveryError.set(
+            err?.error?.message || this.lang.t('admin.commercial.discErrorGeneric'),
+          );
+        },
+      });
+  }
+
+  openCommercializeDrawerForLeg(leg: CommercialNetworkLeg, queueIndex: number = -1): void {
+    this.loadingLegSourceKey.set(leg.source_key);
+    this.api.getAirLabsRouteBySourceKey(leg.source_key).subscribe({
+      next: (routeRef) => {
+        this.loadingLegSourceKey.set(null);
+        this.openCommercializeDrawer(routeRef, queueIndex);
+      },
+      error: () => {
+        this.loadingLegSourceKey.set(null);
+        this.toast.show(this.lang.t('admin.commercial.errorLoadRouteRef'), 'error');
+      },
+    });
+  }
+
+  startItineraryCommercializeQueue(itinerary: CommercialNetworkItinerary): void {
+    const pendingLegs = itinerary.legs.filter((l) => !this.isLegCommercialized(l));
+    if (pendingLegs.length === 0) {
+      this.toast.show(this.lang.t('admin.commercial.allLegsCommercialized'), 'info');
+      return;
+    }
+    this.commercializeQueue.set({
+      itineraryKey: this.itinTrackKey(itinerary),
+      legs: pendingLegs,
+      currentIndex: 0,
+    });
+    this.openCommercializeDrawerForLeg(pendingLegs[0], 0);
+  }
+
+  openMaterializeItineraryModal(itin: CommercialNetworkItinerary): void {
+    this.itineraryMaterializing.set(itin);
+    this.itineraryMaterializeDays.set(30);
+    this.itineraryMaterializeStartDate.set(
+      this.discoveryResponse()?.departure_date || this.discDepartureDate() || new Date().toISOString().slice(0, 10),
+    );
+    this.itineraryMaterializeSummary.set(null);
+
+    const progress = itin.legs.map((leg, idx) => {
+      const tpl = this.templateMapByRouteKey().get(leg.source_key);
+      return {
+        legIndex: idx,
+        flightNumber: tpl ? tpl.flight_number : (leg.flight_iata || leg.flight_number || `APT-Leg${idx + 1}`),
+        status: 'PENDING' as const,
+      };
+    });
+    this.itineraryMaterializeProgress.set(progress);
+  }
+
+  closeMaterializeItineraryModal(): void {
+    if (this.submittingItineraryMaterialize()) return;
+    this.itineraryMaterializing.set(null);
+    this.itineraryMaterializeProgress.set([]);
+    this.itineraryMaterializeSummary.set(null);
+  }
+
+  isItineraryMaterializeDaysValid(): boolean {
+    const d = this.itineraryMaterializeDays();
+    return Number.isInteger(d) && d >= 1 && d <= 330;
+  }
+
+  async executeItineraryMaterialize(): Promise<void> {
+    const itin = this.itineraryMaterializing();
+    if (!itin || !this.isItineraryMaterializeDaysValid()) return;
+
+    const days = this.itineraryMaterializeDays();
+    const startDate = this.itineraryMaterializeStartDate().trim() || undefined;
+
+    this.submittingItineraryMaterialize.set(true);
+
+    let totalInserted = 0;
+    let totalMatched = 0;
+    let successCount = 0;
+
+    for (let i = 0; i < itin.legs.length; i++) {
+      const currentProgress = this.itineraryMaterializeProgress().find((p) => p.legIndex === i);
+      // Skip already materialized legs on retry
+      if (currentProgress && currentProgress.status === 'SUCCESS') {
+        if (currentProgress.stats) {
+          totalInserted += currentProgress.stats.inserted_count || 0;
+          totalMatched += currentProgress.stats.matched_count || 0;
+        }
+        successCount++;
+        continue;
+      }
+
+      const leg = itin.legs[i];
+      const tpl = this.templateMapByRouteKey().get(leg.source_key);
+      if (!tpl) {
+        this.updateItineraryLegProgress(i, 'ERROR', undefined, this.lang.t('admin.commercial.templateNotFound'));
+        continue;
+      }
+
+      this.updateItineraryLegProgress(i, 'RUNNING');
+
+      try {
+        const res = await firstValueFrom(
+          this.api.materializeCommercialTemplate(tpl.template_id, { days_ahead: days, start_date: startDate }),
+        );
+        totalInserted += res.inserted_count;
+        totalMatched += res.matched_count;
+        successCount++;
+        this.updateItineraryLegProgress(i, 'SUCCESS', res);
+      } catch (err: any) {
+        this.updateItineraryLegProgress(
+          i,
+          'ERROR',
+          undefined,
+          err?.error?.message || this.lang.t('admin.commercial.errorMaterializeGeneric'),
+        );
+      }
+    }
+
+    this.submittingItineraryMaterialize.set(false);
+    this.itineraryMaterializeSummary.set({
+      totalInserted,
+      totalMatched,
+      completedCount: successCount,
+    });
+
+    if (successCount === itin.legs.length) {
+      this.toast.show(
+        this.lang.t('admin.commercial.materializeSummary')
+          .replace('{inserted}', String(totalInserted))
+          .replace('{matched}', String(totalMatched))
+          .replace('{total}', String(itin.legs.length)),
+        'success',
+      );
+    } else if (successCount > 0) {
+      this.toast.show(
+        this.lang.t('admin.commercial.materializeSummary')
+          .replace('{inserted}', String(totalInserted))
+          .replace('{matched}', String(totalMatched))
+          .replace('{total}', String(itin.legs.length)),
+        'warning',
+      );
+    } else {
+      this.toast.show(this.lang.t('admin.commercial.errorMaterializeGeneric'), 'error');
+    }
+  }
+
+  private updateItineraryLegProgress(
+    legIndex: number,
+    status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'ERROR',
+    stats?: MaterializeTemplateResponse,
+    error?: string,
+  ): void {
+    this.itineraryMaterializeProgress.update((list) =>
+      list.map((item) =>
+        item.legIndex === legIndex
+          ? { ...item, status, stats, error }
+          : item,
+      ),
+    );
+  }
+
+  itinTrackKey(itin: CommercialNetworkItinerary): string {
+    return itin.legs.map((l) => l.source_key).join('>');
+  }
+
+  formatDuration(minutes: number): string {
+    if (!minutes || minutes <= 0) return this.lang.t('admin.commercial.durationNA');
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  formatDays(days?: Array<number | string>): string {
+    if (!days || days.length === 0) return this.lang.t('admin.commercial.notAvailable');
+    return days
+      .map((d) => {
+        const num = typeof d === 'number' ? d : parseInt(d, 10);
+        return isNaN(num) ? String(d) : this.getDayLabel(num) || String(d);
+      })
+      .join(', ');
+  }
+
+  isItineraryFullyCommercialized(itin: CommercialNetworkItinerary): boolean {
+    return itin.legs.every((l) => this.isLegCommercialized(l));
+  }
+
+  getUncommercializedLegsCount(itin: CommercialNetworkItinerary): number {
+    return itin.legs.filter((l) => !this.isLegCommercialized(l)).length;
+  }
+
+  isLegCommercialized(leg: CommercialNetworkLeg): boolean {
+    return this.templateMapByRouteKey().has(leg.source_key);
+  }
+
+  viewTemplateByFlightNumber(flightNumber: string): void {
+    this.templateSearch.set(flightNumber);
+    this.activeTab.set('templates');
   }
 }

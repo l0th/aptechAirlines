@@ -24,6 +24,7 @@ import {
   MaterializeTemplateDto,
   isValidCalendarDateString,
 } from './flights.dto';
+import { CommercialNetworkDiscoveryDto } from './airlabs-commercial.dto';
 import { FlightStatus } from './flights.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -297,6 +298,13 @@ export class FlightsController {
       throw new BadRequestException('AirlabsCommercialService is not available');
     }
     return this.airlabsCommercialService.getCommercialAircraftLayouts();
+  }
+
+  @Post('commercial-network-discovery')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async discoverCommercialNetwork(@Body() dto: CommercialNetworkDiscoveryDto) {
+    return this.flightsService.discoverCommercialNetwork(dto);
   }
 
   @Get(':id')

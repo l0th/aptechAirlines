@@ -400,3 +400,71 @@ export interface CommercialTemplatesListResponse {
   offset: number;
   items: CommercialScheduleTemplate[];
 }
+
+/** Route graph coverage status */
+export interface RouteGraphCoverage {
+  complete: boolean;
+  expanded_airports: string[];
+  incomplete_airports: string[];
+  missing_sync_state_airports: string[];
+}
+
+/** Request payload for commercial network discovery */
+export interface CommercialNetworkDiscoveryRequest {
+  origin: string;
+  destination: string;
+  departure_date: string;
+  max_stops?: number;
+}
+
+/** Commercial network scope */
+export interface CommercialNetworkScope {
+  query: string;
+  label: string;
+  iata_codes: string[];
+}
+
+/** Single leg within a discovered commercial network itinerary */
+export interface CommercialNetworkLeg {
+  source_key: string;
+  dep_iata: string;
+  arr_iata: string;
+  airline_iata?: string;
+  airline_icao?: string;
+  flight_iata?: string;
+  flight_icao?: string;
+  flight_number?: string;
+  aircraft_icao?: string;
+  dep_datetime?: string | Date;
+  arr_datetime?: string | Date;
+  dep_time_local?: string;
+  arr_time_local?: string;
+  dep_time_utc?: string;
+  arr_time_utc?: string;
+  duration_minutes?: number;
+  days?: string[];
+  is_bookable?: boolean;
+}
+
+/** Discovered itinerary from AirLabs route network */
+export interface CommercialNetworkItinerary {
+  route_type: 'DIRECT' | 'ONE_STOP' | 'TWO_STOP';
+  airports: string[];
+  stops: string[];
+  total_duration_minutes: number;
+  layover_minutes: number[];
+  legs: CommercialNetworkLeg[];
+  is_bookable?: boolean;
+}
+
+/** Full response for commercial network discovery */
+export interface CommercialNetworkDiscoveryResponse {
+  origin_scope: CommercialNetworkScope;
+  destination_scope: CommercialNetworkScope;
+  departure_date: string;
+  max_stops: number;
+  status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+  coverage: RouteGraphCoverage;
+  itineraries: CommercialNetworkItinerary[];
+}
+

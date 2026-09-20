@@ -112,15 +112,6 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             </a>
 
             <a
-              routerLink="/admin/airlabs-sync"
-              routerLinkActive="bg-gold text-navy font-bold shadow-md"
-              class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
-            >
-              <app-icon name="refreshcw" class="w-4 h-4" />
-              <span>{{ lang.t('admin.airlabs') }}</span>
-            </a>
-
-            <a
               routerLink="/admin/airports"
               routerLinkActive="bg-gold text-navy font-bold shadow-md"
               class="flex items-center gap-3 px-4 py-2.5 rounded-2xl text-xs font-semibold text-slate-300 hover:bg-navy-light hover:text-white transition-all duration-150"
