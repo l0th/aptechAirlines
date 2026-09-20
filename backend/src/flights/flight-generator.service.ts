@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import { Flight, FlightDocument, FlightStatus, CabinClass } from './flights.schema';
 import { ScheduleTemplate, ScheduleTemplateDocument } from './schemas/schedule-template.schema';
 import { Airport, AirportDocument } from '../airports/airports.schema';
-import { localWallTimeToUtc, localDateKey } from '../common/timezone.util';
+import { localWallTimeToUtc, resolveLocalWallTimeToUtc, localDateKey } from '../common/timezone.util';
 import { APTECH_FLIGHT_TEMPLATES, CANONICAL_AIRCRAFT_TYPES } from './flight-templates.catalog';
 
 export interface GenerationStats {
@@ -401,6 +401,486 @@ export class FlightGeneratorService {
     if (diffDays > 0 && diffDays <= 30) {
       this.logger.log(`Appending ${diffDays} missing horizon days (${startDateStr} to ${targetEndStr})...`);
       const stats = await this.generateRollingSchedule(startDateStr, diffDays);
+      return stats.inserted_count;
+    }
+
+    return 0;
+  }
+
+  /**
+   * Generates or maintains flights for a specific schedule template (AirLabs-backed or synthetic).
+   * Uses idempotent $setOnInsert keyed by { template_id, operating_date } to protect sold seats and bookings.
+   * Does NOT call syncTemplatesCatalog().
+   */
+  async generateForTemplate(
+    templateInput: ScheduleTemplateDocument | string,
+    startDateStr?: string,
+    days = 330,
+  ): Promise<GenerationStats> {
+    const startTime = Date.now();
+
+    let tpl: ScheduleTemplateDocument | null = null;
+    if (typeof templateInput === 'string') {
+      tpl = await this.templateModel.findOne({ template_id: templateInput }).exec();
+      if (!tpl) {
+        throw new BadRequestException(`ScheduleTemplate not found with template_id: "${templateInput}"`);
+      }
+    } else {
+      tpl = templateInput;
+    }
+
+    // 1. Fetch airports for timezone & coordinates
+    const originApt = await this.airportModel.findOne({ iata_code: tpl.origin_iata }).lean().exec();
+    const destApt = await this.airportModel.findOne({ iata_code: tpl.dest_iata }).lean().exec();
+
+    // Defect 3: No fake Vietnam timezone for AirLabs commercial flights
+    if (tpl.source_type === 'AIRLABS') {
+      if (!originApt || !originApt.time_zone) {
+        throw new BadRequestException(
+          `Missing origin airport or timezone data for AirLabs commercial flight: "${tpl.origin_iata}"`,
+        );
+      }
+      if (!destApt || !destApt.time_zone) {
+        throw new BadRequestException(
+          `Missing destination airport or timezone data for AirLabs commercial flight: "${tpl.dest_iata}"`,
+        );
+      }
+    }
+
+    const originTz = originApt?.time_zone || 'Asia/Ho_Chi_Minh';
+    const destTz = destApt?.time_zone || 'Asia/Ho_Chi_Minh';
+
+    // 2. Mark airports as serviced directly if active
+    if (tpl.is_active) {
+      await this.airportModel.updateMany(
+        { iata_code: { $in: [tpl.origin_iata, tpl.dest_iata] } },
+        { $set: { is_serviced_directly: true } },
+      );
+    }
+
+    // 3. Determine date window using deterministic calendar date iteration (Defect 4)
+    let startFormatted: string;
+    if (startDateStr) {
+      startFormatted = startDateStr;
+    } else {
+      const now = new Date();
+      startFormatted = localDateKey(now, originTz);
+    }
+
+    const [startYear, startMonth, startDay] = startFormatted.split('-').map(Number);
+    const endCalDate = new Date(Date.UTC(startYear, startMonth - 1, startDay + days - 1));
+    const endFormatted = `${endCalDate.getUTCFullYear()}-${String(endCalDate.getUTCMonth() + 1).padStart(2, '0')}-${String(endCalDate.getUTCDate()).padStart(2, '0')}`;
+
+    let totalOperations = 0;
+    let totalInserted = 0;
+    let totalMatched = 0;
+
+    let currentBatch: any[] = [];
+    const CHUNK_SIZE = 1000;
+
+    // Great-circle distance
+    const miles =
+      originApt && destApt && originApt.lat && originApt.lng && destApt.lat && destApt.lng
+        ? this.calculateGreatCircleMiles(originApt.lat, originApt.lng, destApt.lat, destApt.lng)
+        : 0;
+
+    // Aircraft metadata & layout
+    const meta = this.getAircraftMetadata(tpl.aircraft_type);
+
+    // Defect 1: Map commercial inventories from template if configured
+    const templateInvMap = new Map<CabinClass, number>();
+    if (tpl.commercial_inventories && tpl.commercial_inventories.length > 0) {
+      for (const inv of tpl.commercial_inventories) {
+        templateInvMap.set(inv.cabin_class, inv.allocated_seats);
+      }
+    }
+
+    // Build inventories based on template's configured cabin classes
+    const configuredCabins = new Set(tpl.cabin_classes);
+    // Generator must not silently fill a missing configured cabin from physical capacity
+    if (tpl.source_type === 'AIRLABS') {
+      for (const cabin of tpl.cabin_classes) {
+        if (!templateInvMap.has(cabin)) {
+          throw new BadRequestException(
+            `Commercial template "${tpl.template_id}" has configured cabin "${cabin}" without a corresponding commercial inventory allocation.`,
+          );
+        }
+      }
+    }
+
+    const inventories = meta.inventories
+      .filter((inv) => configuredCabins.has(inv.cabin_class))
+      .map((invDef) => {
+        let basePrice = tpl.base_price_economy;
+        if (invDef.cabin_class === CabinClass.BUSINESS) {
+          basePrice = tpl.base_price_business || Math.round(tpl.base_price_economy * invDef.price_factor);
+        } else if (invDef.cabin_class === CabinClass.CLUB) {
+          basePrice = tpl.base_price_club || Math.round(tpl.base_price_economy * invDef.price_factor);
+        } else if (invDef.cabin_class === CabinClass.FIRST) {
+          basePrice = tpl.base_price_first || Math.round(tpl.base_price_economy * 3.5);
+        }
+
+        // Use persisted commercial allocation if present, otherwise default to aircraft layout capacity
+        const allocatedSeats = templateInvMap.has(invDef.cabin_class)
+          ? templateInvMap.get(invDef.cabin_class)!
+          : invDef.allocated_seats;
+
+        return {
+          cabin_class: invDef.cabin_class,
+          is_smoking: false,
+          bucket_code:
+            invDef.cabin_class === CabinClass.ECONOMY ? 'Y' : invDef.cabin_class === CabinClass.BUSINESS ? 'J' : 'W',
+          base_price: basePrice,
+          allocated_seats: allocatedSeats,
+          available_seats: allocatedSeats,
+        };
+      });
+
+    // Defect 4: Pure calendar date iteration across DST boundaries
+    for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+      const calDate = new Date(Date.UTC(startYear, startMonth - 1, startDay + dayOffset));
+      const yearStr = calDate.getUTCFullYear();
+      const monthStr = String(calDate.getUTCMonth() + 1).padStart(2, '0');
+      const dayStr = String(calDate.getUTCDate()).padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+
+      // ISO Day of Week: 1 = Monday ... 7 = Sunday
+      const rawDow = calDate.getUTCDay();
+      const isoDow = rawDow === 0 ? 7 : rawDow;
+
+      if (!tpl.days_of_week.includes(isoDow)) {
+        continue;
+      }
+
+      // Scheduled Departure UTC (Defect 8 & Issue 5: DST-safe local wall time or provider UTC)
+      let scheduledDepartureUtc: Date;
+      if (tpl.std_dep_time) {
+        scheduledDepartureUtc = resolveLocalWallTimeToUtc(
+          dateStr,
+          tpl.std_dep_time,
+          originTz,
+          tpl.source_dep_time_utc,
+        );
+      } else if (tpl.source_dep_time_utc) {
+        // Find UTC date matching operating date dateStr in originTz
+        const [cy, cm, cd] = dateStr.split('-').map(Number);
+        let matchedUtc: Date | null = null;
+        for (const offset of [-1, 0, 1]) {
+          const candD = new Date(Date.UTC(cy, cm - 1, cd + offset));
+          const candDateStr = `${candD.getUTCFullYear()}-${String(candD.getUTCMonth() + 1).padStart(2, '0')}-${String(candD.getUTCDate()).padStart(2, '0')}`;
+          const candUtc = new Date(`${candDateStr}T${tpl.source_dep_time_utc}:00Z`);
+          if (localDateKey(candUtc, originTz) === dateStr) {
+            matchedUtc = candUtc;
+            break;
+          }
+        }
+        if (!matchedUtc) {
+          throw new BadRequestException(
+            `Cannot align source_dep_time_utc "${tpl.source_dep_time_utc}" to operating date "${dateStr}" in timezone "${originTz}"`,
+          );
+        }
+        scheduledDepartureUtc = matchedUtc;
+      } else {
+        throw new BadRequestException(
+          `Schedule template "${tpl.template_id}" lacks both std_dep_time and source_dep_time_utc.`,
+        );
+      }
+
+      const depTimeMs = scheduledDepartureUtc.getTime();
+      let scheduledArrivalUtc: Date;
+      let durationMinutes: number;
+
+      if (tpl.std_arr_time) {
+        // 1. Local arrival chronology
+        let bestArrivalUtc: Date | null = null;
+        let bestDurationMinutes = Infinity;
+        let lastError: Error | null = null;
+
+        for (const arrDayOffset of [0, 1, 2]) {
+          const candCal = new Date(Date.UTC(yearStr, Number(monthStr) - 1, Number(dayStr) + arrDayOffset));
+          const candArrDateStr = `${candCal.getUTCFullYear()}-${String(candCal.getUTCMonth() + 1).padStart(2, '0')}-${String(candCal.getUTCDate()).padStart(2, '0')}`;
+          let candArrUtc: Date;
+          try {
+            candArrUtc = resolveLocalWallTimeToUtc(candArrDateStr, tpl.std_arr_time, destTz, tpl.source_arr_time_utc);
+          } catch (err: any) {
+            lastError = err;
+            continue;
+          }
+          const diffMinutes = Math.round((candArrUtc.getTime() - depTimeMs) / 60000);
+
+          if (diffMinutes >= 20 && diffMinutes <= 1440) {
+            if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
+              const currentBestDiff = Math.abs(bestDurationMinutes - tpl.source_duration_minutes);
+              const thisDiff = Math.abs(diffMinutes - tpl.source_duration_minutes);
+              if (thisDiff < currentBestDiff) {
+                bestArrivalUtc = candArrUtc;
+                bestDurationMinutes = diffMinutes;
+              }
+            } else if (diffMinutes < bestDurationMinutes) {
+              bestArrivalUtc = candArrUtc;
+              bestDurationMinutes = diffMinutes;
+            }
+          }
+        }
+
+        if (bestArrivalUtc) {
+          scheduledArrivalUtc = bestArrivalUtc;
+          durationMinutes = bestDurationMinutes;
+        } else if (tpl.source_arr_time_utc && lastError) {
+          // Provider local/UTC conflict is a SOURCE ERROR - do not hide it by computing arrival from duration!
+          throw lastError;
+        } else if (lastError && lastError.message.includes('does not exist in timezone')) {
+          // Nonexistent provider local arrival time without authoritative UTC must not fall back to duration!
+          throw lastError;
+        } else if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0 && !tpl.source_arr_time_utc) {
+          // Only fall back to source_duration_minutes if source_arr_time_utc was absent and no nonexistent transition error occurred
+          durationMinutes = tpl.source_duration_minutes;
+          scheduledArrivalUtc = new Date(depTimeMs + durationMinutes * 60000);
+        } else {
+          throw new BadRequestException(
+            lastError?.message ||
+              `Schedule template "${tpl.template_id}" cannot resolve arrival chronology and lacks valid source duration`,
+          );
+        }
+      } else if (tpl.source_arr_time_utc) {
+        // 2. Issue 1: Provider UTC arrival clock directly
+        const depCal = new Date(depTimeMs);
+        const [arrH, arrM] = tpl.source_arr_time_utc.split(':').map(Number);
+        const candidates: Date[] = [];
+        for (const dayOffset of [0, 1, 2]) {
+          const cand = new Date(
+            Date.UTC(depCal.getUTCFullYear(), depCal.getUTCMonth(), depCal.getUTCDate() + dayOffset, arrH, arrM),
+          );
+          if (cand.getTime() > depTimeMs) {
+            candidates.push(cand);
+          }
+        }
+
+        if (candidates.length === 0) {
+          throw new BadRequestException(
+            `Cannot resolve arrival chronology from source_arr_time_utc "${tpl.source_arr_time_utc}" after departure ${scheduledDepartureUtc.toISOString()}`,
+          );
+        }
+
+        if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
+          candidates.sort((a, b) => {
+            const durA = Math.abs((a.getTime() - depTimeMs) / 60000 - tpl.source_duration_minutes!);
+            const durB = Math.abs((b.getTime() - depTimeMs) / 60000 - tpl.source_duration_minutes!);
+            return durA - durB;
+          });
+        } else {
+          candidates.sort((a, b) => a.getTime() - b.getTime());
+        }
+
+        scheduledArrivalUtc = candidates[0];
+        durationMinutes = Math.round((scheduledArrivalUtc.getTime() - depTimeMs) / 60000);
+      } else if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
+        // 3. Positive provider duration
+        durationMinutes = tpl.source_duration_minutes;
+        scheduledArrivalUtc = new Date(depTimeMs + durationMinutes * 60000);
+      } else {
+        throw new BadRequestException(
+          `Schedule template "${tpl.template_id}" lacks std_arr_time, source_arr_time_utc, and source_duration_minutes.`,
+        );
+      }
+
+      const isAirLabs = tpl.source_type === 'AIRLABS';
+
+      const flightInsertDoc = {
+        flight_number: tpl.flight_number,
+        origin_iata: tpl.origin_iata,
+        dest_iata: tpl.dest_iata,
+        departure_date: dateStr,
+        scheduled_departure: scheduledDepartureUtc,
+        scheduled_arrival: scheduledArrivalUtc,
+        duration_minutes: durationMinutes,
+        distance_miles: miles,
+        status: FlightStatus.SCHEDULED,
+        delay_reason: '',
+        delay_minutes: 0,
+        aircraft: {
+          model_code: tpl.aircraft_type,
+          model_name: meta.model_name,
+          total_capacity: meta.total_capacity,
+        },
+        inventories,
+        template_id: tpl.template_id,
+        operating_date: dateStr,
+        is_generated: true,
+        generated_source: isAirLabs ? 'airlabs_commercial_schedule' : 'seed_schedule_330',
+        is_manually_modified: false,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: isAirLabs ? 'AIRLABS_COMMERCIALIZED' : 'INTERNAL_GENERATED',
+        commercial_template_id: (tpl as any)._id?.toString() || undefined,
+        source_type: tpl.source_type,
+        source_route_key: tpl.source_route_key,
+        source_service_key: tpl.source_service_key,
+        source_airline_iata: tpl.source_airline_iata,
+        source_airline_icao: tpl.source_airline_icao,
+        source_flight_iata: tpl.source_flight_iata,
+        source_flight_icao: tpl.source_flight_icao,
+        source_flight_number: tpl.source_flight_number,
+        source_aircraft_icao: tpl.source_aircraft_icao,
+        source_duration_minutes: tpl.source_duration_minutes,
+        source_synced_at: tpl.source_synced_at,
+      };
+
+      currentBatch.push({
+        updateOne: {
+          filter: {
+            template_id: tpl.template_id,
+            operating_date: dateStr,
+          },
+          update: {
+            $setOnInsert: flightInsertDoc,
+          },
+          upsert: true,
+        },
+      });
+
+      if (currentBatch.length >= CHUNK_SIZE) {
+        const res = await this.flightModel.bulkWrite(currentBatch, { ordered: false });
+        totalOperations += currentBatch.length;
+        totalInserted += res.upsertedCount;
+        totalMatched += res.matchedCount;
+        currentBatch = [];
+      }
+    }
+
+    if (currentBatch.length > 0) {
+      const res = await this.flightModel.bulkWrite(currentBatch, { ordered: false });
+      totalOperations += currentBatch.length;
+      totalInserted += res.upsertedCount;
+      totalMatched += res.matchedCount;
+      currentBatch = [];
+    }
+
+    const durationMs = Date.now() - startTime;
+    return {
+      total_days: days,
+      start_date: startFormatted,
+      end_date: endFormatted,
+      templates_count: 1,
+      total_operations: totalOperations,
+      inserted_count: totalInserted,
+      matched_count: totalMatched,
+      skipped_existing: totalMatched,
+      duration_ms: durationMs,
+    };
+  }
+
+  /**
+   * Materialize all active AirLabs commercial templates.
+   */
+  async generateActiveCommercialTemplates(
+    startDateStr?: string,
+    days = 330,
+  ): Promise<{ templatesCount: number; insertedCount: number; matchedCount: number }> {
+    const templates = await this.templateModel
+      .find({ source_type: 'AIRLABS', is_active: true })
+      .exec();
+
+    let insertedCount = 0;
+    let matchedCount = 0;
+
+    for (const tpl of templates) {
+      const stats = await this.generateForTemplate(tpl, startDateStr, days);
+      insertedCount += stats.inserted_count;
+      matchedCount += stats.matched_count;
+    }
+
+    return {
+      templatesCount: templates.length,
+      insertedCount,
+      matchedCount,
+    };
+  }
+
+  /**
+   * Ensures forward horizon for an individual commercial template.
+   * Defect 5: Checks expected operating dates rather than plain calendar end.
+   */
+  async ensureCommercialTemplateHorizon(
+    templateInput: ScheduleTemplateDocument | string,
+    horizonDays = 330,
+    customStartDateStr?: string,
+  ): Promise<number> {
+    let tpl: ScheduleTemplateDocument | null = null;
+    if (typeof templateInput === 'string') {
+      tpl = await this.templateModel.findOne({ template_id: templateInput }).exec();
+      if (!tpl) {
+        throw new BadRequestException(`ScheduleTemplate not found with template_id: "${templateInput}"`);
+      }
+    } else {
+      tpl = templateInput;
+    }
+
+    const originApt = await this.airportModel.findOne({ iata_code: tpl.origin_iata }).lean().exec();
+    // Defect 3: Reject missing timezone on AirLabs template
+    if (tpl.source_type === 'AIRLABS' && (!originApt || !originApt.time_zone)) {
+      throw new BadRequestException(
+        `Missing origin airport or timezone data for AirLabs commercial flight: "${tpl.origin_iata}"`,
+      );
+    }
+
+    const originTz = originApt?.time_zone || 'Asia/Ho_Chi_Minh';
+
+    const originTodayStr = customStartDateStr || localDateKey(new Date(), originTz);
+    const [startYear, startMonth, startDay] = originTodayStr.split('-').map(Number);
+
+    // Defect 5: Compute the final EXPECTED operating date within horizon [0 ... horizonDays - 1]
+    let lastExpectedDateStr: string | null = null;
+    for (let offset = horizonDays - 1; offset >= 0; offset--) {
+      const d = new Date(Date.UTC(startYear, startMonth - 1, startDay + offset));
+      const rawDow = d.getUTCDay();
+      const isoDow = rawDow === 0 ? 7 : rawDow;
+      if (tpl.days_of_week.includes(isoDow)) {
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
+        lastExpectedDateStr = `${y}-${m}-${day}`;
+        break;
+      }
+    }
+
+    if (!lastExpectedDateStr) {
+      return 0; // Template does not operate on any day in the requested horizon
+    }
+
+    // Horizon is complete if flight exists on that last expected operating date
+    const exists = await this.flightModel.exists({
+      template_id: tpl.template_id,
+      operating_date: lastExpectedDateStr,
+    });
+    if (exists) {
+      return 0;
+    }
+
+    const latestFlight = await this.flightModel
+      .findOne({ template_id: tpl.template_id })
+      .sort({ operating_date: -1 })
+      .select('operating_date')
+      .lean()
+      .exec();
+
+    let startDateStr: string;
+    if (latestFlight?.operating_date) {
+      const [ly, lm, ld] = latestFlight.operating_date.split('-').map(Number);
+      const nextDate = new Date(Date.UTC(ly, lm - 1, ld + 1));
+      startDateStr = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDate.getUTCDate()).padStart(2, '0')}`;
+    } else {
+      startDateStr = originTodayStr;
+    }
+
+    const [sy, sm, sd] = startDateStr.split('-').map(Number);
+    const [ey, em, ed] = lastExpectedDateStr.split('-').map(Number);
+    const diffDays = Math.round(
+      (Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86400000,
+    ) + 1;
+
+    if (diffDays > 0) {
+      const stats = await this.generateForTemplate(tpl, startDateStr, diffDays);
       return stats.inserted_count;
     }
 

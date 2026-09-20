@@ -13,11 +13,15 @@ import {
 } from '@nestjs/common';
 import { FlightsService } from './flights.service';
 import { FlightGeneratorService } from './flight-generator.service';
+import { AirlabsCommercialService } from './airlabs-commercial.service';
 import {
   CreateFlightDto,
   SearchFlightDto,
   UpdateFlightDto,
   UpdateFlightStatusDto,
+  CommercializeRouteDto,
+  UpdateCommercialTemplateDto,
+  MaterializeTemplateDto,
 } from './flights.dto';
 import { FlightStatus } from './flights.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
@@ -35,6 +39,7 @@ export class FlightsController {
   constructor(
     private readonly flightsService: FlightsService,
     private readonly flightGeneratorService?: FlightGeneratorService,
+    private readonly airlabsCommercialService?: AirlabsCommercialService,
   ) {}
 
   @Get('search')
@@ -126,6 +131,117 @@ export class FlightsController {
   async getBookingWindow() {
     const { getBookingWindowLimits } = await import('../common/pricing.util');
     return getBookingWindowLimits();
+  }
+
+  // --- Phase C1: AirLabs-Backed Commercial Flight Endpoints (Admin) ---
+
+  @Get('airlabs-routes')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async listAirlabsRoutes(
+    @Query('dep_iata') depIata?: string,
+    @Query('arr_iata') arrIata?: string,
+    @Query('has_schedule') hasSchedule?: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+  ) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.listAirlabsRoutesWithSchedule({
+      dep_iata: depIata,
+      arr_iata: arrIata,
+      has_schedule: hasSchedule !== undefined ? hasSchedule === 'true' : true,
+      limit: limit ? Number(limit) : 50,
+      offset: offset ? Number(offset) : 0,
+    });
+  }
+
+  @Get('airlabs-routes/:sourceKey')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async getAirlabsRouteDetail(@Param('sourceKey') sourceKey: string) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.getAirlabsRouteDetail(sourceKey);
+  }
+
+  @Post('commercialize-airlabs-route')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async commercializeAirlabsRoute(@Body() dto: CommercializeRouteDto) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.commercializeRoute(dto);
+  }
+
+  @Get('commercial-templates')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async listCommercialTemplates(
+    @Query('source_type') sourceType?: string,
+    @Query('is_active') isActive?: string,
+    @Query('origin_iata') originIata?: string,
+    @Query('dest_iata') destIata?: string,
+    @Query('limit') limit?: number,
+    @Query('offset') offset?: number,
+  ) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.listCommercialTemplates({
+      source_type: sourceType,
+      is_active: isActive !== undefined ? isActive === 'true' : undefined,
+      origin_iata: originIata,
+      dest_iata: destIata,
+      limit: limit ? Number(limit) : 50,
+      offset: offset ? Number(offset) : 0,
+    });
+  }
+
+  @Patch('commercial-templates/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async updateCommercialTemplate(
+    @Param('id') id: string,
+    @Body() dto: UpdateCommercialTemplateDto,
+  ) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.updateCommercialTemplate(id, dto);
+  }
+
+  @Patch('commercial-templates/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async setCommercialTemplateStatus(
+    @Param('id') id: string,
+    @Body('is_active') isActive: boolean,
+  ) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.setTemplateStatus(id, isActive);
+  }
+
+  @Post('commercial-templates/:id/materialize')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async materializeCommercialTemplate(
+    @Param('id') id: string,
+    @Body() body: MaterializeTemplateDto,
+  ) {
+    if (!this.airlabsCommercialService) {
+      throw new BadRequestException('AirlabsCommercialService is not available');
+    }
+    return this.airlabsCommercialService.materializeTemplate(
+      id,
+      body?.days_ahead || 30,
+      body?.start_date,
+    );
   }
 
   @Get(':id')

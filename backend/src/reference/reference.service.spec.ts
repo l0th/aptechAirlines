@@ -214,6 +214,101 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
     expect(keyB).toContain('HAN_SGN');
   });
 
+  it('4b. deterministic priority in computeSourceKey: flight_iata > flight_icao > flight_number > NOFLT', () => {
+    // 1. Both flight_iata and flight_icao: preserves existing flight_iata key
+    const withBoth = {
+      airline_iata: 'VN',
+      flight_iata: 'VN231',
+      flight_icao: 'HVN231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+    };
+    expect(computeSourceKey(withBoth)).toBe('AIRLABS_VN_VN231_HAN_SGN_NOTIME_NODAYS');
+
+    // 2. flight_icao only (no flight_iata): distinguishes HVN231 vs HVN233 without collision
+    const icaoA = {
+      airline_icao: 'HVN',
+      flight_icao: 'HVN231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+      dep_time: '08:00',
+      days: ['mon'],
+    };
+    const icaoB = {
+      airline_icao: 'HVN',
+      flight_icao: 'HVN233',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+      dep_time: '08:00',
+      days: ['mon'],
+    };
+    const keyA = computeSourceKey(icaoA);
+    const keyB = computeSourceKey(icaoB);
+    expect(keyA).toBe('AIRLABS_HVN_HVN231_HAN_SGN_L:08:00_D:mon');
+    expect(keyB).toBe('AIRLABS_HVN_HVN233_HAN_SGN_L:08:00_D:mon');
+    expect(keyA).not.toEqual(keyB);
+
+    // 3. flight_number prefixed with carrier when prefix absent
+    const fnRecord = {
+      airline_icao: 'HVN',
+      flight_number: '231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+    };
+    expect(computeSourceKey(fnRecord)).toBe('AIRLABS_HVN_HVN231_HAN_SGN_NOTIME_NODAYS');
+
+    // 4. flight_number already prefixed with carrier
+    const fnPrefixed = {
+      airline_icao: 'HVN',
+      flight_number: 'HVN231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+    };
+    expect(computeSourceKey(fnPrefixed)).toBe('AIRLABS_HVN_HVN231_HAN_SGN_NOTIME_NODAYS');
+
+    // 5. Missing both carrier IATA and ICAO falls back to UNK
+    const noCarrier = {
+      flight_icao: 'HVN231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+    };
+    expect(computeSourceKey(noCarrier)).toBe('AIRLABS_UNK_HVN231_HAN_SGN_NOTIME_NODAYS');
+  });
+
+  it('4c. syncRoutesForAirport accepts airline_icao without airline_iata, persists without synthesizing IATA', async () => {
+    const icaoRecord = {
+      airline_icao: 'HVN',
+      flight_icao: 'HVN231',
+      dep_iata: 'HAN',
+      arr_iata: 'SGN',
+      dep_time: '08:00',
+      days: ['mon'],
+    };
+    const expectedKey = computeSourceKey(icaoRecord);
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({
+        request: { has_more: false },
+        response: [icaoRecord],
+      }),
+    });
+
+    const result = await service.syncRoutesForAirport('HAN');
+    expect(result.updated).toBe(1);
+
+    const calls = routeRefModel.findOneAndUpdate.mock.calls;
+    expect(calls.length).toBe(1);
+    expect(calls[0][0]).toEqual({ source_key: expectedKey });
+    const payload = calls[0][1];
+    expect(payload.airline_icao).toBe('HVN');
+    expect(payload.airline_iata).toBeUndefined();
+    expect(payload.flight_icao).toBe('HVN231');
+    expect(payload.dep_iata).toBe('HAN');
+    expect(payload.arr_iata).toBe('SGN');
+  });
+
   it('5. missing schedule-time fields -> no fake 00:00 or invented timetable', async () => {
     const coarseRecord = {
       airline_iata: 'VN',

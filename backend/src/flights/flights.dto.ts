@@ -257,3 +257,5 @@ export class SearchFlightDto {
   @IsBoolean()
   include_connecting?: boolean;
 }
+
+export * from './airlabs-commercial.dto';

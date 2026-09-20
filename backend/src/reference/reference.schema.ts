@@ -58,8 +58,8 @@ export class RouteRef {
   @Prop({ required: true, uppercase: true, trim: true })
   source_key: string;
 
-  @Prop({ required: true, uppercase: true, trim: true })
-  airline_iata: string;
+  @Prop({ uppercase: true, trim: true })
+  airline_iata?: string;
 
   @Prop({ uppercase: true, trim: true })
   airline_icao?: string;

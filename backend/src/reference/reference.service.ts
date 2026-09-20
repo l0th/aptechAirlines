@@ -14,7 +14,16 @@ const VI_NAMES: Record<string, string> = {
 // NOTIME, NODAYS preserve honesty for coarse route edges without complete schedules.
 export function computeSourceKey(item: any): string {
   const carrier = (item.airline_iata || item.airline_icao || 'UNK').trim().toUpperCase();
-  const flight = (item.flight_iata || (item.flight_number ? `${item.airline_iata || ''}${item.flight_number}` : 'NOFLT')).trim().toUpperCase();
+  let flight = 'NOFLT';
+  if (item.flight_iata && item.flight_iata.trim()) {
+    flight = item.flight_iata.trim().toUpperCase();
+  } else if (item.flight_icao && item.flight_icao.trim()) {
+    flight = item.flight_icao.trim().toUpperCase();
+  } else if (item.flight_number && String(item.flight_number).trim()) {
+    const fn = String(item.flight_number).trim().toUpperCase();
+    const prefix = (item.airline_iata || item.airline_icao || '').trim().toUpperCase();
+    flight = (prefix && fn.startsWith(prefix)) ? fn : `${prefix}${fn}`;
+  }
   const dep = (item.dep_iata || 'UNK').trim().toUpperCase();
   const arr = (item.arr_iata || 'UNK').trim().toUpperCase();
   const time = item.dep_time_utc ? `T:${item.dep_time_utc.trim()}` : (item.dep_time ? `L:${item.dep_time.trim()}` : 'NOTIME');
@@ -245,7 +254,7 @@ export class ReferenceService {
 
         for (const item of items) {
           totalSeen++;
-          if (!item.airline_iata || !item.dep_iata || !item.arr_iata) continue;
+          if ((!item.airline_iata && !item.airline_icao) || !item.dep_iata || !item.arr_iata) continue;
           
           const source_key = computeSourceKey(item);
           const has_schedule = !!(item.dep_time || item.dep_time_utc) && Array.isArray(item.days) && item.days.length > 0;
@@ -256,7 +265,7 @@ export class ReferenceService {
               {
                 source_key,
                 sync_generation: generation,
-                airline_iata: item.airline_iata.trim().toUpperCase(),
+                airline_iata: item.airline_iata?.trim().toUpperCase(),
                 airline_icao: item.airline_icao?.trim().toUpperCase(),
                 flight_number: item.flight_number?.toString().trim(),
                 flight_iata: item.flight_iata?.trim().toUpperCase(),
@@ -300,7 +309,7 @@ export class ReferenceService {
                   { source_key },
                   {
                     $set: {
-                      airline_iata: item.airline_iata.trim().toUpperCase(),
+                      airline_iata: item.airline_iata?.trim().toUpperCase(),
                       airline_icao: item.airline_icao?.trim().toUpperCase(),
                       flight_number: item.flight_number?.toString().trim(),
                       flight_iata: item.flight_iata?.trim().toUpperCase(),
@@ -847,9 +856,12 @@ export class ReferenceService {
     for (const [t, { leg1, leg2 }] of transitOptions.entries()) {
       results.push({
         transit_airport: t,
-        leg1: { airline_iata: leg1.airline_iata, dep_iata: leg1.dep_iata, arr_iata: leg1.arr_iata },
-        leg2: { airline_iata: leg2.airline_iata, dep_iata: leg2.dep_iata, arr_iata: leg2.arr_iata },
-        note: 'Tuyến nối theo mạng đường bay nội bộ Aptech Airlines - chưa có lịch bay cụ thể cho ngày đã chọn',
+        leg1: { airline_iata: leg1.airline_iata || leg1.airline_icao, dep_iata: leg1.dep_iata, arr_iata: leg1.arr_iata },
+        leg2: { airline_iata: leg2.airline_iata || leg2.airline_icao, dep_iata: leg2.dep_iata, arr_iata: leg2.arr_iata },
+        note:
+          source === 'airlabs'
+            ? 'Tuyến nối theo mạng đường bay đối tác AirLabs - chưa có lịch bay cụ thể cho ngày đã chọn'
+            : 'Tuyến nối theo mạng đường bay nội bộ Aptech Airlines - chưa có lịch bay cụ thể cho ngày đã chọn',
       });
     }
     return results;

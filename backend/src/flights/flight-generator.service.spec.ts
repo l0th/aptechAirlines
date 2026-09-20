@@ -230,4 +230,48 @@ describe('FlightGeneratorService - Phase A 330-Day Automated Generator Tests', (
       expect(flightModel.bulkWrite).toHaveBeenCalled();
     });
   });
+
+  describe('7. Legacy Generator Invariants & Regression Proof', () => {
+    it('proves APTECH_FLIGHT_TEMPLATES syncs into templateModel and generates flights with APTECH_AIRLINES and INTERNAL_GENERATED', async () => {
+      // 1. syncTemplatesCatalog invokes templateModel.bulkWrite for catalog templates
+      const syncedCount = await service.syncTemplatesCatalog();
+      expect(syncedCount).toBeGreaterThan(0);
+      expect(templateModel.bulkWrite).toHaveBeenCalled();
+
+      // 2. generateRollingSchedule generates internal flights with APTECH_AIRLINES and INTERNAL_GENERATED
+      const mockLegacyTemplate = {
+        template_id: 'TPL_LEGACY_01',
+        flight_number: 'APT101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        std_dep_time: '08:00',
+        std_arr_time: '10:15',
+        days_of_week: [1, 2, 3, 4, 5, 6, 7],
+        aircraft_type: 'A21N',
+        cabin_classes: [CabinClass.BUSINESS, CabinClass.ECONOMY],
+        base_price_economy: 1500000,
+        is_active: true,
+      };
+
+      templateModel.find.mockReturnValue({
+        lean: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([mockLegacyTemplate]),
+      });
+
+      flightModel.bulkWrite.mockClear();
+      await service.generateRollingSchedule('2026-09-25', 1);
+
+      expect(flightModel.bulkWrite).toHaveBeenCalledTimes(1);
+      const bulkOps = flightModel.bulkWrite.mock.calls[0][0];
+      const insertedDoc = bulkOps[0].updateOne.update.$setOnInsert;
+
+      expect(insertedDoc.operator).toBe('APTECH_AIRLINES');
+      expect(insertedDoc.data_source).toBe('INTERNAL_GENERATED');
+      expect(insertedDoc.generated_source).toBe('seed_schedule_330');
+      expect(insertedDoc.is_bookable).toBe(true);
+      expect(insertedDoc.is_generated).toBe(true);
+      expect(insertedDoc.template_id).toBe('TPL_LEGACY_01');
+      expect(insertedDoc.flight_number).toBe('APT101');
+    });
+  });
 });

@@ -158,6 +158,43 @@ export class Flight {
 
   @Prop({ default: 'INTERNAL_GENERATED' })
   data_source: string;
+
+  // Phase C1: AirLabs-backed commercial provenance
+  @Prop({ required: false, trim: true })
+  commercial_template_id?: string;
+
+  @Prop({ required: false, trim: true })
+  source_type?: string;
+
+  @Prop({ required: false, trim: true })
+  source_route_key?: string;
+
+  @Prop({ required: false, trim: true })
+  source_service_key?: string;
+
+  @Prop({ required: false, uppercase: true, trim: true })
+  source_airline_iata?: string;
+
+  @Prop({ required: false, uppercase: true, trim: true })
+  source_airline_icao?: string;
+
+  @Prop({ required: false, uppercase: true, trim: true })
+  source_flight_iata?: string;
+
+  @Prop({ required: false, uppercase: true, trim: true })
+  source_flight_icao?: string;
+
+  @Prop({ required: false, trim: true })
+  source_flight_number?: string;
+
+  @Prop({ required: false, uppercase: true, trim: true })
+  source_aircraft_icao?: string;
+
+  @Prop({ required: false, min: 1 })
+  source_duration_minutes?: number;
+
+  @Prop({ required: false })
+  source_synced_at?: Date;
 }
 
 export const FlightSchema = SchemaFactory.createForClass(Flight);

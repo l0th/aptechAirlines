@@ -862,12 +862,14 @@ export class FlightsService {
             routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
               originScope.iata_codes,
               destScope.iata_codes,
+              'airlabs',
             );
           }
         } else {
           routeNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
             originScope.iata_codes,
             destScope.iata_codes,
+            'airlabs',
           );
         }
       }
@@ -934,12 +936,14 @@ export class FlightsService {
             returnRouteNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
               destScope.iata_codes,
               originScope.iata_codes,
+              'airlabs',
             );
           }
         } else {
           returnRouteNetworkSuggestions = await this.referenceService.findRouteNetworkConnections(
             destScope.iata_codes,
             originScope.iata_codes,
+            'airlabs',
           );
         }
       }
