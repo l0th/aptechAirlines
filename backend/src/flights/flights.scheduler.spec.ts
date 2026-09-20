@@ -12,13 +12,20 @@ describe('FlightsScheduler - Timezone & Maintenance Verification', () => {
     expect(meta.timeZone).toBe('Asia/Ho_Chi_Minh');
   });
 
-  it('2. handleDailyHorizonMaintenance delegates to flightGeneratorService.ensureHorizonDays(330)', async () => {
+  it('2. handleDailyHorizonMaintenance delegates to flightGeneratorService.ensureActiveCommercialHorizons(330)', async () => {
+    const mockReport = {
+      templates_count: 5,
+      successful_templates: 5,
+      failed_templates: 0,
+      inserted_count: 1,
+      failures: [],
+    };
     const mockFlightGen = {
-      ensureHorizonDays: jest.fn().mockResolvedValue(1),
+      ensureActiveCommercialHorizons: jest.fn().mockResolvedValue(mockReport),
     };
     const scheduler = new FlightsScheduler(mockFlightGen as any);
     const result = await scheduler.handleDailyHorizonMaintenance();
-    expect(mockFlightGen.ensureHorizonDays).toHaveBeenCalledWith(330);
+    expect(mockFlightGen.ensureActiveCommercialHorizons).toHaveBeenCalledWith(330);
     expect(result).toBe(1);
   });
 });

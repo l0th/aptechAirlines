@@ -16,7 +16,7 @@ import {
   BookingType,
   PassengerType,
 } from './bookings.schema';
-import { FlightDocument, FlightStatus } from '../flights/flights.schema';
+import { FlightDocument, FlightStatus, isCustomerBookableFlight } from '../flights/flights.schema';
 import {
   CancelTicketDto,
   ConfirmTicketDto,
@@ -89,9 +89,14 @@ export class BookingsService {
   }
 
   private assertBookableFlight(flight: FlightDocument, context = 'book'): void {
-    if (flight.is_bookable === false || (flight.operator && flight.operator !== 'APTECH_AIRLINES')) {
+    if (flight.status === FlightStatus.CANCELLED) {
       throw new BadRequestException(
-        `Cannot ${context} flight ${flight.flight_number}: only internal Aptech Airlines operational flights are customer-bookable.`,
+        `Cannot ${context} flight ${flight.flight_number}: flight is CANCELLED.`,
+      );
+    }
+    if (!isCustomerBookableFlight(flight)) {
+      throw new BadRequestException(
+        `Cannot ${context} flight ${flight.flight_number}: only AirLabs-backed Aptech commercial flights are customer-bookable.`,
       );
     }
   }

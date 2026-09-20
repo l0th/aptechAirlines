@@ -180,11 +180,13 @@ export class ApiService {
     status?: FlightStatus;
     origin?: string;
     dest?: string;
+    commercial_only?: boolean;
   }): Observable<Flight[]> {
     let params = new HttpParams();
     if (filter?.status) params = params.set('status', filter.status);
     if (filter?.origin) params = params.set('origin', filter.origin);
     if (filter?.dest) params = params.set('dest', filter.dest);
+    if (filter?.commercial_only !== undefined) params = params.set('commercial_only', String(filter.commercial_only));
     return this.http.get<Flight[]>(`${this.baseUrl}/flights`, { params });
   }
 

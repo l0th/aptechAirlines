@@ -1691,6 +1691,7 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
         cabin_classes: [CabinClass.BUSINESS, CabinClass.ECONOMY],
         base_price_economy: 1200000,
         is_active: true,
+        source_type: 'LEGACY_SYNTHETIC',
       };
 
       mockTemplates.set('APT_LEGACY_001', legacyTemplate);

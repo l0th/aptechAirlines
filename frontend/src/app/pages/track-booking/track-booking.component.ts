@@ -1699,7 +1699,7 @@ export class TrackBookingComponent implements OnInit {
       }
 
       this.api
-        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
+        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata, commercial_only: true })
         .subscribe({
           next: (flights) => {
             this.loadingAlternatives.set(false);
@@ -1834,7 +1834,7 @@ export class TrackBookingComponent implements OnInit {
       });
     } else {
       this.api
-        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata })
+        .getFlights({ origin: outbound.origin_iata, dest: outbound.dest_iata, commercial_only: true })
         .subscribe({
           next: (flights) => {
             this.loadingAlternatives.set(false);
@@ -1936,7 +1936,7 @@ export class TrackBookingComponent implements OnInit {
       });
     } else {
       this.api
-        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata })
+        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata, commercial_only: true })
         .subscribe({
           next: (flights) => {
             this.loadingReturnAlternatives.set(false);
@@ -2114,7 +2114,7 @@ export class TrackBookingComponent implements OnInit {
     } else {
       // Return direction is direct
       this.api
-        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata })
+        .getFlights({ origin: firstReturn.origin_iata, dest: firstReturn.dest_iata, commercial_only: true })
         .subscribe({
           next: (flights) => {
             this.loadingReturnAlternatives.set(false);

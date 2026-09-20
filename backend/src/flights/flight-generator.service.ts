@@ -19,6 +19,14 @@ export interface GenerationStats {
   duration_ms: number;
 }
 
+export interface CommercialHorizonReport {
+  templates_count: number;
+  successful_templates: number;
+  failed_templates: number;
+  inserted_count: number;
+  failures: Array<{ template_id: string; error: string }>;
+}
+
 @Injectable()
 export class FlightGeneratorService {
   private readonly logger = new Logger(FlightGeneratorService.name);
@@ -141,6 +149,7 @@ export class FlightGeneratorService {
             base_price_club: tpl.base_price_club,
             base_price_first: tpl.base_price_first,
             is_active: true,
+            source_type: 'LEGACY_SYNTHETIC',
           },
         },
         upsert: true,
@@ -161,10 +170,13 @@ export class FlightGeneratorService {
     const startTime = Date.now();
     await this.syncTemplatesCatalog();
 
-    // 1. Fetch active templates
-    const templates = await this.templateModel.find({ is_active: true }).lean().exec();
+    // 1. Fetch active legacy templates only (AirLabs commercial templates must never pass through legacy generator)
+    const templates = await this.templateModel
+      .find({ is_active: true, source_type: 'LEGACY_SYNTHETIC' })
+      .lean()
+      .exec();
     if (templates.length === 0) {
-      throw new Error('No active schedule templates found in database.');
+      throw new Error('No active legacy schedule templates found in database.');
     }
 
     // 2. Fetch all airports for timezone and coordinate lookup
@@ -369,15 +381,23 @@ export class FlightGeneratorService {
     const targetEndDate = new Date(baseDate.getTime() + (horizonDays - 1) * 86400000);
     const targetEndStr = localDateKey(targetEndDate, 'Asia/Ho_Chi_Minh');
 
-    // Check if the farthest horizon day is already generated
-    const exists = await this.flightModel.exists({ operating_date: targetEndStr });
+    // Check if the farthest horizon day is already generated for the legacy population
+    const exists = await this.flightModel.exists({
+      operating_date: targetEndStr,
+      data_source: 'INTERNAL_GENERATED',
+      generated_source: 'seed_schedule_330',
+    });
     if (exists) {
       return 0; // Horizon is intact; zero overhead on startup
     }
 
     // Generate missing days only (from last existing date forward)
     const latestFlight = await this.flightModel
-      .findOne({ is_generated: true })
+      .findOne({
+        is_generated: true,
+        data_source: 'INTERNAL_GENERATED',
+        generated_source: 'seed_schedule_330',
+      })
       .sort({ operating_date: -1 })
       .select('operating_date')
       .lean()
@@ -771,29 +791,53 @@ export class FlightGeneratorService {
   }
 
   /**
-   * Materialize all active AirLabs commercial templates.
+   * Materialize all active AirLabs commercial templates with per-template failure isolation.
    */
   async generateActiveCommercialTemplates(
     startDateStr?: string,
     days = 330,
-  ): Promise<{ templatesCount: number; insertedCount: number; matchedCount: number }> {
+  ): Promise<{
+    templates_count: number;
+    successful_templates: number;
+    failed_templates: number;
+    inserted_count: number;
+    matched_count: number;
+    failures: Array<{ template_id: string; error: string }>;
+  }> {
     const templates = await this.templateModel
       .find({ source_type: 'AIRLABS', is_active: true })
       .exec();
 
+    let successfulTemplates = 0;
+    let failedTemplates = 0;
     let insertedCount = 0;
     let matchedCount = 0;
+    const failures: Array<{ template_id: string; error: string }> = [];
 
     for (const tpl of templates) {
-      const stats = await this.generateForTemplate(tpl, startDateStr, days);
-      insertedCount += stats.inserted_count;
-      matchedCount += stats.matched_count;
+      try {
+        const stats = await this.generateForTemplate(tpl, startDateStr, days);
+        insertedCount += stats.inserted_count;
+        matchedCount += stats.matched_count;
+        successfulTemplates++;
+      } catch (err: any) {
+        failedTemplates++;
+        const errMsg = err?.message || String(err);
+        failures.push({ template_id: tpl.template_id, error: errMsg });
+        this.logger.error(
+          `Failed generation for commercial template "${tpl.template_id}": ${errMsg}`,
+          err?.stack,
+        );
+      }
     }
 
     return {
-      templatesCount: templates.length,
-      insertedCount,
-      matchedCount,
+      templates_count: templates.length,
+      successful_templates: successfulTemplates,
+      failed_templates: failedTemplates,
+      inserted_count: insertedCount,
+      matched_count: matchedCount,
+      failures,
     };
   }
 
@@ -885,5 +929,45 @@ export class FlightGeneratorService {
     }
 
     return 0;
+  }
+
+  /**
+   * Orchestrates forward horizon maintenance across all active AirLabs commercial templates.
+   * Isolates failures per template so one failure does not halt maintenance for others.
+   * Returns an aggregate report containing templates_count, successful_templates, failed_templates, inserted_count, failures.
+   */
+  async ensureActiveCommercialHorizons(horizonDays = 330): Promise<CommercialHorizonReport> {
+    const templates = await this.templateModel
+      .find({ source_type: 'AIRLABS', is_active: true })
+      .exec();
+
+    let successfulTemplates = 0;
+    let failedTemplates = 0;
+    let totalInserted = 0;
+    const failures: Array<{ template_id: string; error: string }> = [];
+
+    for (const tpl of templates) {
+      try {
+        const appended = await this.ensureCommercialTemplateHorizon(tpl, horizonDays);
+        totalInserted += appended;
+        successfulTemplates++;
+      } catch (err: any) {
+        failedTemplates++;
+        const errMsg = err?.message || String(err);
+        failures.push({ template_id: tpl.template_id, error: errMsg });
+        this.logger.error(
+          `Failed horizon maintenance for commercial template "${tpl.template_id}": ${errMsg}`,
+          err?.stack,
+        );
+      }
+    }
+
+    return {
+      templates_count: templates.length,
+      successful_templates: successfulTemplates,
+      failed_templates: failedTemplates,
+      inserted_count: totalInserted,
+      failures,
+    };
   }
 }

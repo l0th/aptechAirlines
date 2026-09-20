@@ -151,6 +151,9 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
     const mockFlight = {
       _id: flightId,
       flight_number: 'VN123',
+      operator: 'APTECH_AIRLINES',
+      is_bookable: true,
+      data_source: 'AIRLABS_COMMERCIALIZED',
       origin_iata: 'HAN',
       dest_iata: 'SGN',
       scheduled_departure: new Date(Date.now() + 86400000 * 30),
@@ -394,6 +397,9 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
     const mockFlight = {
       _id: flightId,
       flight_number: 'VN456',
+      operator: 'APTECH_AIRLINES',
+      is_bookable: true,
+      data_source: 'AIRLABS_COMMERCIALIZED',
       origin_iata: 'HAN',
       dest_iata: 'SGN',
       scheduled_departure: new Date(Date.now() + 86400000 * 30),
@@ -694,6 +700,9 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
     const mockFlight = {
       _id: flightId,
       flight_number: 'VN123',
+      operator: 'APTECH_AIRLINES',
+      is_bookable: true,
+      data_source: 'AIRLABS_COMMERCIALIZED',
       origin_iata: 'HAN',
       dest_iata: 'SGN',
       scheduled_departure: new Date(Date.now() + 86400000 * 30),

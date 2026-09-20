@@ -208,3 +208,29 @@ FlightSchema.index({ origin_iata: 1, dest_iata: 1, departure_date: 1, status: 1 
 FlightSchema.index({ is_bookable: 1, origin_iata: 1, dest_iata: 1, departure_date: 1, status: 1 });
 FlightSchema.index({ operator: 1, is_bookable: 1 });
 FlightSchema.index({ status: 1, scheduled_departure: 1 });
+FlightSchema.index({ data_source: 1, operator: 1, is_bookable: 1, status: 1 });
+
+// ============================================================================
+// Phase C2: Authoritative Customer-Bookable Flight Invariant
+// ============================================================================
+export const CUSTOMER_BOOKABLE_OPERATOR = 'APTECH_AIRLINES';
+export const CUSTOMER_BOOKABLE_DATA_SOURCE = 'AIRLABS_COMMERCIALIZED';
+
+export function getCustomerBookableFlightFilter(): Record<string, any> {
+  return {
+    operator: CUSTOMER_BOOKABLE_OPERATOR,
+    is_bookable: true,
+    data_source: CUSTOMER_BOOKABLE_DATA_SOURCE,
+    status: { $ne: FlightStatus.CANCELLED },
+  };
+}
+
+export function isCustomerBookableFlight(flight: any): boolean {
+  if (!flight) return false;
+  return (
+    flight.operator === CUSTOMER_BOOKABLE_OPERATOR &&
+    flight.is_bookable === true &&
+    flight.data_source === CUSTOMER_BOOKABLE_DATA_SOURCE &&
+    flight.status !== FlightStatus.CANCELLED
+  );
+}

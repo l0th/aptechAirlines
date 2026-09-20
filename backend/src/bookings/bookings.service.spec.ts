@@ -90,6 +90,9 @@ describe('BookingsService', () => {
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         status: 'SCHEDULED',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         inventories: [{ _id: 'i1', id: 'i1', available_seats: 10, base_price: 100 }],
       };
       flightsService.findById.mockResolvedValue(mockFlight);
@@ -114,7 +117,6 @@ describe('BookingsService', () => {
     it('sets CONFIRMED + confirmation_number + payment transaction + accrues miles when buying', async () => {
       baseDto.is_block = false;
       baseDto.passengers.push({ passenger_type: PassengerType.ADULT, first_name: 'C', last_name: 'D' }); // 2 adults
-      
       const result = await service.createBooking(baseDto);
       expect(result.status).toBe(BookingStatus.CONFIRMED);
       expect(result.confirmation_number).toBeDefined();
@@ -140,6 +142,9 @@ describe('BookingsService', () => {
         _id: 'f2',
         flight_number: 'FL2',
         distance_miles: 1000,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         scheduled_departure: new Date(Date.now() + 35 * 24 * 60 * 60 * 1000),
         inventories: [{ _id: 'i2', id: 'i2', available_seats: 10, base_price: 100 }],
       };
@@ -183,6 +188,9 @@ describe('BookingsService', () => {
         _id: 'f2',
         flight_number: 'FL2',
         distance_miles: 500,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         scheduled_departure: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000),
         scheduled_arrival: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000),
         origin_iata: 'DAD',
@@ -740,6 +748,9 @@ describe('BookingsService', () => {
         origin_iata: origin,
         dest_iata: dest,
         inventories,
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
       };
     }
 
@@ -1170,6 +1181,9 @@ describe('BookingsService', () => {
       const newLeg1 = {
         _id: 'f_new1',
         flight_number: 'VN10',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         scheduled_departure: futureDate,
@@ -1181,6 +1195,9 @@ describe('BookingsService', () => {
       const newLeg2 = {
         _id: 'f_new2',
         flight_number: 'VN20',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'DAD',
         dest_iata: 'SGN',
         scheduled_departure: new Date(futureDate.getTime() + 150 * 60000), // 75 min layover -> valid
@@ -1222,6 +1239,9 @@ describe('BookingsService', () => {
       const newLeg1 = {
         _id: 'f_new1',
         flight_number: 'VN10',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         scheduled_departure: futureDate,
@@ -1232,6 +1252,9 @@ describe('BookingsService', () => {
       const newLeg2 = {
         _id: 'f_new2',
         flight_number: 'VN20',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'DAD',
         dest_iata: 'SGN',
         scheduled_departure: new Date(futureDate.getTime() + 90 * 60000), // 15 min layover < 45 min
@@ -1266,6 +1289,9 @@ describe('BookingsService', () => {
       const newLeg1 = {
         _id: 'f_new1',
         flight_number: 'VN10',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         scheduled_departure: futureDate,
@@ -1276,6 +1302,9 @@ describe('BookingsService', () => {
       const newLeg2 = {
         _id: 'f_new2',
         flight_number: 'VN20',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'CXR', // Discontinuous: DAD != CXR
         dest_iata: 'SGN',
         scheduled_departure: new Date(futureDate.getTime() + 150 * 60000),
@@ -1319,6 +1348,9 @@ describe('BookingsService', () => {
       const newLeg1 = {
         _id: 'f_new1',
         flight_number: 'VN10',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         scheduled_departure: futureDate,
@@ -1329,6 +1361,9 @@ describe('BookingsService', () => {
       const newLeg2 = {
         _id: 'f_new2',
         flight_number: 'VN20',
+        operator: 'APTECH_AIRLINES',
+        is_bookable: true,
+        data_source: 'AIRLABS_COMMERCIALIZED',
         origin_iata: 'DAD',
         dest_iata: 'SGN',
         scheduled_departure: new Date(futureDate.getTime() + 150 * 60000),

@@ -22,6 +22,7 @@ import {
   CommercializeRouteDto,
   UpdateCommercialTemplateDto,
   MaterializeTemplateDto,
+  isValidCalendarDateString,
 } from './flights.dto';
 import { FlightStatus } from './flights.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
@@ -74,19 +75,61 @@ export class FlightsController {
     );
   }
 
-  // Admin on-demand schedule horizon generation
+  private validateScheduleGenerationInput(
+    startDate?: string,
+    days?: any,
+  ): { parsedStartDate?: string; parsedDays: number } {
+    let parsedDays = 330;
+    if (days !== undefined && days !== null && days !== '') {
+      const num = typeof days === 'number' ? days : Number(days);
+      if (typeof days === 'string' && days.trim() === '') {
+        parsedDays = 330;
+      } else if (isNaN(num) || !Number.isInteger(num)) {
+        throw new BadRequestException('days must be an integer');
+      } else if (num < 1 || num > 330) {
+        throw new BadRequestException('days must be between 1 and 330');
+      } else {
+        parsedDays = num;
+      }
+    }
+
+    if (startDate !== undefined && startDate !== null && startDate !== '') {
+      if (!isValidCalendarDateString(startDate)) {
+        throw new BadRequestException('start_date must be a valid calendar date in YYYY-MM-DD format');
+      }
+    }
+
+    return { parsedStartDate: startDate || undefined, parsedDays };
+  }
+
+  // Admin on-demand schedule generation (default: AirLabs commercial templates)
   @Post('generate-schedule')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLES)
   async generateSchedule(
     @Query('start_date') startDate?: string,
-    @Query('days') days?: number,
+    @Query('days') days?: any,
   ) {
     if (!this.flightGeneratorService) {
       throw new BadRequestException('FlightGeneratorService not available');
     }
-    const daysNum = days ? Number(days) : 330;
-    return this.flightGeneratorService.generateRollingSchedule(startDate, daysNum);
+    const { parsedStartDate, parsedDays } = this.validateScheduleGenerationInput(startDate, days);
+    return this.flightGeneratorService.generateActiveCommercialTemplates(parsedStartDate, parsedDays);
+  }
+
+  // Explicit legacy synthetic generation (kept for compatibility and regression tests)
+  @Post('generate-legacy-schedule')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async generateLegacySchedule(
+    @Query('start_date') startDate?: string,
+    @Query('days') days?: any,
+  ) {
+    if (!this.flightGeneratorService) {
+      throw new BadRequestException('FlightGeneratorService not available');
+    }
+    const { parsedStartDate, parsedDays } = this.validateScheduleGenerationInput(startDate, days);
+    return this.flightGeneratorService.generateRollingSchedule(parsedStartDate, parsedDays);
   }
 
   @Get()
@@ -94,8 +137,10 @@ export class FlightsController {
     @Query('status') status?: FlightStatus,
     @Query('origin') origin?: string,
     @Query('dest') dest?: string,
+    @Query('commercial_only') commercialOnly?: string,
   ) {
-    return this.flightsService.findAll(status, origin, dest);
+    const isCommercialOnly = commercialOnly === 'true';
+    return this.flightsService.findAll(status, origin, dest, isCommercialOnly);
   }
 
   // Requirement 3.10: public lookup by flight number + date (must be above @Get(':id'))

@@ -18,18 +18,27 @@ export class FlightsScheduler {
     timeZone: 'Asia/Ho_Chi_Minh',
   })
   async handleDailyHorizonMaintenance(): Promise<number> {
-    this.logger.log('Running daily rolling flight horizon maintenance...');
+    this.logger.log('Running daily AirLabs commercial flight horizon maintenance...');
     try {
-      const appended = await this.flightGeneratorService.ensureHorizonDays(330);
-      if (appended > 0) {
-        this.logger.log(`Daily horizon maintenance: appended ${appended} tail flights.`);
+      const report = await this.flightGeneratorService.ensureActiveCommercialHorizons(330);
+      if (report.inserted_count > 0) {
+        this.logger.log(
+          `Daily AirLabs commercial flight horizon maintenance: appended ${report.inserted_count} tail flights across ${report.successful_templates} active templates.`,
+        );
       } else {
-        this.logger.log('Daily horizon maintenance: 330-day horizon is intact.');
+        this.logger.log(
+          `Daily AirLabs commercial flight horizon maintenance: 330-day horizon is intact across ${report.successful_templates} active templates.`,
+        );
       }
-      return appended;
+      if (report.failed_templates > 0) {
+        this.logger.warn(
+          `Daily AirLabs commercial flight horizon maintenance encountered ${report.failed_templates} template failure(s).`,
+        );
+      }
+      return report.inserted_count;
     } catch (err: any) {
       this.logger.error(
-        `Daily horizon maintenance error: ${err?.message || err}`,
+        `Daily AirLabs commercial flight horizon maintenance error: ${err?.message || err}`,
         err?.stack,
       );
       return 0;

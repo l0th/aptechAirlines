@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Flight, FlightDocument, FlightStatus, CabinClass } from './flights.schema';
+import { Flight, FlightDocument, FlightStatus, CabinClass, getCustomerBookableFlightFilter } from './flights.schema';
 import {
   CreateFlightDto,
   SearchFlightDto,
@@ -39,7 +39,7 @@ export function enumerateDateRange(startDate: string, endDate?: string): string[
   const cur = new Date(`${startDate}T00:00:00Z`);
   const end = new Date(`${endDate}T00:00:00Z`);
   while (cur <= end) {
-    dates.push(cur.toISOString().split('T')[0]);
+    dates.push(cur.toISOString().substring(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return dates;
@@ -73,11 +73,23 @@ export class FlightsService {
     @Optional() private readonly seatAllocationService?: SeatAllocationService,
   ) {}
 
-  async findAll(status?: FlightStatus, origin?: string, dest?: string): Promise<Flight[]> {
+  async findAll(status?: FlightStatus, origin?: string, dest?: string, commercialOnly = false): Promise<Flight[]> {
+    if (commercialOnly && status === FlightStatus.CANCELLED) {
+      return [];
+    }
+
     const filter: any = {};
-    if (status) filter.status = status;
+    if (commercialOnly) {
+      Object.assign(filter, getCustomerBookableFlightFilter());
+      if (status) {
+        filter.status = status;
+      }
+    } else if (status) {
+      filter.status = status;
+    }
     if (origin) filter.origin_iata = origin.toUpperCase();
     if (dest) filter.dest_iata = dest.toUpperCase();
+
     return this.flightModel.find(filter).sort({ scheduled_departure: 1 }).exec();
   }
 
@@ -956,9 +968,9 @@ export class FlightsService {
     let originAirportsWithFlights = 0;
     if (originScope.iata_codes.length > 1) {
       const distinct = await this.flightModel.distinct('origin_iata', {
+        ...getCustomerBookableFlightFilter(),
         origin_iata: { $in: originScope.iata_codes },
         departure_date: dateFilter,
-        status: { $ne: FlightStatus.CANCELLED }
       }).exec();
       originAirportsWithFlights = distinct.length;
     }
@@ -966,9 +978,9 @@ export class FlightsService {
     let destAirportsWithFlights = 0;
     if (destScope.iata_codes.length > 1) {
       const distinct = await this.flightModel.distinct('dest_iata', {
+        ...getCustomerBookableFlightFilter(),
         dest_iata: { $in: destScope.iata_codes },
         departure_date: dateFilter,
-        status: { $ne: FlightStatus.CANCELLED }
       }).exec();
       destAirportsWithFlights = distinct.length;
     }
@@ -1032,11 +1044,9 @@ export class FlightsService {
     if (originIatas.length === 0 || destIatas.length === 0) return [];
 
     const filter: any = {
+      ...getCustomerBookableFlightFilter(),
       origin_iata: { $in: originIatas },
       dest_iata: { $in: destIatas },
-      status: { $ne: FlightStatus.CANCELLED },
-      is_bookable: true,
-      operator: 'APTECH_AIRLINES',
     };
 
     if (departureDateEnd) {
@@ -1228,11 +1238,9 @@ export class FlightsService {
 
     const leg1Flights = await this.flightModel
       .find({
+        ...getCustomerBookableFlightFilter(),
         origin_iata: { $in: originIatas },
         departure_date: leg1DateFilter,
-        status: { $ne: FlightStatus.CANCELLED },
-        is_bookable: true,
-        operator: 'APTECH_AIRLINES',
         'inventories.available_seats': { $gte: totalPassengers },
       })
       .exec();
@@ -1263,11 +1271,9 @@ export class FlightsService {
     const leg2OriginFilter = transit1Iatas.length === 1 ? transit1Iatas[0] : { $in: transit1Iatas };
     const leg2Flights = await this.flightModel
       .find({
+        ...getCustomerBookableFlightFilter(),
         origin_iata: leg2OriginFilter,
         departure_date: { $in: leg2Dates },
-        status: { $ne: FlightStatus.CANCELLED },
-        is_bookable: true,
-        operator: 'APTECH_AIRLINES',
         'inventories.available_seats': { $gte: totalPassengers },
       })
       .exec();
@@ -1294,12 +1300,10 @@ export class FlightsService {
       const leg3OriginFilter = transit2Arr.length === 1 ? transit2Arr[0] : { $in: transit2Arr };
       leg3Flights = await this.flightModel
         .find({
+          ...getCustomerBookableFlightFilter(),
           origin_iata: leg3OriginFilter,
           dest_iata: { $in: destIatas },
           departure_date: { $in: leg2Dates },
-          status: { $ne: FlightStatus.CANCELLED },
-          is_bookable: true,
-          operator: 'APTECH_AIRLINES',
           'inventories.available_seats': { $gte: totalPassengers },
         })
         .exec();
