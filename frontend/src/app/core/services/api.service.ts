@@ -17,6 +17,8 @@ import {
   AirportRoutesSyncResponse,
   AirLabsRoutesListResponse,
   CommercialTemplatesListResponse,
+  CommercialNetworkDiscoveryRequest,
+  CommercialNetworkDiscoveryResponse,
 } from '../models/flight.model';
 import {
   Airport,
@@ -31,32 +33,6 @@ import {
   CancellationPolicy,
 } from '../models/booking.model';
 import { AuthResponse, RegisterPayload, User, UserRole } from '../models/user.model';
-
-export type AirLabsSyncMode = 'route' | 'departure' | 'arrival' | 'airline' | 'flight';
-
-export interface AirLabsSyncParams {
-  mode?: AirLabsSyncMode;
-  dep_iata?: string;
-  arr_iata?: string;
-  airline_iata?: string;
-  flight_iata?: string;
-  limit?: number;
-  offset?: number;
-  api_key?: string;
-}
-
-export interface AirLabsSyncResponse {
-  message: string;
-  mode?: AirLabsSyncMode;
-  request_params?: any;
-  fetched_count?: number;
-  created_or_updated_count?: number;
-  synchronized_count?: number;
-  has_more?: boolean;
-  next_offset?: number;
-  window_note?: string;
-  flights?: any[];
-}
 
 export interface AirportSyncAllResponse {
   checked: number;
@@ -215,84 +191,9 @@ export class ApiService {
     );
   }
 
-  /**
-   * Đồng bộ lịch bay từ AirLabs với các chế độ linh hoạt (route, departure, arrival, airline, flight).
-   */
-  syncAirLabsModes(params: AirLabsSyncParams): Observable<AirLabsSyncResponse> {
-    let httpParams = new HttpParams();
-    const body: Record<string, any> = {};
-
-    const mode = params.mode || 'route';
-    httpParams = httpParams.set('mode', mode);
-    body['mode'] = mode;
-
-    if (params.dep_iata) {
-      const dep = params.dep_iata.trim().toUpperCase();
-      httpParams = httpParams.set('dep_iata', dep);
-      body['dep_iata'] = dep;
-    }
-    if (params.arr_iata) {
-      const arr = params.arr_iata.trim().toUpperCase();
-      httpParams = httpParams.set('arr_iata', arr);
-      body['arr_iata'] = arr;
-    }
-    if (params.airline_iata) {
-      const airline = params.airline_iata.trim().toUpperCase();
-      httpParams = httpParams.set('airline_iata', airline);
-      body['airline_iata'] = airline;
-    }
-    if (params.flight_iata) {
-      const flight = params.flight_iata.trim().toUpperCase();
-      httpParams = httpParams.set('flight_iata', flight);
-      body['flight_iata'] = flight;
-    }
-    if (params.limit !== undefined && params.limit !== null && (params.limit as any) !== '') {
-      httpParams = httpParams.set('limit', String(params.limit));
-      body['limit'] = Number(params.limit);
-    }
-    if (params.offset !== undefined && params.offset !== null && (params.offset as any) !== '') {
-      httpParams = httpParams.set('offset', String(params.offset));
-      body['offset'] = Number(params.offset);
-    }
-    if (params.api_key && params.api_key.trim()) {
-      httpParams = httpParams.set('api_key', params.api_key.trim());
-      body['api_key'] = params.api_key.trim();
-    }
-
-    return this.http.post<AirLabsSyncResponse>(`${this.baseUrl}/flights/sync-airlabs`, body, {
-      params: httpParams,
-    });
-  }
-
-  /**
-   * Đồng bộ lịch bay thật từ AirLabs.
-   * KHÔNG hardcode API key trong bundle frontend: nếu không truyền `apiKey`,
-   * backend sẽ dùng AIRLABS_API_KEY trong biến môi trường (.env).
-   */
-  syncAirLabs(
-    depIata = 'HAN',
-    arrIata = 'SGN',
-    apiKey?: string,
-  ): Observable<AirLabsSyncResponse> {
-    return this.syncAirLabsModes({
-      mode: 'route',
-      dep_iata: depIata,
-      arr_iata: arrIata,
-      api_key: apiKey,
-    });
-  }
-
   getAirlineFleet(airlineIata: string): Observable<any> {
     const params = new HttpParams().set('airline_iata', airlineIata);
     return this.http.get<any>(`${this.baseUrl}/flights/airline-fleet`, { params });
-  }
-
-  enrichAirborneFlightsForToday(): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/flights/enrich-airborne`, {});
-  }
-
-  enrichAircraftFromAirLabs(id: string): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/flights/${id}/enrich-aircraft`, {});
   }
 
   createFlight(flightData: any): Observable<Flight> {
@@ -605,6 +506,15 @@ export class ApiService {
   getAirLabsRouteBySourceKey(sourceKey: string): Observable<AirLabsRouteRef> {
     return this.http.get<AirLabsRouteRef>(
       `${this.baseUrl}/flights/airlabs-routes/${encodeURIComponent(sourceKey)}`,
+    );
+  }
+
+  discoverCommercialNetwork(
+    payload: CommercialNetworkDiscoveryRequest,
+  ): Observable<CommercialNetworkDiscoveryResponse> {
+    return this.http.post<CommercialNetworkDiscoveryResponse>(
+      `${this.baseUrl}/flights/commercial-network-discovery`,
+      payload,
     );
   }
 

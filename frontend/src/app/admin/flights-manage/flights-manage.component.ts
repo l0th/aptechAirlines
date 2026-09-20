@@ -37,14 +37,6 @@ const FLIGHT_FORM_DEFAULTS = {
         <div class="flex gap-2">
           <button
             type="button"
-            (click)="enrichAirborne()"
-            class="btn-navy text-xs !py-2.5 !px-5 font-bold"
-          >
-            <app-icon name="refreshcw" class="w-4 h-4" />
-            <span>{{ lang.isVietnamese() ? 'Làm giàu máy bay hôm nay' : 'Enrich aircraft for today' }}</span>
-          </button>
-          <button
-            type="button"
             (click)="openCreateModal()"
             class="btn-gold text-xs !py-2.5 !px-5 font-bold"
           >
@@ -195,16 +187,6 @@ const FLIGHT_FORM_DEFAULTS = {
                     </td>
                     <td class="py-3.5 px-4 text-right">
                       <div class="flex items-center justify-end gap-2">
-                        <!-- Enrich Aircraft Button -->
-                        <button
-                          type="button"
-                          (click)="enrichAircraft(fl)"
-                          class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg border border-blue-200 transition-colors"
-                          [title]="lang.isVietnamese() ? 'Lấy máy bay thật' : 'Fetch real aircraft'"
-                        >
-                          <app-icon name="refreshcw" class="w-4 h-4" />
-                        </button>
-
                         <!-- Edit Flight Button -->
                         <button
                           type="button"
@@ -781,36 +763,6 @@ export class FlightsManageComponent implements OnInit {
     const mins = minutes && minutes > 0 ? minutes : Number((reason || '').match(/trễ\s+(\d+)\s+phút/i)?.[1] || 0);
     if (mins > 0) return this.lang.t('track.delayMinutes').replace('{n}', String(mins));
     return reason || '';
-  }
-
-  enrichAirborne(): void {
-    this.api.enrichAirborneFlightsForToday().subscribe({
-      next: (res) => {
-        const msg = this.lang.isVietnamese() ? `Làm giàu máy bay: kiểm tra ${res.checked}, thành công ${res.enriched}, không thấy ${res.not_found}, lỗi ${res.errors}.` : `Aircraft enrichment: checked ${res.checked}, enriched ${res.enriched}, not found ${res.not_found}, errors ${res.errors}.`;
-        this.toast.success(msg);
-        this.loadFlights();
-      },
-      error: (err) => {
-        this.toast.error(this.describeError(err, this.lang.isVietnamese() ? 'Lỗi khi làm giàu máy bay.' : 'Failed to enrich aircraft.'));
-      }
-    });
-  }
-
-  enrichAircraft(fl: Flight): void {
-    this.api.enrichAircraftFromAirLabs(fl._id).subscribe({
-      next: (res) => {
-        if (res.found) {
-          const msg = this.lang.isVietnamese() ? `Đã lấy máy bay thật: ${res.flight.aircraft.model_name} (${res.registration})` : `Retrieved real aircraft: ${res.flight.aircraft.model_name} (${res.registration})`;
-          this.toast.success(msg);
-        } else {
-          this.toast.info(res.message);
-        }
-        this.loadFlights();
-      },
-      error: (err) => {
-        this.toast.error(this.describeError(err, this.lang.isVietnamese() ? 'Lỗi khi lấy thông tin máy bay.' : 'Failed to retrieve aircraft info.'));
-      }
-    });
   }
 
   onFleetModelChange(): void {

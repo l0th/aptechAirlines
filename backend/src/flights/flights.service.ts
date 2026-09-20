@@ -16,6 +16,10 @@ import {
   UpdateFlightStatusDto,
   isValidCalendarDateString,
 } from './flights.dto';
+import {
+  CommercialNetworkDiscoveryDto,
+  CommercialNetworkDiscoveryResponse,
+} from './airlabs-commercial.dto';
 import { AirportsService } from '../airports/airports.service';
 import { Booking, BookingDocument, BookingStatus } from '../bookings/bookings.schema';
 import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes } from '../common/timezone.util';
@@ -1402,6 +1406,7 @@ export class FlightsService {
     originIatas: string[],
     destIatas: string[],
     departureDate: string,
+    maxStops: number = 2,
   ): Promise<{
     status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
     itineraries: ValidatedItinerary[];
@@ -1419,6 +1424,11 @@ export class FlightsService {
         },
       };
     }
+
+    const effectiveMaxStops =
+      typeof maxStops === 'number' && !isNaN(maxStops)
+        ? Math.max(0, Math.min(2, Math.floor(maxStops)))
+        : 2;
 
     const MAX_ON_DEMAND_AIRPORT_EXPANSIONS = 8;
     const PRIORITY_HUBS = [
@@ -1449,9 +1459,9 @@ export class FlightsService {
 
     const destSet = new Set(cleanDestinations);
 
-    // Initial graph exploration with maxStops = 2
+    // Initial graph exploration with effectiveMaxStops
     let graphResult = await this.routeGraphService.findPaths(cleanOrigins, cleanDestinations, {
-      maxStops: 2,
+      maxStops: effectiveMaxStops,
       source: 'airlabs',
     });
 
@@ -1565,7 +1575,7 @@ export class FlightsService {
 
       // Re-run findPaths after expansion
       graphResult = await this.routeGraphService.findPaths(cleanOrigins, cleanDestinations, {
-        maxStops: 2,
+        maxStops: effectiveMaxStops,
         source: 'airlabs',
       });
 
@@ -1655,6 +1665,70 @@ export class FlightsService {
         inventories: [],
       })),
     }));
+  }
+
+  /**
+   * Admin-Only Commercial Network Discovery:
+   * Resolves origin and destination via ReferenceService (including unserviced reference airports),
+   * validates calendar date and bounded maxStops (0..2), executes bounded network discovery over AirLabs routes,
+   * and returns grounded discovery response with origin/destination scopes, coverage, and source network itineraries.
+   */
+  async discoverCommercialNetwork(
+    dto: CommercialNetworkDiscoveryDto,
+  ): Promise<CommercialNetworkDiscoveryResponse> {
+    const origin = (dto.origin || '').trim();
+    const destination = (dto.destination || '').trim();
+    const departureDate = (dto.departure_date || '').trim();
+    const rawMaxStops = dto.max_stops;
+    const maxStops = typeof rawMaxStops === 'number' && !isNaN(rawMaxStops) ? rawMaxStops : 2;
+
+    if (!origin) {
+      throw new BadRequestException('Origin is required.');
+    }
+    if (!destination) {
+      throw new BadRequestException('Destination is required.');
+    }
+    if (!isValidCalendarDateString(departureDate)) {
+      throw new BadRequestException('departure_date must be a valid calendar date in YYYY-MM-DD format.');
+    }
+    if (typeof maxStops !== 'number' || isNaN(maxStops) || maxStops < 0 || maxStops > 2) {
+      throw new BadRequestException('max_stops must be an integer between 0 and 2.');
+    }
+
+    const originNetScope = await this.referenceService.expandLocation(origin, { includeUnserviced: true });
+    if (!originNetScope || !originNetScope.iata_codes || originNetScope.iata_codes.length === 0) {
+      throw new BadRequestException(`Origin location '${origin}' could not be resolved to any supported airport.`);
+    }
+
+    const destNetScope = await this.referenceService.expandLocation(destination, { includeUnserviced: true });
+    if (!destNetScope || !destNetScope.iata_codes || destNetScope.iata_codes.length === 0) {
+      throw new BadRequestException(`Destination location '${destination}' could not be resolved to any supported airport.`);
+    }
+
+    const discovery = await this.discoverNetworkRoutes(
+      originNetScope.iata_codes,
+      destNetScope.iata_codes,
+      departureDate,
+      maxStops,
+    );
+
+    return {
+      origin_scope: {
+        query: origin,
+        label: originNetScope.label || originNetScope.iata_codes.join(', '),
+        iata_codes: originNetScope.iata_codes,
+      },
+      destination_scope: {
+        query: destination,
+        label: destNetScope.label || destNetScope.iata_codes.join(', '),
+        iata_codes: destNetScope.iata_codes,
+      },
+      departure_date: departureDate,
+      max_stops: maxStops,
+      status: discovery.status,
+      itineraries: discovery.itineraries,
+      coverage: discovery.coverage,
+    };
   }
 
   private mapItinerariesToSuggestions(itineraries: ValidatedItinerary[]): any[] {

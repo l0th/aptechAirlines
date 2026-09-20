@@ -16,6 +16,8 @@ import {
 import { Type } from 'class-transformer';
 import { CabinClass } from './flights.schema';
 import { IsCalendarDate } from './flights.dto';
+import { RouteGraphCoverage } from '../reference/route-graph.service';
+import { ValidatedItinerary } from '../reference/route-schedule-validator.service';
 
 export class CommercialInventoryItemDto {
   @IsEnum(CabinClass)
@@ -136,5 +138,42 @@ export class MaterializeTemplateDto {
   @IsOptional()
   @IsCalendarDate()
   start_date?: string;
+}
+
+export class CommercialNetworkDiscoveryDto {
+  @IsString()
+  @IsNotEmpty()
+  origin: string;
+
+  @IsString()
+  @IsNotEmpty()
+  destination: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsCalendarDate()
+  departure_date: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2)
+  max_stops?: number;
+}
+
+export interface CommercialNetworkScope {
+  query: string;
+  label: string;
+  iata_codes: string[];
+}
+
+export interface CommercialNetworkDiscoveryResponse {
+  origin_scope: CommercialNetworkScope;
+  destination_scope: CommercialNetworkScope;
+  departure_date: string;
+  max_stops: number;
+  status: 'FOUND' | 'NO_ROUTE_FOUND' | 'NETWORK_DATA_INCOMPLETE';
+  coverage: RouteGraphCoverage;
+  itineraries: ValidatedItinerary[];
 }
 
