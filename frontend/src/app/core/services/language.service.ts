@@ -256,6 +256,9 @@ export class LanguageService {
       'common.action': 'Thao tác',
       'common.status': 'Trạng thái',
       'common.vnd': 'VND',
+      'common.hide': 'Ẩn',
+      'common.show': 'Hiện',
+      'common.error': 'Đã xảy ra lỗi',
 
       // Statuses (Spec & Components)
       'status.scheduled': 'Theo lịch bay',
@@ -1355,6 +1358,17 @@ export class LanguageService {
       'admin.commercial.lblRoute': 'Tuyến bay:',
       'admin.commercial.lblAircraft': 'Máy bay:',
       'admin.commercial.lblCabins': 'Khoang ghế:',
+      'admin.commercial.colAirline': 'Hãng bay',
+      'admin.commercial.colFlight': 'Chuyến bay',
+      'admin.commercial.colTimes': 'Giờ bay',
+      'admin.commercial.colDays': 'Ngày khai thác',
+      'admin.commercial.colAction': 'Thao tác',
+      'admin.commercial.colCabins': 'Khoang ghế',
+      'admin.commercial.emptyRoutes': 'Không tìm thấy tuyến bay nào trong bộ nhớ đệm.',
+      'admin.commercial.flightNumber': 'Số hiệu chuyến bay',
+      'admin.commercial.syncDepIataLabel': 'Mã IATA Sân bay khởi hành',
+      'admin.commercial.syncExecuteBtn': 'Bắt đầu đồng bộ',
+      'admin.commercial.cabinInventoryHeading': 'Cấu hình Khoang vé & Sức chứa',
     },
     en: {
       // Header / Nav
@@ -1556,6 +1570,9 @@ export class LanguageService {
       'common.action': 'Action',
       'common.status': 'Status',
       'common.vnd': 'VND',
+      'common.hide': 'Hide',
+      'common.show': 'Show',
+      'common.error': 'An error occurred',
 
       // Statuses (Spec & Components)
       'status.scheduled': 'Scheduled',
@@ -2656,6 +2673,17 @@ export class LanguageService {
       'admin.commercial.lblRoute': 'Route:',
       'admin.commercial.lblAircraft': 'Aircraft:',
       'admin.commercial.lblCabins': 'Cabins:',
+      'admin.commercial.colAirline': 'Airline',
+      'admin.commercial.colFlight': 'Flight',
+      'admin.commercial.colTimes': 'Times',
+      'admin.commercial.colDays': 'Operating Days',
+      'admin.commercial.colAction': 'Action',
+      'admin.commercial.colCabins': 'Cabins',
+      'admin.commercial.emptyRoutes': 'No cached routes found.',
+      'admin.commercial.flightNumber': 'Flight Number',
+      'admin.commercial.syncDepIataLabel': 'Departure Airport IATA Code',
+      'admin.commercial.syncExecuteBtn': 'Start Sync',
+      'admin.commercial.cabinInventoryHeading': 'Cabin & Capacity Configuration',
     },
   };
 
