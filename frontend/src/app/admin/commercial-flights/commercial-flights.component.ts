@@ -1,13 +1,11 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
-import { PaginationComponent } from '../../shared/components/pagination/pagination.component';
 import {
   AirLabsRouteRef,
   CommercialAircraftLayout,
@@ -21,10 +19,36 @@ import {
   CommercialNetworkLeg,
 } from '../../core/models/flight.model';
 
+import { CommercialStepperComponent } from './components/commercial-stepper.component';
+import { CommercialNetworkSearchComponent } from './components/commercial-network-search.component';
+import { CommercialItineraryResultsComponent } from './components/commercial-itinerary-results.component';
+import { CommercialSelectedJourneyComponent } from './components/commercial-selected-journey.component';
+import { CommercialPublishScheduleComponent } from './components/commercial-publish-schedule.component';
+import { CommercialAdvancedToolsComponent } from './components/commercial-advanced-tools.component';
+import { CommercializeRouteDrawerComponent } from './components/commercialize-route-drawer.component';
+import { TemplateEditDrawerComponent } from './components/template-edit-drawer.component';
+import { SingleTemplateMaterializeModalComponent } from './components/single-template-materialize-modal.component';
+import { RouteInspectDrawerComponent } from './components/route-inspect-drawer.component';
+import { RouteSyncModalComponent } from './components/route-sync-modal.component';
+
 @Component({
   selector: 'app-commercial-flights',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, IconComponent, PaginationComponent],
+  imports: [
+    CommonModule,
+    IconComponent,
+    CommercialStepperComponent,
+    CommercialNetworkSearchComponent,
+    CommercialItineraryResultsComponent,
+    CommercialSelectedJourneyComponent,
+    CommercialPublishScheduleComponent,
+    CommercialAdvancedToolsComponent,
+    CommercializeRouteDrawerComponent,
+    TemplateEditDrawerComponent,
+    SingleTemplateMaterializeModalComponent,
+    RouteInspectDrawerComponent,
+    RouteSyncModalComponent,
+  ],
   template: `
     <div class="space-y-6">
 
@@ -42,1881 +66,212 @@ import {
         </div>
       </div>
 
-      <!-- Notice Banner: Separation of Commercial Operations vs Raw Reference Sync -->
-      <div class="p-4 bg-navy text-slate-200 rounded-2xl border border-navy-light/40 flex items-start gap-3 text-xs shadow-sm">
-        <app-icon name="info" class="w-5 h-5 text-gold shrink-0 mt-0.5" />
-        <div class="space-y-1">
-          <p class="font-bold text-white tracking-wide">
-            {{ lang.t('admin.commercial.bannerTitle') }}
-          </p>
-          <p class="text-slate-300 leading-relaxed">
-            {{ lang.t('admin.commercial.rawSyncNotice') }}
-          </p>
-        </div>
-      </div>
+      <!-- 4-Step Stepper -->
+      <app-commercial-stepper
+        [currentStep]="currentStep()"
+        [step1Done]="step1Done()"
+        [step2Done]="step2Done()"
+        [step3Done]="step3Done()"
+        [step4Done]="step4Done()"
+        (stepClick)="onStepClick($event)"
+      />
 
-      <!-- Grounded Summary Metric Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="card-luxury p-5 space-y-2">
-          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-            {{ lang.t('admin.commercial.kpiCachedRoutes') }}
-          </span>
-          <div class="flex items-baseline justify-between">
-            <span class="text-2xl sm:text-3xl font-black text-navy font-mono">
-              {{ matchingRoutesCount() }}
-            </span>
-            <app-icon name="compass" class="w-5 h-5 text-slate-300" />
-          </div>
-          <span class="text-[10px] text-slate-400 block truncate">
-            {{ filterHasSchedule() ? lang.t('admin.commercial.kpiSubActiveRoutes') : lang.t('admin.commercial.kpiSubFilteredRoutes') }}
-          </span>
-        </div>
+      <!-- STEP 1: Search Journey -->
+      <app-commercial-network-search
+        [origin]="discOrigin()"
+        [destination]="discDestination()"
+        [departureDate]="discDepartureDate()"
+        [maxStops]="discMaxStops()"
+        [isSearching]="isDiscovering()"
+        (originChange)="discOrigin.set($event)"
+        (destinationChange)="discDestination.set($event)"
+        (departureDateChange)="discDepartureDate.set($event)"
+        (maxStopsChange)="discMaxStops.set($event)"
+        (searchSubmit)="searchNetworkDiscovery()"
+      />
 
-        <div class="card-luxury p-5 space-y-2">
-          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-            {{ lang.t('admin.commercial.kpiTemplatesTotal') }}
-          </span>
-          <div class="flex items-baseline justify-between">
-            <span class="text-2xl sm:text-3xl font-black text-navy font-mono">
-              {{ templates().length }}
-            </span>
-            <app-icon name="slidershorizontal" class="w-5 h-5 text-slate-300" />
-          </div>
-          <span class="text-[10px] text-slate-400 block truncate">
-            {{ lang.t('admin.commercial.kpiSubCatalogTemplates') }}
-          </span>
-        </div>
-
-        <div class="card-luxury p-5 space-y-2">
-          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-            {{ lang.t('admin.commercial.kpiActiveTemplates') }}
-          </span>
-          <div class="flex items-baseline justify-between">
-            <span class="text-2xl sm:text-3xl font-black text-emerald-600 font-mono">
-              {{ activeTemplatesCount() }}
-            </span>
-            <app-icon name="checkcircle2" class="w-5 h-5 text-emerald-500" />
-          </div>
-          <span class="text-[10px] text-slate-400 block truncate">
-            {{ lang.t('admin.commercial.kpiSubActiveTemplates') }}
-          </span>
-        </div>
-
-        <div class="card-luxury p-5 space-y-2">
-          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-            {{ lang.t('admin.commercial.kpiCommercializedRoutes') }}
-          </span>
-          <div class="flex items-baseline justify-between">
-            <span class="text-2xl sm:text-3xl font-black text-gold font-mono">
-              {{ commercializedRoutesCount() }}
-            </span>
-            <app-icon name="plane" class="w-5 h-5 text-gold" />
-          </div>
-          <span class="text-[10px] text-slate-400 block truncate">
-            {{ lang.t('admin.commercial.kpiSubUniqueCommercialized') }}
-          </span>
-        </div>
-      </div>
-
-      <!-- Navigation Tabs (Pill style) -->
-      <div class="flex items-center gap-3 border-b border-slate-200 pb-3 flex-wrap">
-        <button
-          type="button"
-          (click)="activeTab.set('discovery')"
-          [class]="activeTab() === 'discovery' ? 'btn-navy text-xs !py-2 !px-4 shadow-md' : 'btn-ghost text-xs !py-2 !px-4 text-slate-600 hover:text-navy'"
-        >
-          <app-icon name="search" class="w-4 h-4" />
-          <span>{{ lang.t('admin.commercial.tabDiscovery') }}</span>
-        </button>
-
-        <button
-          type="button"
-          (click)="activeTab.set('routes')"
-          [class]="activeTab() === 'routes' ? 'btn-navy text-xs !py-2 !px-4 shadow-md' : 'btn-ghost text-xs !py-2 !px-4 text-slate-600 hover:text-navy'"
-        >
-          <app-icon name="compass" class="w-4 h-4" />
-          <span>{{ lang.t('admin.commercial.tabRoutes') }}</span>
-        </button>
-
-        <button
-          type="button"
-          (click)="activeTab.set('templates')"
-          [class]="activeTab() === 'templates' ? 'btn-navy text-xs !py-2 !px-4 shadow-md' : 'btn-ghost text-xs !py-2 !px-4 text-slate-600 hover:text-navy'"
-        >
-          <app-icon name="calendar" class="w-4 h-4" />
-          <span>{{ lang.t('admin.commercial.tabTemplates') }} ({{ templates().length }})</span>
-        </button>
-      </div>
-
-      <!-- TAB 1: Network Discovery -->
-      @if (activeTab() === 'discovery') {
-        <div class="space-y-6">
-
-          <!-- Search Form Card -->
-          <div class="card-luxury p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 class="text-sm font-black text-navy uppercase tracking-wider flex items-center gap-2">
-                  <app-icon name="search" class="w-4 h-4 text-gold" />
-                  <span>{{ lang.t('admin.commercial.discoveryTitle') }}</span>
-                </h2>
-                <p class="text-xs text-slate-500 mt-0.5">
-                  {{ lang.t('admin.commercial.discoveryDesc') }}
-                </p>
-              </div>
-            </div>
-
-            <form (ngSubmit)="searchNetworkDiscovery()" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
-              <!-- Origin Input -->
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
-                  {{ lang.t('admin.commercial.discOrigin') }} *
-                </label>
-                <div class="relative">
-                  <app-icon name="planetakeoff" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    [ngModel]="discOrigin()"
-                    (ngModelChange)="discOrigin.set($event)"
-                    name="disc_origin"
-                    required
-                    placeholder="VD: HAN, Hanoi, Vietnam..."
-                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
-                  />
-                </div>
-              </div>
-
-              <!-- Destination Input -->
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
-                  {{ lang.t('admin.commercial.discDest') }} *
-                </label>
-                <div class="relative">
-                  <app-icon name="planelanding" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    [ngModel]="discDestination()"
-                    (ngModelChange)="discDestination.set($event)"
-                    name="disc_dest"
-                    required
-                    placeholder="VD: SGN, Tokyo, Germany..."
-                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
-                  />
-                </div>
-              </div>
-
-              <!-- Departure Date -->
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
-                  {{ lang.t('admin.commercial.discDate') }} *
-                </label>
-                <div class="relative">
-                  <app-icon name="calendar" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="date"
-                    [ngModel]="discDepartureDate()"
-                    (ngModelChange)="discDepartureDate.set($event)"
-                    name="disc_date"
-                    required
-                    class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
-                  />
-                </div>
-              </div>
-
-              <!-- Max Stops -->
-              <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
-                  {{ lang.t('admin.commercial.discMaxStops') }}
-                </label>
-                <div class="relative">
-                  <select
-                    [ngModel]="discMaxStops()"
-                    (ngModelChange)="discMaxStops.set($event === '' ? null : +$event)"
-                    name="disc_stops"
-                    class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-navy focus:ring-2 focus:ring-gold"
-                  >
-                    <option [ngValue]="null">{{ lang.t('admin.commercial.stopsAny') }}</option>
-                    <option [ngValue]="0">{{ lang.t('admin.commercial.stopsDirect') }}</option>
-                    <option [ngValue]="1">{{ lang.t('admin.commercial.stops1') }}</option>
-                    <option [ngValue]="2">{{ lang.t('admin.commercial.stops2') }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Submit Button -->
-              <div>
-                <button
-                  type="submit"
-                  [disabled]="isDiscovering() || !discOrigin().trim() || !discDestination().trim() || !discDepartureDate().trim()"
-                  class="w-full btn-gold text-xs !py-2.5 font-bold flex items-center justify-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50"
-                >
-                  @if (isDiscovering()) {
-                    <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-                    <span>{{ lang.t('admin.commercial.discovering') }}</span>
-                  } @else {
-                    <app-icon name="search" class="w-4 h-4" />
-                    <span>{{ lang.t('admin.commercial.btnDiscover') }}</span>
-                  }
-                </button>
-              </div>
-            </form>
-          </div>
-
-          <!-- Error Display -->
-          @if (discoveryError()) {
-            <div class="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl flex items-start gap-3 text-xs">
-              <app-icon name="alerttriangle" class="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
-              <div>
-                <span class="font-bold block">{{ lang.t('admin.commercial.discError') }}</span>
-                <p>{{ discoveryError() }}</p>
-              </div>
-            </div>
-          }
-
-          <!-- Discovery Response -->
-          @if (discoveryResponse(); as resp) {
-            <!-- Scope & Coverage Card -->
-            <div class="card-luxury p-4 space-y-3 bg-slate-50/50">
-              <div class="flex items-center justify-between border-b border-slate-200 pb-2">
-                <span class="text-xs font-bold text-navy uppercase tracking-wider flex items-center gap-2">
-                  <app-icon name="compass" class="w-4 h-4 text-gold" />
-                  <span>{{ lang.t('admin.commercial.scopeCoverage') }}</span>
-                </span>
-                <div class="flex items-center gap-2">
-                  <span class="text-[11px] font-semibold text-slate-500">
-                    {{ lang.t('admin.commercial.colStatus') }}:
-                  </span>
-                  @if (resp.coverage.complete) {
-                    <span class="badge-emerald text-[10px] px-2 py-0.5 rounded-full font-bold">{{ lang.t('admin.commercial.coverageComplete') }}</span>
-                  } @else {
-                    <span class="badge-amber text-[10px] px-2 py-0.5 rounded-full font-bold">{{ lang.t('admin.commercial.coverageIncomplete') }}</span>
-                  }
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                <!-- Origin Scope -->
-                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
-                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.scopeOriginAirports') }}</span>
-                  <p class="font-mono text-navy font-bold text-sm">{{ resp.origin_scope.query }} ({{ resp.origin_scope.label }})</p>
-                  <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.origin_scope.iata_codes.join(', ')">
-                    {{ lang.t('admin.commercial.scopeResolvedIatas') }}: {{ resp.origin_scope.iata_codes.join(', ') }}
-                  </p>
-                </div>
-
-                <!-- Destination Scope -->
-                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
-                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.scopeDestAirports') }}</span>
-                  <p class="font-mono text-navy font-bold text-sm">{{ resp.destination_scope.query }} ({{ resp.destination_scope.label }})</p>
-                  <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.destination_scope.iata_codes.join(', ')">
-                    {{ lang.t('admin.commercial.scopeResolvedIatas') }}: {{ resp.destination_scope.iata_codes.join(', ') }}
-                  </p>
-                </div>
-
-                <!-- Parameters & Network Coverage -->
-                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
-                  <span class="font-bold text-slate-600 block">{{ lang.t('admin.commercial.discSearchScope') }}</span>
-                  <p class="text-[11px] text-slate-700">
-                    {{ lang.t('admin.commercial.discDate') }}: <strong class="font-mono text-navy">{{ resp.departure_date }}</strong>
-                  </p>
-                  <p class="text-[11px] text-slate-700">
-                    {{ lang.t('admin.commercial.discMaxStops') }}: <strong class="font-mono text-navy">{{ resp.max_stops }}</strong>
-                  </p>
-                  @if (resp.coverage.expanded_airports.length > 0) {
-                    <p class="text-[11px] text-slate-500 font-mono truncate" [title]="resp.coverage.expanded_airports.join(', ')">
-                      {{ lang.t('admin.commercial.coverageExpanded') }}: {{ resp.coverage.expanded_airports.join(', ') }}
-                    </p>
-                  }
-                  @if (resp.coverage.missing_sync_state_airports.length > 0) {
-                    <p class="text-[11px] text-amber-700 font-mono truncate" [title]="resp.coverage.missing_sync_state_airports.join(', ')">
-                      {{ lang.t('admin.commercial.coverageMissingSync') }}: {{ resp.coverage.missing_sync_state_airports.join(', ') }}
-                    </p>
-                  }
-                </div>
-              </div>
-            </div>
-
-            <!-- Status Warnings / Banners -->
-            @if (resp.status === 'NO_ROUTE_FOUND') {
-              <div class="card-luxury p-8 text-center space-y-3">
-                <app-icon name="compass" class="w-10 h-10 text-slate-300 mx-auto" />
-                <h3 class="text-sm font-bold text-navy">{{ lang.t('admin.commercial.statusNoRoute') }}</h3>
-                <p class="text-xs text-slate-500 max-w-md mx-auto">
-                  {{ lang.t('admin.commercial.statusNoRouteHelp') }}
-                </p>
-              </div>
-            }
-
-            @if (resp.status === 'NETWORK_DATA_INCOMPLETE') {
-              <div class="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-3 text-xs text-amber-900">
-                <app-icon name="alerttriangle" class="w-5 h-5 text-gold shrink-0 mt-0.5" />
-                <div class="space-y-1">
-                  <p class="font-bold text-amber-950">{{ lang.t('admin.commercial.statusIncomplete') }}</p>
-                  <p class="text-amber-800">{{ lang.t('admin.commercial.statusIncompleteHelp') }}</p>
-                </div>
-              </div>
-            }
-
-            <!-- Itineraries List -->
-            @if (resp.itineraries.length > 0) {
-              <div class="space-y-4">
-                <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-bold text-navy flex items-center gap-2">
-                    <app-icon name="plane" class="w-4 h-4 text-gold" />
-                    <span>{{ lang.t('admin.commercial.statusFound').replace('{count}', String(resp.itineraries.length)) }}</span>
-                  </h3>
-                </div>
-
-                @for (itin of resp.itineraries; track itinTrackKey(itin); let itinIdx = $index) {
-                  @let allCommercialized = isItineraryFullyCommercialized(itin);
-                  @let uncommercializedCount = getUncommercializedLegsCount(itin);
-
-                  <div class="card-luxury p-5 space-y-4 hover:border-gold/50 transition-all">
-                    <!-- Itinerary Header -->
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                      <div class="flex items-center gap-3 flex-wrap">
-                        <span class="text-base font-black text-navy font-mono">
-                          #{{ itinIdx + 1 }}. {{ itin.airports[0] }} → {{ itin.airports[itin.airports.length - 1] }}
-                        </span>
-
-                        @if (itin.route_type === 'DIRECT') {
-                          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            {{ lang.t('admin.commercial.itineraryDirect') }}
-                          </span>
-                        } @else {
-                          <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                            {{ lang.t('admin.commercial.itineraryConnecting').replace('{stops}', String(itin.stops.length)) }}
-                            @if (itin.stops.length > 0) {
-                              <span class="font-normal font-mono text-[9px] ml-1">({{ itin.stops.join(' → ') }})</span>
-                            }
-                          </span>
-                        }
-
-                        <span class="text-xs text-slate-500 flex items-center gap-1 font-mono">
-                          <app-icon name="clock" class="w-3.5 h-3.5 text-slate-400" />
-                          <span>{{ formatDuration(itin.total_duration_minutes) }}</span>
-                        </span>
-                      </div>
-
-                      <!-- Itinerary Actions Header -->
-                      <div class="flex items-center gap-2 flex-wrap">
-                        @if (allCommercialized) {
-                          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 border border-emerald-300 text-emerald-700">
-                            <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-emerald-600" />
-                            <span>{{ lang.t('admin.commercial.allLegsCommercialized') }}</span>
-                          </span>
-                          <button
-                            type="button"
-                            (click)="openMaterializeItineraryModal(itin)"
-                            class="btn-navy text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1.5 shadow-sm"
-                          >
-                            <app-icon name="calendar" class="w-3.5 h-3.5" />
-                            <span>{{ lang.t('admin.commercial.btnMaterializeItinerary') }}</span>
-                          </button>
-                        } @else {
-                          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-50 border border-amber-300 text-amber-800">
-                            <app-icon name="info" class="w-3.5 h-3.5 text-gold" />
-                            <span>{{ lang.t('admin.commercial.legsPendingCommercialization').replace('{count}', String(uncommercializedCount)) }}</span>
-                          </span>
-                          <button
-                            type="button"
-                            (click)="startItineraryCommercializeQueue(itin)"
-                            class="btn-gold text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1.5 shadow-sm"
-                          >
-                            <app-icon name="slidershorizontal" class="w-3.5 h-3.5" />
-                            <span>{{ lang.t('admin.commercial.btnCommercializeQueue').replace('{count}', String(uncommercializedCount)) }}</span>
-                          </button>
-                        }
-                      </div>
-                    </div>
-
-                    <!-- Legs Timeline -->
-                    <div class="space-y-3">
-                      @for (leg of itin.legs; track leg.source_key; let legIdx = $index) {
-                        @let matchedTpl = templateMapByRouteKey().get(leg.source_key);
-                        @let isComm = isLegCommercialized(leg);
-
-                        <!-- Leg Item Card -->
-                        <div class="p-4 rounded-xl border transition-all" [class]="isComm ? 'bg-emerald-50/20 border-emerald-200' : 'bg-slate-50/60 border-slate-200'">
-                          <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                            <!-- Leg Details -->
-                            <div class="space-y-1.5">
-                              <div class="flex items-center gap-2 flex-wrap">
-                                <span class="text-xs font-black text-navy uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200">
-                                  {{ lang.t('admin.commercial.legNum').replace('{num}', String(legIdx + 1)) }}
-                                </span>
-                                <span class="font-mono text-sm font-bold text-navy">
-                                  {{ leg.dep_iata }} → {{ leg.arr_iata }}
-                                </span>
-                                @if (leg.airline_iata || leg.flight_iata) {
-                                  <span class="text-xs font-semibold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-                                    {{ leg.airline_iata }} {{ leg.flight_number || leg.flight_iata }}
-                                  </span>
-                                }
-                                @if (leg.aircraft_icao) {
-                                  <span class="text-xs font-mono text-slate-500">
-                                    ({{ leg.aircraft_icao }})
-                                  </span>
-                                }
-                              </div>
-
-                              <div class="flex items-center gap-4 text-xs text-slate-600 flex-wrap">
-                                <span>
-                                  <strong>UTC:</strong> <span class="font-mono">{{ leg.dep_time_utc || 'N/A' }} → {{ leg.arr_time_utc || 'N/A' }}</span>
-                                </span>
-                                @if (leg.duration_minutes) {
-                                  <span>
-                                    <strong>{{ lang.t('admin.commercial.colDuration') }}:</strong> {{ leg.duration_minutes }} {{ lang.t('admin.commercial.minsUnit') }}
-                                  </span>
-                                }
-                                @if (leg.days && leg.days.length > 0) {
-                                  <span class="text-[11px] text-slate-500">
-                                    <strong>{{ lang.t('admin.commercial.operatingDaysLabel') }}</strong> {{ formatDays(leg.days) }}
-                                  </span>
-                                }
-                              </div>
-                            </div>
-
-                            <!-- Leg Commercial Status & Actions -->
-                            <div class="flex items-center gap-2 self-end md:self-center">
-                              @if (isComm && matchedTpl) {
-                                @let flNum = matchedTpl.flight_number;
-                                @let isAct = matchedTpl.is_active;
-                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold" [class]="isAct ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'">
-                                  <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-emerald-600" />
-                                  <span class="font-mono">{{ flNum }}</span>
-                                  <span class="text-[10px] font-normal">({{ isAct ? lang.t('admin.commercial.statusActive') : lang.t('admin.commercial.statusInactive') }})</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  (click)="viewTemplateByFlightNumber(flNum)"
-                                  class="btn-ghost text-xs !py-1.5 !px-3 text-navy hover:text-gold border border-slate-200"
-                                >
-                                  <span>{{ lang.t('admin.commercial.actionViewTemplate') }}</span>
-                                </button>
-                              } @else {
-                                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
-                                  {{ lang.t('admin.commercial.statusAvailable') }}
-                                </span>
-                                <button
-                                  type="button"
-                                  [disabled]="loadingLegSourceKey() === leg.source_key"
-                                  (click)="openCommercializeDrawerForLeg(leg)"
-                                  class="btn-gold text-xs !py-1.5 !px-3 font-bold inline-flex items-center gap-1 shadow-sm disabled:opacity-60"
-                                >
-                                  @if (loadingLegSourceKey() === leg.source_key) {
-                                    <app-icon name="refreshcw" class="w-3.5 h-3.5 animate-spin" />
-                                    <span>{{ lang.t('admin.commercial.loadingRouteRef') }}</span>
-                                  } @else {
-                                    <app-icon name="slidershorizontal" class="w-3.5 h-3.5" />
-                                    <span>{{ lang.t('admin.commercial.btnCommercializeLeg') }}</span>
-                                  }
-                                </button>
-                              }
-                            </div>
-                          </div>
-                        </div>
-
-                        <!-- Layover Indicator -->
-                        @if (legIdx < itin.legs.length - 1) {
-                          <div class="flex items-center gap-2 pl-4 text-xs font-medium text-slate-500 py-0.5">
-                            <app-icon name="hourglass" class="w-3.5 h-3.5 text-gold" />
-                            <span>
-                              {{ lang.t('admin.commercial.layoverAt')
-                                  .replace('{airport}', leg.arr_iata)
-                                  .replace('{mins}', String(itin.layover_minutes[legIdx] || 0)) }}
-                            </span>
-                          </div>
-                        }
-                      }
-                    </div>
-                  </div>
-                }
-              </div>
-            }
-          }
-        </div>
+      <!-- STEP 2: Choose Itinerary -->
+      @if (isDiscovering() || discoveryError() || discoveryResponse()) {
+        <app-commercial-itinerary-results
+          [isDiscovering]="isDiscovering()"
+          [discoveryError]="discoveryError()"
+          [discoveryResponse]="discoveryResponse()"
+          [selectedItinerary]="selectedItinerary()"
+          (itinerarySelect)="onSelectItinerary($event)"
+        />
       }
 
-      <!-- TAB 2: AirLabs Route Catalog -->
-      @if (activeTab() === 'routes') {
-        <div class="space-y-4">
+      <!-- STEP 3 & STEP 4: Selected Journey Workspace -->
+      @if (selectedItinerary(); as itin) {
+        <!-- STEP 3: Create APTECH Flights -->
+        <app-commercial-selected-journey
+          [itinerary]="itin"
+          [templateMap]="templateMapByRouteKey()"
+          [loadingLegSourceKey]="loadingLegSourceKey()"
+          [allCommercialized]="allCommercialized()"
+          [allReadyToPublish]="allReadyToPublish()"
+          [hasInactiveTemplate]="hasInactiveTemplate()"
+          [uncommercializedCount]="uncommercializedCount()"
+          (changeItinerary)="onChangeItinerary()"
+          (configureLeg)="openCommercializeDrawerForLeg($event)"
+          (createRemainingQueue)="startItineraryCommercializeQueue(itin)"
+          (viewTemplate)="onViewTemplateFlightNumber($event)"
+        />
 
-          <!-- Filters Row -->
-          <div class="card-luxury p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div class="flex flex-wrap items-center gap-3">
-              <div class="flex items-center gap-1.5">
-                <label class="font-bold text-slate-600">{{ lang.t('admin.commercial.filterDep') }}:</label>
-                <input
-                  type="text"
-                  [ngModel]="filterDep()"
-                  (ngModelChange)="filterDep.set($event.toUpperCase().trim())"
-                  (keyup.enter)="loadRoutes(1)"
-                  placeholder="SGN, HAN..."
-                  class="w-24 uppercase px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-navy focus:ring-1 focus:ring-gold"
-                />
-              </div>
-
-              <div class="flex items-center gap-1.5">
-                <label class="font-bold text-slate-600">{{ lang.t('admin.commercial.filterArr') }}:</label>
-                <input
-                  type="text"
-                  [ngModel]="filterArr()"
-                  (ngModelChange)="filterArr.set($event.toUpperCase().trim())"
-                  (keyup.enter)="loadRoutes(1)"
-                  placeholder="DAD, CXR..."
-                  class="w-24 uppercase px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-navy focus:ring-1 focus:ring-gold"
-                />
-              </div>
-
-              <label class="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  [ngModel]="filterHasSchedule()"
-                  (ngModelChange)="filterHasSchedule.set($event); loadRoutes(1)"
-                  class="rounded text-gold focus:ring-gold"
-                />
-                <span class="font-semibold text-slate-700">{{ lang.t('admin.commercial.filterHasSchedule') }}</span>
-              </label>
-
-              <button
-                type="button"
-                (click)="loadRoutes(1)"
-                class="btn-navy text-xs !py-1.5 !px-3.5 font-bold"
-              >
-                <app-icon name="search" class="w-3.5 h-3.5" />
-                <span>{{ lang.t('admin.commercial.filterBtn') }}</span>
-              </button>
-            </div>
-
-            <!-- On-Demand Hub Sync Action -->
-            <button
-              type="button"
-              (click)="openSyncModal()"
-              class="btn-gold text-xs !py-1.5 !px-4 font-bold"
-            >
-              <app-icon name="refreshcw" class="w-3.5 h-3.5" />
-              <span>{{ lang.t('admin.commercial.syncHubBtn') }}</span>
-            </button>
-          </div>
-
-          <!-- Routes Table -->
-          <div class="card-luxury overflow-hidden border-slate-200">
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
-                <thead class="bg-navy text-slate-200 uppercase font-semibold">
-                  <tr>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colCarrier') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colRoute') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colLocalTimes') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colUtcTimes') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colOperatingDays') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colDuration') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colStatus') }}</th>
-                    <th class="py-3 px-4 text-right">{{ lang.t('admin.commercial.colActions') }}</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 font-medium bg-white">
-                  @if (routesLoading()) {
-                    <tr>
-                      <td colspan="8" class="text-center py-12 text-slate-400">
-                        <app-icon name="refreshcw" class="w-6 h-6 animate-spin mx-auto text-gold mb-2" />
-                        <span>{{ lang.t('admin.commercial.loadingRoutes') }}</span>
-                      </td>
-                    </tr>
-                  } @else if (!routes().length) {
-                    <tr>
-                      <td colspan="8" class="text-center py-12 text-slate-400">
-                        <app-icon name="compass" class="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                        <span>{{ lang.t('admin.commercial.noRoutesFound') }}</span>
-                      </td>
-                    </tr>
-                  } @else {
-                    @for (r of routes(); track r.source_key) {
-                      @let matchedTemplate = templateMapByRouteKey().get(r.source_key);
-                      <tr class="hover:bg-slate-50/80 transition-colors">
-                        <td class="py-3 px-4">
-                          <div class="font-bold text-navy font-mono">
-                            {{ r.airline_iata || r.airline_icao || 'AirLabs' }}
-                            <span class="text-slate-500 font-normal">({{ r.flight_iata || r.flight_number || '-' }})</span>
-                          </div>
-                          @if (r.aircraft_icao) {
-                            <span class="text-[10px] text-slate-400 font-mono block">A/C: {{ r.aircraft_icao }}</span>
-                          }
-                        </td>
-                        <td class="py-3 px-4">
-                          <div class="flex items-center gap-1 font-bold text-navy font-mono">
-                            <span>{{ r.dep_iata }}</span>
-                            <span class="text-slate-400 font-normal">→</span>
-                            <span>{{ r.arr_iata }}</span>
-                          </div>
-                        </td>
-                        <td class="py-3 px-4 font-mono">
-                          {{ r.dep_time || '-' }} – {{ r.arr_time || '-' }}
-                        </td>
-                        <td class="py-3 px-4 font-mono text-slate-500 text-[11px]">
-                          {{ r.dep_time_utc ? r.dep_time_utc + 'Z' : '-' }} – {{ r.arr_time_utc ? r.arr_time_utc + 'Z' : '-' }}
-                        </td>
-                        <td class="py-3 px-4">
-                          <div class="flex items-center gap-1 flex-wrap">
-                            @for (d of formatDayChips(r.days); track d.dayNum) {
-                              <span
-                                class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
-                                [class]="d.active ? 'bg-amber-100 text-amber-900 border border-gold/40' : 'bg-slate-100 text-slate-300'"
-                              >
-                                {{ d.label }}
-                              </span>
-                            }
-                          </div>
-                        </td>
-                        <td class="py-3 px-4 font-mono text-slate-600">
-                          {{ r.duration ? r.duration + ' ' + lang.t('admin.commercial.minsUnit') : '-' }}
-                        </td>
-                        <td class="py-3 px-4">
-                          @if (matchedTemplate) {
-                            <div class="space-y-0.5">
-                              <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <app-icon name="checkcircle2" class="w-3 h-3 text-emerald-600" />
-                                <span>{{ lang.t('admin.commercial.statusCommercialized') }}</span>
-                              </span>
-                              <span class="text-[10px] font-mono text-slate-500 block font-semibold">
-                                {{ matchedTemplate.flight_number }} ({{ matchedTemplate.template_id }})
-                              </span>
-                            </div>
-                          } @else {
-                            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                              <span>{{ lang.t('admin.commercial.statusAvailable') }}</span>
-                            </span>
-                          }
-                        </td>
-                        <td class="py-3 px-4 text-right">
-                          <div class="inline-flex items-center gap-2 justify-end">
-                            <button
-                              type="button"
-                              (click)="inspectRoute(r)"
-                              class="btn-ghost text-[11px] !py-1 !px-2.5 font-semibold text-slate-600"
-                            >
-                              <app-icon name="info" class="w-3.5 h-3.5" />
-                              <span>{{ lang.t('admin.commercial.actionInspect') }}</span>
-                            </button>
-
-                            @if (matchedTemplate) {
-                              <!-- C3.1 BOUNDARY: NO Re-commercialize action. Show View Template only. -->
-                              <button
-                                type="button"
-                                (click)="viewTemplate(matchedTemplate)"
-                                class="btn-outline-navy text-[11px] !py-1 !px-3 font-semibold"
-                              >
-                                <app-icon name="calendar" class="w-3.5 h-3.5 text-gold" />
-                                <span>{{ lang.t('admin.commercial.actionViewTemplate') }}</span>
-                              </button>
-                            } @else {
-                              <button
-                                type="button"
-                                (click)="openCommercializeDrawer(r)"
-                                class="btn-gold text-[11px] !py-1 !px-3 font-bold"
-                              >
-                                <app-icon name="plane" class="w-3.5 h-3.5" />
-                                <span>{{ lang.t('admin.commercial.actionCommercialize') }}</span>
-                              </button>
-                            }
-                          </div>
-                        </td>
-                      </tr>
-                    }
-                  }
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Pagination -->
-            @if (routesTotal() > 0) {
-              <app-pagination
-                [total]="routesTotal()"
-                [page]="routesPage()"
-                [pageSize]="routesLimit()"
-                [pageSizeOptions]="[10, 20, 50, 100]"
-                (pageChange)="loadRoutes($event)"
-                (pageSizeChange)="onRoutesLimitChange($event)"
-              />
-            }
-          </div>
-
-        </div>
+        <!-- STEP 4: Publish Commercial Flight Schedule -->
+        <app-commercial-publish-schedule
+          [itinerary]="itin"
+          [templateMap]="templateMapByRouteKey()"
+          [readyToPublish]="allReadyToPublish()"
+          [hasInactiveTemplate]="hasInactiveTemplate()"
+          [days]="itineraryMaterializeDays()"
+          [startDate]="itineraryMaterializeStartDate()"
+          [isDaysValid]="isItineraryMaterializeDaysValid()"
+          [submitting]="submittingItineraryMaterialize()"
+          [progress]="itineraryMaterializeProgress()"
+          [summary]="itineraryMaterializeSummary()"
+          [hasErrors]="hasItineraryMaterializeErrors()"
+          (daysChange)="onItineraryMaterializeDaysChange($event)"
+          (startDateChange)="onItineraryMaterializeStartDateChange($event)"
+          (generateSubmit)="executeItineraryMaterialize()"
+          (viewFlights)="onViewFlights()"
+          (viewTemplate)="onViewTemplateFlightNumber($event)"
+        />
       }
 
-      <!-- TAB 2: Aptech Commercial Templates & Materialization -->
-      @if (activeTab() === 'templates') {
-        <div class="space-y-4">
+      <!-- SECONDARY ADVANCED TOOLS (Collapsed by default) -->
+      <app-commercial-advanced-tools
+        #advancedTools
+        [routes]="routes()"
+        [routesLoading]="routesLoading()"
+        [filterDep]="filterDep()"
+        [filterArr]="filterArr()"
+        [filterHasSchedule]="filterHasSchedule()"
+        [routesPage]="routesPage()"
+        [routesLimit]="routesLimit()"
+        [routesTotal]="routesTotal()"
+        [templates]="templates()"
+        [filteredTemplates]="filteredTemplates()"
+        [templatesLoading]="templatesLoading()"
+        [templateSearch]="templateSearch()"
+        [matchingRoutesCount]="matchingRoutesCount()"
+        [activeTemplatesCount]="activeTemplatesCount()"
+        [commercializedRoutesCount]="commercializedRoutesCount()"
+        (filterDepChange)="filterDep.set($event)"
+        (filterArrChange)="filterArr.set($event)"
+        (filterHasScheduleChange)="onFilterHasScheduleChange($event)"
+        (loadRoutes)="loadRoutes($event)"
+        (openSyncModal)="openSyncModal()"
+        (inspectRoute)="inspectRoute($event)"
+        (templateSearchChange)="templateSearch.set($event)"
+        (toggleTemplateStatus)="onToggleTemplateStatus($event)"
+        (openEditTemplate)="openEditDrawer($event)"
+        (openMaterializeTemplate)="openMaterializeModal($event)"
+      />
 
-          <!-- Filter & Search Bar -->
-          <div class="card-luxury p-4 flex items-center justify-between gap-3 flex-wrap text-xs">
-            <div class="flex items-center gap-2 flex-1 min-w-[240px]">
-              <app-icon name="search" class="w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                [ngModel]="templateSearch()"
-                (ngModelChange)="templateSearch.set($event)"
-                [placeholder]="lang.t('admin.commercial.templateSearch')"
-                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-1 focus:ring-gold"
-              />
-            </div>
+      <!-- DRAWERS & MODALS -->
+      @if (commercializingRoute(); as cr) {
+        <app-commercialize-route-drawer
+          [route]="cr"
+          [queue]="commercializeQueue()"
+          [aircraftLayouts]="aircraftLayouts()"
+          [formFlightNumber]="formFlightNumber()"
+          [formAircraftType]="formAircraftType()"
+          [formSelectedCabins]="formSelectedCabins()"
+          [formAllocatedSeats]="formAllocatedSeats()"
+          [formBasePrices]="formBasePrices()"
+          [formMaterializeImmediately]="formMaterializeImmediately()"
+          [formIncompatibleCabins]="formIncompatibleCabins()"
+          [formOvercapacityDetails]="formOvercapacityDetails()"
+          [selectedAircraftLayout]="selectedAircraftLayout()"
+          [isFormValid]="isCommercializeFormValid()"
+          [submitting]="submittingCommercialize()"
+          (closeDrawer)="closeCommercializeDrawer()"
+          (cancelQueue)="closeCommercializeDrawer()"
+          (flightNumberChange)="formFlightNumber.set($event)"
+          (aircraftTypeChange)="onAircraftTypeSelected($event)"
+          (toggleCabin)="toggleCabinSelection($event)"
+          (allocatedSeatsChange)="updateAllocatedSeats($event.cabin, $event.count)"
+          (basePriceChange)="updateBasePrice($event.cabin, $event.price)"
+          (materializeImmediatelyChange)="formMaterializeImmediately.set($event)"
+          (removeIncompatibleCabins)="removeIncompatibleFormCabins()"
+          (submitCommercialize)="submitCommercialize()"
+        />
+      }
 
-            <button
-              type="button"
-              (click)="refreshTemplatesCatalog()"
-              [disabled]="templatesLoading()"
-              class="btn-outline-navy text-xs !py-1.5 !px-3 font-semibold inline-flex items-center gap-1.5"
-            >
-              <app-icon name="refreshcw" class="w-3.5 h-3.5" [class.animate-spin]="templatesLoading()" />
-              <span>{{ lang.t('admin.commercial.reloadCatalog') }}</span>
-            </button>
-          </div>
+      @if (editingTemplate(); as et) {
+        <app-template-edit-drawer
+          [template]="et"
+          [aircraftLayouts]="aircraftLayouts()"
+          [editFlightNumber]="editFlightNumber()"
+          [editAircraftType]="editAircraftType()"
+          [editSelectedCabins]="editSelectedCabins()"
+          [editAllocatedSeats]="editAllocatedSeats()"
+          [editBasePrices]="editBasePrices()"
+          [editIsActive]="editIsActive()"
+          [submittingEdit]="submittingEdit()"
+          [editIncompatibleCabins]="editIncompatibleCabins()"
+          [editOvercapacityDetails]="editOvercapacityDetails()"
+          [editAircraftLayout]="editAircraftLayout()"
+          [isEditFormValid]="isEditFormValid()"
+          (closeDrawer)="editingTemplate.set(null)"
+          (flightNumberChange)="editFlightNumber.set($event)"
+          (aircraftTypeChange)="onEditAircraftTypeSelected($event)"
+          (toggleCabin)="toggleEditCabinSelection($event)"
+          (allocatedSeatsChange)="updateEditAllocatedSeats($event.cabin, $event.count)"
+          (basePriceChange)="updateEditBasePrice($event.cabin, $event.price)"
+          (isActiveChange)="editIsActive.set($event)"
+          (removeIncompatibleCabins)="removeIncompatibleEditCabins()"
+          (saveEdit)="saveTemplateEdit()"
+        />
+      }
 
-          <!-- Templates Table -->
-          <div class="card-luxury overflow-hidden border-slate-200">
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
-                <thead class="bg-navy text-slate-200 uppercase font-semibold">
-                  <tr>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colTemplateId') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colFlightNumber') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colRoute') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colLocalTimes') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colAircraft') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.colOperatingDays') }}</th>
-                    <th class="py-3 px-4">{{ lang.t('admin.commercial.cabinsAndInventory') }}</th>
-                    <th class="py-3 px-4 text-center">{{ lang.t('admin.commercial.colActiveToggle') }}</th>
-                    <th class="py-3 px-4 text-right">{{ lang.t('admin.commercial.colActions') }}</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 font-medium bg-white">
-                  @if (templatesLoading()) {
-                    <tr>
-                      <td colspan="9" class="text-center py-12 text-slate-400">
-                        <app-icon name="refreshcw" class="w-6 h-6 animate-spin mx-auto text-gold mb-2" />
-                        <span>{{ lang.t('admin.commercial.loadingTemplates') }}</span>
-                      </td>
-                    </tr>
-                  } @else if (!filteredTemplates().length) {
-                    <tr>
-                      <td colspan="9" class="text-center py-12 text-slate-400">
-                        <app-icon name="calendar" class="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                        <span>{{ lang.t('admin.commercial.noTemplatesFound') }}</span>
-                      </td>
-                    </tr>
-                  } @else {
-                    @for (t of filteredTemplates(); track t.template_id) {
-                      <tr class="hover:bg-slate-50/80 transition-colors">
-                        <td class="py-3 px-4 font-mono font-bold text-navy">
-                          {{ t.template_id }}
-                          @if (t.source_route_key) {
-                            <div class="text-[10px] font-normal text-slate-400 truncate max-w-[140px]" [title]="t.source_route_key">
-                              {{ lang.t('admin.commercial.labelSrc') }} {{ t.source_route_key }}
-                            </div>
-                          }
-                        </td>
-                        <td class="py-3 px-4">
-                          <span class="font-black text-navy font-mono text-sm px-2 py-0.5 rounded-lg bg-amber-500/15 border border-gold/40 text-gold">
-                            {{ t.flight_number }}
-                          </span>
-                        </td>
-                        <td class="py-3 px-4">
-                          <span class="font-bold text-navy font-mono">{{ t.origin_iata }}</span>
-                          <span class="text-slate-400 mx-1">→</span>
-                          <span class="font-bold text-navy font-mono">{{ t.dest_iata }}</span>
-                        </td>
-                        <td class="py-3 px-4 font-mono">
-                          {{ t.std_dep_time || '-' }} – {{ t.std_arr_time || '-' }}
-                        </td>
-                        <td class="py-3 px-4 font-bold text-navy font-mono">
-                          {{ t.aircraft_type }}
-                        </td>
-                        <td class="py-3 px-4">
-                          <div class="flex items-center gap-1 flex-wrap">
-                            @for (d of formatTemplateDaysChips(t.days_of_week); track d.dayNum) {
-                              <span
-                                class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
-                                [class]="d.active ? 'bg-amber-100 text-amber-900 border border-gold/40' : 'bg-slate-100 text-slate-300'"
-                              >
-                                {{ d.label }}
-                              </span>
-                            }
-                          </div>
-                        </td>
-                        <td class="py-3 px-4">
-                          <div class="space-y-1">
-                            @for (inv of t.commercial_inventories; track inv.cabin_class) {
-                              <div class="text-[11px] flex items-center gap-1.5">
-                                <span class="font-bold text-slate-700">{{ inv.cabin_class }}:</span>
-                                <span class="font-mono text-slate-600">{{ inv.allocated_seats }} {{ lang.t('admin.commercial.seatsUnit') }}</span>
-                                <span class="text-[10px] text-slate-400 font-mono">({{ formatCabinFareDisplay(t.base_price_economy, inv.cabin_class, t) }})</span>
-                              </div>
-                            }
-                          </div>
-                        </td>
-                        <td class="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            (click)="toggleTemplateStatus(t)"
-                            class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold transition-all"
-                            [class]="t.is_active ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'"
-                          >
-                            <span class="w-1.5 h-1.5 rounded-full mr-1.5" [class]="t.is_active ? 'bg-emerald-600' : 'bg-slate-400'"></span>
-                            <span>{{ t.is_active ? lang.t('admin.commercial.statusActive') : lang.t('admin.commercial.statusInactive') }}</span>
-                          </button>
-                        </td>
-                        <td class="py-3 px-4 text-right">
-                          <div class="inline-flex items-center gap-1.5 justify-end">
-                            <button
-                              type="button"
-                              (click)="openEditDrawer(t)"
-                              class="btn-outline-navy text-[11px] !py-1 !px-2.5 font-semibold"
-                            >
-                              <app-icon name="edit" class="w-3.5 h-3.5" />
-                              <span>{{ lang.t('admin.commercial.btnEditTemplate') }}</span>
-                            </button>
+      @if (materializingTemplate(); as mt) {
+        <app-single-template-materialize-modal
+          [template]="mt"
+          [days]="materializeDays()"
+          [startDate]="materializeStartDate()"
+          [isDaysValid]="isMaterializeDaysValid()"
+          [submitting]="submittingMaterialize()"
+          [materializeResult]="materializeResult()"
+          (closeModal)="closeMaterializeModal()"
+          (daysChange)="materializeDays.set($event)"
+          (startDateChange)="materializeStartDate.set($event)"
+          (executeMaterialize)="executeMaterialize()"
+        />
+      }
 
-                            <button
-                              type="button"
-                              (click)="openMaterializeModal(t)"
-                              [disabled]="!t.is_active"
-                              class="btn-gold text-[11px] !py-1 !px-3 font-bold disabled:opacity-40"
-                            >
-                              <app-icon name="calendar" class="w-3.5 h-3.5" />
-                              <span>{{ lang.t('admin.commercial.btnMaterialize') }}</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    }
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
+      @if (inspectingRoute(); as ir) {
+        <app-route-inspect-drawer
+          [route]="ir"
+          (closeDrawer)="inspectingRoute.set(null)"
+        />
+      }
 
-        </div>
+      @if (syncModalOpen()) {
+        <app-route-sync-modal
+          [depIata]="syncDepIata()"
+          [limit]="syncLimit()"
+          [syncing]="syncing()"
+          (closeModal)="syncModalOpen.set(false)"
+          (depIataChange)="syncDepIata.set($event)"
+          (limitChange)="syncLimit.set($event)"
+          (executeSync)="executeAirportSync()"
+        />
       }
 
     </div>
-
-    <!-- MODAL 1: On-Demand Hub Route Sync -->
-    @if (syncModalOpen()) {
-      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl p-6 border border-slate-200 space-y-4">
-          <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 class="text-base font-bold text-navy flex items-center gap-2">
-              <app-icon name="refreshcw" class="w-5 h-5 text-gold" />
-              <span>{{ lang.t('admin.commercial.syncModalTitle') }}</span>
-            </h3>
-            <button (click)="syncModalOpen.set(false)" class="text-slate-400 hover:text-slate-600">
-              <app-icon name="x" class="w-5 h-5" />
-            </button>
-          </div>
-
-          <p class="text-xs text-slate-500 leading-relaxed">
-            {{ lang.t('admin.commercial.syncModalDesc') }}
-          </p>
-
-          <div class="space-y-3 text-xs">
-            <div>
-              <label class="block font-semibold text-slate-700 mb-1">
-                {{ lang.t('admin.commercial.syncDepLabel') }}
-              </label>
-              <input
-                type="text"
-                [ngModel]="syncDepIata()"
-                (ngModelChange)="syncDepIata.set($event.toUpperCase().trim())"
-                placeholder="SGN, HAN, DAD..."
-                maxlength="3"
-                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-              />
-            </div>
-
-            <div>
-              <label class="block font-semibold text-slate-700 mb-1">
-                {{ lang.t('admin.commercial.syncLimitLabel') }}
-              </label>
-              <input
-                type="number"
-                [ngModel]="syncLimit()"
-                (ngModelChange)="syncLimit.set(+$event)"
-                min="1"
-                max="200"
-                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-              />
-            </div>
-          </div>
-
-          <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              (click)="syncModalOpen.set(false)"
-              class="btn-ghost text-xs"
-            >
-              {{ lang.t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              (click)="executeAirportSync()"
-              [disabled]="syncing() || !syncDepIata()"
-              class="btn-gold text-xs !py-2.5 !px-5 font-bold"
-            >
-              @if (syncing()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-              }
-              <span>{{ lang.t('admin.commercial.syncBtn') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- DRAWER 1: Inspect AirLabs RouteRef Detail -->
-    @if (inspectingRoute(); as r) {
-      <div class="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-lg h-full shadow-2xl p-6 border-l border-slate-200 overflow-y-auto flex flex-col justify-between">
-          <div class="space-y-5">
-            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 class="text-base font-bold text-navy flex items-center gap-2">
-                <app-icon name="compass" class="w-5 h-5 text-gold" />
-                <span>{{ lang.t('admin.commercial.drawerInspectTitle') }}</span>
-              </h3>
-              <button (click)="inspectingRoute.set(null)" class="text-slate-400 hover:text-slate-600">
-                <app-icon name="x" class="w-5 h-5" />
-              </button>
-            </div>
-
-            <!-- Route Header Banner -->
-            <div class="p-4 bg-navy text-white rounded-2xl flex items-center justify-between">
-              <div>
-                <span class="text-xs text-gold uppercase tracking-wider block font-bold">
-                  {{ r.airline_iata || r.airline_icao || lang.t('admin.commercial.airlabsPartner') }}
-                </span>
-                <span class="text-lg font-black font-mono">
-                  {{ r.flight_iata || r.flight_number || lang.t('admin.commercial.notAvailable') }}
-                </span>
-              </div>
-              <div class="text-right">
-                <span class="text-xl font-black font-mono">{{ r.dep_iata }} → {{ r.arr_iata }}</span>
-                <span class="text-xs text-slate-300 block font-mono">
-                  {{ r.duration ? r.duration + ' ' + lang.t('admin.commercial.minsUnit') : lang.t('admin.commercial.durationNA') }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Provenance Detail Grid -->
-            <div class="card-luxury p-4 space-y-2.5 text-xs">
-              <span class="font-bold text-navy uppercase tracking-wider text-[11px] block border-b border-slate-100 pb-1.5">
-                {{ lang.t('admin.commercial.sourceProvenance') }}
-              </span>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceCarrier') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.airline_iata || r.airline_icao || '-' }}</span>
-                </div>
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceFlight') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.flight_iata || r.flight_number || '-' }}</span>
-                </div>
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceLocalClocks') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.dep_time || '-' }} → {{ r.arr_time || '-' }}</span>
-                </div>
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceUtcClocks') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.dep_time_utc ? r.dep_time_utc + 'Z' : '-' }} → {{ r.arr_time_utc ? r.arr_time_utc + 'Z' : '-' }}</span>
-                </div>
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceAircraft') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.aircraft_icao || '-' }}</span>
-                </div>
-                <div>
-                  <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceSyncedAt') }}</span>
-                  <span class="font-bold text-navy font-mono">{{ r.synced_at ? (r.synced_at | date:'yyyy-MM-dd HH:mm') : '-' }}</span>
-                </div>
-              </div>
-
-              <div class="pt-2 border-t border-slate-100">
-                <span class="text-slate-400 block">{{ lang.t('admin.commercial.sourceKey') }}</span>
-                <span class="font-mono text-[11px] text-slate-700 break-all select-all font-semibold">{{ r.source_key }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="pt-4 border-t border-slate-100 flex justify-end">
-            <button
-              type="button"
-              (click)="inspectingRoute.set(null)"
-              class="btn-navy text-xs !py-2 !px-5"
-            >
-              {{ lang.t('common.cancel') }}
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- DRAWER 2: Commercialize Route Configuration -->
-    @if (commercializingRoute(); as r) {
-      <div class="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-xl h-full shadow-2xl p-6 border-l border-slate-200 overflow-y-auto flex flex-col justify-between">
-          <div class="space-y-5">
-            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 class="text-base font-bold text-navy flex items-center gap-2">
-                <app-icon name="plane" class="w-5 h-5 text-gold" />
-                <span>{{ lang.t('admin.commercial.drawerCommercializeTitle') }}</span>
-              </h3>
-              <button (click)="closeCommercializeDrawer()" class="text-slate-400 hover:text-slate-600">
-                <app-icon name="x" class="w-5 h-5" />
-              </button>
-            </div>
-
-            <!-- Step banner when guided multi-leg commercialization queue is active -->
-            @if (commercializeQueue(); as queue) {
-              <div class="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900">
-                <app-icon name="slidershorizontal" class="w-4 h-4 text-gold shrink-0" />
-                <div class="space-y-0.5">
-                  <span class="font-bold text-amber-950">
-                    {{ lang.t('admin.commercial.queueStep')
-                        .replace('{current}', String(queue.currentIndex + 1))
-                        .replace('{total}', String(queue.legs.length))
-                        .replace('{route}', r.dep_iata + ' → ' + r.arr_iata) }}
-                  </span>
-                  <p class="text-[11px] text-amber-800">
-                    {{ lang.t('admin.commercial.queueAutoAdvance') }}
-                  </p>
-                </div>
-              </div>
-            }
-
-            <!-- Read-only Source Summary Banner -->
-            <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
-              <div class="flex items-center justify-between font-bold text-navy">
-                <span>{{ r.airline_iata || r.airline_icao || 'AirLabs' }} ({{ r.flight_iata || r.flight_number || '-' }})</span>
-                <span class="font-mono">{{ r.dep_iata }} → {{ r.arr_iata }}</span>
-              </div>
-              <div class="flex items-center justify-between text-slate-500 font-mono text-[11px]">
-                <span>{{ lang.t('admin.commercial.labelLocal') }} {{ r.dep_time || '-' }} → {{ r.arr_time || '-' }}</span>
-                <span>{{ lang.t('admin.commercial.labelUtc') }} {{ r.dep_time_utc ? r.dep_time_utc + 'Z' : '-' }} → {{ r.arr_time_utc ? r.arr_time_utc + 'Z' : '-' }}</span>
-              </div>
-              <div>
-                <span class="text-slate-500 font-medium block mb-1">{{ lang.t('admin.commercial.sourceOperatingDays') }}</span>
-                <div class="flex items-center gap-1 flex-wrap">
-                  @for (d of formatDayChips(r.days); track d.dayNum) {
-                    <span
-                      class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold"
-                      [class]="d.active ? 'bg-amber-100 text-amber-900 border border-gold/40' : 'bg-slate-200 text-slate-400'"
-                    >
-                      {{ d.label }}
-                    </span>
-                  }
-                </div>
-              </div>
-            </div>
-
-            <!-- Incompatibility Warning Banner if any -->
-            @if (formIncompatibleCabins().length > 0 || formOvercapacityDetails().length > 0) {
-              <div class="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl space-y-2.5 text-xs text-amber-900 animate-fade-in">
-                <div class="flex items-start gap-2.5">
-                  <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div class="space-y-1.5 flex-1">
-                    <p class="font-bold text-amber-950">{{ lang.t('admin.commercial.incompatibleAircraftWarning') }}</p>
-
-                    @if (formIncompatibleCabins().length > 0) {
-                      <div class="flex items-center justify-between gap-2 bg-amber-100/70 p-2.5 rounded-xl border border-amber-200">
-                        <span>
-                          {{ lang.t('admin.commercial.incompatibleCabinsLabel') }}:
-                          <strong class="font-mono text-amber-950">{{ getIncompatibleCabinsString(formIncompatibleCabins()) }}</strong>
-                        </span>
-                        <button
-                          type="button"
-                          (click)="removeIncompatibleFormCabins()"
-                          class="btn-navy !py-1 !px-2.5 text-[11px] shrink-0 font-semibold"
-                        >
-                          {{ lang.t('admin.commercial.removeIncompatibleCabins') }}
-                        </button>
-                      </div>
-                    }
-
-                    @if (formOvercapacityDetails().length > 0) {
-                      <div class="space-y-1 bg-amber-100/70 p-2.5 rounded-xl border border-amber-200">
-                        <p class="font-medium text-[11px] text-amber-950">{{ lang.t('admin.commercial.overcapacityNotice') }}:</p>
-                        @for (item of formOvercapacityDetails(); track item.cabin) {
-                          <p class="font-mono text-[11px] text-amber-900">
-                            • {{ item.cabin }}: {{ lang.t('admin.commercial.allocatedSeats') }} <strong>{{ item.allocated }}</strong> > {{ lang.t('admin.commercial.maxCapacity') }} <strong>{{ item.max }}</strong>
-                          </p>
-                        }
-                      </div>
-                    }
-                  </div>
-                </div>
-              </div>
-            }
-
-            <!-- Commercial Configuration Form -->
-            <form class="space-y-4 text-xs">
-              <div>
-                <label class="block font-semibold text-slate-700 mb-1">
-                  {{ lang.t('admin.commercial.aptFlightNumber') }}
-                </label>
-                <input
-                  type="text"
-                  [ngModel]="formFlightNumber()"
-                  (ngModelChange)="formFlightNumber.set($event.toUpperCase().trim())"
-                  name="aptech_flight_number"
-                  placeholder="APT231"
-                  required
-                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-                />
-                <p class="text-[10px] text-slate-400 mt-1 font-mono">
-                  {{ lang.t('admin.commercial.flightNumberFormatHelp') }}
-                </p>
-              </div>
-
-              <div>
-                <label class="block font-semibold text-slate-700 mb-1">
-                  {{ lang.t('admin.commercial.aircraftType') }}
-                </label>
-                <select
-                  [ngModel]="formAircraftType()"
-                  (ngModelChange)="onAircraftTypeSelected($event)"
-                  name="aircraft_type"
-                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-                >
-                  <option value="">{{ lang.t('admin.commercial.selectAircraft') }}</option>
-                  @for (layout of aircraftLayouts(); track layout.aircraft_type) {
-                    <option [value]="layout.aircraft_type">
-                      {{ layout.aircraft_type }} – {{ layout.model_name }} ({{ layout.total_capacity }} {{ lang.t('admin.commercial.seatsUnit') }})
-                    </option>
-                  }
-                </select>
-              </div>
-
-              <!-- Dynamic Cabins & Allocations based on chosen Aircraft -->
-              @if (selectedAircraftLayout(); as layout) {
-                <div class="card-luxury p-4 space-y-3">
-                  <div class="border-b border-slate-100 pb-2">
-                    <span class="font-bold text-navy uppercase tracking-wider text-[11px] block">
-                      {{ lang.t('admin.commercial.cabinsAndInventory') }}
-                    </span>
-                    <p class="text-[11px] text-slate-400 mt-0.5">
-                      {{ lang.t('admin.commercial.cabinHelp') }}
-                    </p>
-                  </div>
-
-                  @for (cabin of layout.supported_cabins; track cabin) {
-                    @let physicalCap = layout.cabin_capacities[cabin] || 0;
-                    @let isSelected = formSelectedCabins().has(cabinAsEnum(cabin));
-                    <div class="p-3 rounded-xl border transition-all" [class]="isSelected ? 'border-gold bg-amber-50/20' : 'border-slate-100 bg-slate-50/60'">
-                      <div class="flex items-center justify-between mb-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer font-bold text-navy">
-                          <input
-                            type="checkbox"
-                            [checked]="isSelected"
-                            [disabled]="cabin === 'ECONOMY'"
-                            (change)="toggleCabinSelection(cabinAsEnum(cabin))"
-                            class="rounded text-gold focus:ring-gold"
-                          />
-                          <span>{{ cabin }}</span>
-                        </label>
-                        <span class="text-[11px] text-slate-500 font-mono">
-                          {{ lang.t('admin.commercial.physicalCapacity') }} <strong class="text-navy">{{ physicalCap }}</strong>
-                        </span>
-                      </div>
-
-                      @if (isSelected) {
-                        <div class="grid grid-cols-2 gap-2.5 pt-1.5">
-                          <div>
-                            <label class="block text-[11px] font-medium text-slate-600 mb-1">
-                              {{ lang.t('admin.commercial.allocatedSeats') }}
-                            </label>
-                            <input
-                              type="number"
-                              [ngModel]="formAllocatedSeats()[cabin]"
-                              (ngModelChange)="updateAllocatedSeats(cabin, +$event)"
-                              [name]="'allocated_' + cabin"
-                              min="1"
-                              [max]="physicalCap"
-                              class="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs focus:ring-1 focus:ring-gold"
-                            />
-                          </div>
-                          <div>
-                            <label class="block text-[11px] font-medium text-slate-600 mb-1">
-                              {{ lang.t('admin.commercial.baseFare') }}
-                              @if (cabin === 'ECONOMY') {
-                                <span class="text-rose-500 font-bold">*</span>
-                              }
-                            </label>
-                            <input
-                              type="number"
-                              [ngModel]="formBasePrices()[cabin]"
-                              (ngModelChange)="updateBasePrice(cabin, $event ? +$event : null)"
-                              [name]="'price_' + cabin"
-                              [placeholder]="cabin === 'ECONOMY' ? '1500000' : lang.t('admin.commercial.autoPricing')"
-                              class="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs focus:ring-1 focus:ring-gold"
-                            />
-                          </div>
-                        </div>
-                      }
-                    </div>
-                  }
-                </div>
-              }
-
-              <!-- Immediate Materialization Option -->
-              <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-start gap-2.5">
-                <input
-                  type="checkbox"
-                  [ngModel]="formMaterializeImmediately()"
-                  (ngModelChange)="formMaterializeImmediately.set($event)"
-                  name="materialize_immediately"
-                  id="mat_now"
-                  class="rounded text-gold focus:ring-gold mt-0.5"
-                />
-                <label for="mat_now" class="cursor-pointer select-none">
-                  <span class="font-bold text-navy block text-xs">{{ lang.t('admin.commercial.optMaterializeNow') }}</span>
-                  <span class="text-[11px] text-slate-500 block">
-                    {{ lang.t('admin.commercial.materializeImmediatelyHelp') }}
-                  </span>
-                </label>
-              </div>
-            </form>
-          </div>
-
-          <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              (click)="closeCommercializeDrawer()"
-              class="btn-ghost text-xs"
-            >
-              {{ lang.t('common.cancel') }}
-            </button>
-
-            <button
-              type="button"
-              (click)="submitCommercialize()"
-              [disabled]="submittingCommercialize() || !isCommercializeFormValid()"
-              class="btn-gold text-xs !py-2.5 !px-6 font-bold"
-            >
-              @if (submittingCommercialize()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-              }
-              <span>
-                {{ commercializeQueue() && commercializeQueue()!.currentIndex + 1 < commercializeQueue()!.legs.length
-                    ? lang.t('admin.commercial.btnCreateAndNextLeg').replace('{next}', String(commercializeQueue()!.currentIndex + 2)).replace('{total}', String(commercializeQueue()!.legs.length))
-                    : lang.t('admin.commercial.btnCreateTemplate') }}
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- DRAWER 3: Edit Commercial Template Drawer -->
-    @if (editingTemplate(); as t) {
-      <div class="fixed inset-0 z-50 flex justify-end bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-xl h-full shadow-2xl p-6 border-l border-slate-200 overflow-y-auto flex flex-col justify-between">
-          <div class="space-y-5">
-            <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 class="text-base font-bold text-navy flex items-center gap-2">
-                <app-icon name="edit" class="w-5 h-5 text-gold" />
-                <span>{{ lang.t('admin.commercial.drawerEditTitle') }}: {{ t.template_id }}</span>
-              </h3>
-              <button (click)="editingTemplate.set(null)" class="text-slate-400 hover:text-slate-600">
-                <app-icon name="x" class="w-5 h-5" />
-              </button>
-            </div>
-
-            <!-- Read-only Provenance Banner -->
-            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs">
-              <p class="font-bold text-navy">
-                {{ lang.t('admin.commercial.routeReadOnly') }}
-                <span class="font-mono">{{ t.origin_iata }} → {{ t.dest_iata }}</span>
-              </p>
-              <p class="text-[11px] text-slate-500 font-mono">
-                {{ lang.t('admin.commercial.standardTime') }} {{ t.std_dep_time || '-' }} → {{ t.std_arr_time || '-' }} |
-                {{ lang.t('admin.commercial.operatingDaysLabel') }} {{ t.days_of_week.join(', ') }}
-              </p>
-              <p class="text-[11px] text-amber-800 font-medium">
-                {{ lang.t('admin.commercial.editNotice') }}
-              </p>
-            </div>
-
-            <!-- Incompatibility Warning Banner if any -->
-            @if (editIncompatibleCabins().length > 0 || editOvercapacityDetails().length > 0) {
-              <div class="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl space-y-2.5 text-xs text-amber-900 animate-fade-in">
-                <div class="flex items-start gap-2.5">
-                  <app-icon name="alerttriangle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div class="space-y-1.5 flex-1">
-                    <p class="font-bold text-amber-950">{{ lang.t('admin.commercial.incompatibleAircraftWarning') }}</p>
-
-                    @if (editIncompatibleCabins().length > 0) {
-                      <div class="flex items-center justify-between gap-2 bg-amber-100/70 p-2.5 rounded-xl border border-amber-200">
-                        <span>
-                          {{ lang.t('admin.commercial.incompatibleCabinsLabel') }}:
-                          <strong class="font-mono text-amber-950">{{ getIncompatibleCabinsString(editIncompatibleCabins()) }}</strong>
-                        </span>
-                        <button
-                          type="button"
-                          (click)="removeIncompatibleEditCabins()"
-                          class="btn-navy !py-1 !px-2.5 text-[11px] shrink-0 font-semibold"
-                        >
-                          {{ lang.t('admin.commercial.removeIncompatibleCabins') }}
-                        </button>
-                      </div>
-                    }
-
-                    @if (editOvercapacityDetails().length > 0) {
-                      <div class="space-y-1 bg-amber-100/70 p-2.5 rounded-xl border border-amber-200">
-                        <p class="font-medium text-[11px] text-amber-950">{{ lang.t('admin.commercial.overcapacityNotice') }}:</p>
-                        @for (item of editOvercapacityDetails(); track item.cabin) {
-                          <p class="font-mono text-[11px] text-amber-900">
-                            • {{ item.cabin }}: {{ lang.t('admin.commercial.allocatedSeats') }} <strong>{{ item.allocated }}</strong> > {{ lang.t('admin.commercial.maxCapacity') }} <strong>{{ item.max }}</strong>
-                          </p>
-                        }
-                      </div>
-                    }
-                  </div>
-                </div>
-              </div>
-            }
-
-            <form class="space-y-4 text-xs">
-              <div>
-                <label class="block font-semibold text-slate-700 mb-1">
-                  {{ lang.t('admin.commercial.colFlightNumber') }}
-                </label>
-                <input
-                  type="text"
-                  [ngModel]="editFlightNumber()"
-                  (ngModelChange)="editFlightNumber.set($event.toUpperCase().trim())"
-                  name="edit_flight_number"
-                  required
-                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-                />
-              </div>
-
-              <div>
-                <label class="block font-semibold text-slate-700 mb-1">
-                  {{ lang.t('admin.commercial.aircraftType') }}
-                </label>
-                <select
-                  [ngModel]="editAircraftType()"
-                  (ngModelChange)="onEditAircraftTypeSelected($event)"
-                  name="edit_aircraft_type"
-                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-navy focus:ring-2 focus:ring-gold"
-                >
-                  @for (layout of aircraftLayouts(); track layout.aircraft_type) {
-                    <option [value]="layout.aircraft_type">
-                      {{ layout.aircraft_type }} – {{ layout.model_name }} ({{ layout.total_capacity }} {{ lang.t('admin.commercial.seatsUnit') }})
-                    </option>
-                  }
-                </select>
-              </div>
-
-              <!-- Dynamic Cabins & Allocations for Edit -->
-              @if (editAircraftLayout(); as layout) {
-                <div class="card-luxury p-4 space-y-3">
-                  <div class="border-b border-slate-100 pb-2">
-                    <span class="font-bold text-navy uppercase tracking-wider text-[11px] block">
-                      {{ lang.t('admin.commercial.cabinsAndInventory') }}
-                    </span>
-                  </div>
-
-                  @for (cabin of layout.supported_cabins; track cabin) {
-                    @let physicalCap = layout.cabin_capacities[cabin] || 0;
-                    @let isSelected = editSelectedCabins().has(cabinAsEnum(cabin));
-                    <div class="p-3 rounded-xl border transition-all" [class]="isSelected ? 'border-gold bg-amber-50/20' : 'border-slate-100 bg-slate-50/60'">
-                      <div class="flex items-center justify-between mb-2">
-                        <label class="inline-flex items-center gap-2 cursor-pointer font-bold text-navy">
-                          <input
-                            type="checkbox"
-                            [checked]="isSelected"
-                            [disabled]="cabin === 'ECONOMY'"
-                            (change)="toggleEditCabinSelection(cabinAsEnum(cabin))"
-                            class="rounded text-gold focus:ring-gold"
-                          />
-                          <span>{{ cabin }}</span>
-                        </label>
-                        <span class="text-[11px] text-slate-500 font-mono">
-                          {{ lang.t('admin.commercial.physicalCapacity') }} <strong class="text-navy">{{ physicalCap }}</strong>
-                        </span>
-                      </div>
-
-                      @if (isSelected) {
-                        <div class="grid grid-cols-2 gap-2.5 pt-1.5">
-                          <div>
-                            <label class="block text-[11px] font-medium text-slate-600 mb-1">
-                              {{ lang.t('admin.commercial.allocatedSeats') }}
-                            </label>
-                            <input
-                              type="number"
-                              [ngModel]="editAllocatedSeats()[cabin]"
-                              (ngModelChange)="updateEditAllocatedSeats(cabin, +$event)"
-                              [name]="'edit_allocated_' + cabin"
-                              min="1"
-                              [max]="physicalCap"
-                              class="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs focus:ring-1 focus:ring-gold"
-                            />
-                          </div>
-                          <div>
-                            <label class="block text-[11px] font-medium text-slate-600 mb-1">
-                              {{ lang.t('admin.commercial.baseFare') }}
-                            </label>
-                            <input
-                              type="number"
-                              [ngModel]="editBasePrices()[cabin]"
-                              (ngModelChange)="updateEditBasePrice(cabin, $event ? +$event : null)"
-                              [name]="'edit_price_' + cabin"
-                              [placeholder]="cabin === 'ECONOMY' ? '1500000' : lang.t('admin.commercial.autoPricing')"
-                              class="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono text-xs focus:ring-1 focus:ring-gold"
-                            />
-                          </div>
-                        </div>
-                      }
-                    </div>
-                  }
-                </div>
-              }
-
-              <!-- Active status toggle in edit -->
-              <div class="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span class="font-bold text-navy text-xs">{{ lang.t('admin.commercial.colActiveToggle') }}</span>
-                <label class="inline-flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    [ngModel]="editIsActive()"
-                    (ngModelChange)="editIsActive.set($event)"
-                    name="edit_is_active"
-                    class="rounded text-gold focus:ring-gold"
-                  />
-                  <span class="text-xs font-semibold text-slate-700">{{ editIsActive() ? lang.t('admin.commercial.statusActive') : lang.t('admin.commercial.statusInactive') }}</span>
-                </label>
-              </div>
-            </form>
-          </div>
-
-          <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
-            <button
-              type="button"
-              (click)="editingTemplate.set(null)"
-              class="btn-ghost text-xs"
-            >
-              {{ lang.t('common.cancel') }}
-            </button>
-
-            <button
-              type="button"
-              (click)="saveTemplateEdit()"
-              [disabled]="submittingEdit() || !isEditFormValid()"
-              class="btn-gold text-xs !py-2.5 !px-6 font-bold"
-            >
-              @if (submittingEdit()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-              }
-              <span>{{ lang.t('admin.commercial.btnSaveTemplate') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- MODAL 2: Materialize Flights Horizon Modal -->
-    @if (materializingTemplate(); as t) {
-      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 border border-slate-200 space-y-4">
-          <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-            <h3 class="text-base font-bold text-navy flex items-center gap-2">
-              <app-icon name="calendar" class="w-5 h-5 text-gold" />
-              <span>{{ lang.t('admin.commercial.materializeModalTitle') }}</span>
-            </h3>
-            <button (click)="closeMaterializeModal()" class="text-slate-400 hover:text-slate-600">
-              <app-icon name="x" class="w-5 h-5" />
-            </button>
-          </div>
-
-          <!-- Template Mini Header -->
-          <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between text-xs">
-            <div>
-              <span class="font-black text-navy text-sm font-mono">{{ t.flight_number }}</span>
-              <span class="text-slate-400 mx-1.5 font-mono">({{ t.template_id }})</span>
-            </div>
-            <div class="font-mono font-bold text-navy">
-              {{ t.origin_iata }} → {{ t.dest_iata }} ({{ t.aircraft_type }})
-            </div>
-          </div>
-
-          <!-- Informational Notice on Idempotency -->
-          <div class="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-900">
-            <app-icon name="shieldcheck" class="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-            <div class="space-y-1">
-              <p class="font-bold">{{ lang.t('admin.commercial.safeIdempotentTitle') }}</p>
-              <p class="text-emerald-800 leading-relaxed">{{ lang.t('admin.commercial.materializeIdempotentNotice') }}</p>
-            </div>
-          </div>
-
-          <!-- Horizon Selector with Presets & Custom Days -->
-          <div class="space-y-3 text-xs">
-            <label class="block font-semibold text-slate-700">
-              {{ lang.t('admin.commercial.horizonPreset') }}
-            </label>
-            <div class="grid grid-cols-4 gap-2">
-              @for (preset of [30, 90, 180, 330]; track preset) {
-                <button
-                  type="button"
-                  (click)="materializeDays.set(preset)"
-                  class="px-3 py-2 rounded-xl font-bold font-mono text-center border transition-all text-xs"
-                  [class]="materializeDays() === preset ? 'bg-navy text-white border-navy shadow-sm' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'"
-                >
-                  {{ preset }}d
-                </button>
-              }
-            </div>
-
-            <div>
-              <label class="block font-medium text-slate-600 mb-1">
-                {{ lang.t('admin.commercial.customDaysLabel') }}
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="330"
-                step="1"
-                [ngModel]="materializeDays()"
-                (ngModelChange)="materializeDays.set(+$event)"
-                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
-              />
-              @if (!isMaterializeDaysValid()) {
-                <p class="text-rose-600 text-[11px] mt-1">
-                  {{ lang.t('admin.commercial.customDaysInvalid') }}
-                </p>
-              }
-            </div>
-
-            <div>
-              <label class="block font-medium text-slate-600 mb-1">
-                {{ lang.t('admin.commercial.customStartDate') }}
-              </label>
-              <input
-                type="date"
-                [ngModel]="materializeStartDate()"
-                (ngModelChange)="materializeStartDate.set($event)"
-                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
-              />
-            </div>
-          </div>
-
-          <!-- Complete GenerationStats Display -->
-          @if (materializeResult(); as res) {
-            <div class="p-4 bg-amber-50 border border-gold/40 rounded-2xl space-y-2 text-xs">
-              <div class="flex items-center gap-2 font-bold text-navy">
-                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.t('admin.commercial.statHeader') }}</span>
-              </div>
-              <p class="text-[11px] text-emerald-800 font-semibold">
-                {{ lang.t('admin.commercial.missingDatesMaterialized') }}
-              </p>
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-[11px] font-mono pt-1 text-slate-700">
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statInserted') }}</span>
-                  <strong class="text-emerald-600 text-sm">{{ res.inserted_count }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statMatched') }}</span>
-                  <strong class="text-navy text-sm">{{ res.matched_count }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statSkipped') }}</span>
-                  <strong class="text-slate-700 text-sm">{{ res.skipped_existing }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalOps') }}</span>
-                  <strong class="text-slate-800 text-sm">{{ res.total_operations }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalDays') }}</span>
-                  <strong class="text-slate-800 text-sm">{{ res.total_days }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTemplatesCount') }}</span>
-                  <strong class="text-slate-800 text-sm">{{ res.templates_count }}</strong>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statStartDate') }}</span>
-                  <span class="text-slate-700 font-bold">{{ res.start_date }}</span>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statEndDate') }}</span>
-                  <span class="text-slate-700 font-bold">{{ res.end_date }}</span>
-                </div>
-                <div class="p-2 bg-white/80 rounded-lg border border-slate-200">
-                  <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statDuration') }}</span>
-                  <span class="text-slate-700 font-bold">{{ res.duration_ms }}ms</span>
-                </div>
-              </div>
-            </div>
-          }
-
-          <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              (click)="closeMaterializeModal()"
-              class="btn-ghost text-xs"
-            >
-              {{ lang.t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              (click)="executeMaterialize()"
-              [disabled]="submittingMaterialize() || !isMaterializeDaysValid()"
-              class="btn-gold text-xs !py-2.5 !px-6 font-bold"
-            >
-              @if (submittingMaterialize()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-              }
-              <span>{{ lang.t('admin.commercial.btnExecuteMaterialize') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    }
-
-    <!-- MODAL: Materialize Entire Itinerary (All Legs) -->
-    @if (itineraryMaterializing(); as itin) {
-      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-navy/60 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white rounded-3xl shadow-2xl max-w-xl w-full border border-slate-100 overflow-hidden space-y-4 p-6">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-            <div class="flex items-center gap-2.5">
-              <div class="w-9 h-9 rounded-xl bg-gold/20 flex items-center justify-center text-navy font-bold">
-                <app-icon name="calendar" class="w-5 h-5 text-gold" />
-              </div>
-              <div>
-                <h3 class="text-sm font-bold text-navy">
-                  {{ lang.t('admin.commercial.materializeItineraryTitle') }}
-                </h3>
-                <p class="text-xs text-slate-500">
-                  {{ itin.airports[0] }} → {{ itin.airports[itin.airports.length - 1] }} ({{ itin.legs.length }} {{ lang.t('admin.commercial.legsUnit') }})
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              (click)="closeMaterializeItineraryModal()"
-              [disabled]="submittingItineraryMaterialize()"
-              class="p-1 rounded-lg text-slate-400 hover:text-navy hover:bg-slate-100"
-            >
-              <app-icon name="x" class="w-5 h-5" />
-            </button>
-          </div>
-
-          <p class="text-xs text-slate-600 leading-relaxed">
-            {{ lang.t('admin.commercial.materializeItineraryDesc') }}
-          </p>
-
-          <div class="space-y-3 text-xs">
-            <div>
-              <label class="block font-medium text-slate-600 mb-1.5">
-                {{ lang.t('admin.commercial.horizonPreset') }}
-              </label>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                @for (preset of [30, 90, 180, 330]; track preset) {
-                  <button
-                    type="button"
-                    (click)="itineraryMaterializeDays.set(preset)"
-                    [class]="itineraryMaterializeDays() === preset ? 'btn-navy text-xs !py-2 font-bold shadow-sm' : 'btn-outline-navy text-xs !py-2 font-medium'"
-                  >
-                    {{ preset }} {{ lang.t('admin.commercial.daysUnit') }}
-                  </button>
-                }
-              </div>
-            </div>
-
-            <div>
-              <label class="block font-medium text-slate-600 mb-1">
-                {{ lang.t('admin.commercial.customDaysLabel') }}
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="330"
-                step="1"
-                [ngModel]="itineraryMaterializeDays()"
-                (ngModelChange)="itineraryMaterializeDays.set(+$event)"
-                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
-              />
-              @if (!isItineraryMaterializeDaysValid()) {
-                <p class="text-rose-600 text-[11px] mt-1">
-                  {{ lang.t('admin.commercial.customDaysInvalid') }}
-                </p>
-              }
-            </div>
-
-            <div>
-              <label class="block font-medium text-slate-600 mb-1">
-                {{ lang.t('admin.commercial.customStartDate') }}
-              </label>
-              <input
-                type="date"
-                [ngModel]="itineraryMaterializeStartDate()"
-                (ngModelChange)="itineraryMaterializeStartDate.set($event)"
-                class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs focus:ring-1 focus:ring-gold"
-              />
-            </div>
-          </div>
-
-          <!-- Progress List per Leg -->
-          @if (itineraryMaterializeProgress().length > 0) {
-            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-              <span class="font-bold text-slate-700 block">
-                {{ lang.t('admin.commercial.matProgressPerLeg') }}
-              </span>
-              @for (item of itineraryMaterializeProgress(); track item.legIndex) {
-                <div class="p-2.5 bg-white rounded-xl border border-slate-100 space-y-1.5">
-                  <div class="flex items-center justify-between">
-                    <span class="font-mono font-bold text-navy">
-                      {{ lang.t('admin.commercial.legNum').replace('{num}', String(item.legIndex + 1)) }}: {{ item.flightNumber }}
-                    </span>
-                    <div>
-                      @if (item.status === 'PENDING') {
-                        <span class="text-slate-400 font-medium text-[11px]">{{ lang.t('admin.commercial.statusPending') }}</span>
-                      } @else if (item.status === 'RUNNING') {
-                        <span class="text-blue-600 font-bold text-[11px] inline-flex items-center gap-1">
-                          <app-icon name="refreshcw" class="w-3.5 h-3.5 animate-spin" />
-                          <span>{{ lang.t('admin.commercial.statusRunning') }}</span>
-                        </span>
-                      } @else if (item.status === 'SUCCESS') {
-                        <span class="text-emerald-600 font-bold text-[11px] inline-flex items-center gap-1">
-                          <app-icon name="checkcircle2" class="w-3.5 h-3.5" />
-                          <span>{{ lang.t('admin.commercial.legStatsSummary').replace('{inserted}', String(item.stats?.inserted_count || 0)).replace('{matched}', String(item.stats?.matched_count || 0)) }}</span>
-                        </span>
-                      } @else if (item.status === 'ERROR') {
-                        <span class="text-rose-600 font-bold text-[11px] inline-flex items-center gap-1">
-                          <app-icon name="xcircle" class="w-3.5 h-3.5" />
-                          <span>{{ item.error || 'Error' }}</span>
-                        </span>
-                      }
-                    </div>
-                  </div>
-
-                  @if (item.status === 'SUCCESS' && item.stats; as st) {
-                    <details class="mt-1 p-2 bg-slate-50 rounded-lg border border-slate-200 text-[11px]">
-                      <summary class="cursor-pointer font-bold text-navy select-none flex items-center gap-1">
-                        <span>{{ lang.t('admin.commercial.routeDetailsView') }}</span>
-                      </summary>
-                      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono pt-2 text-slate-700">
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statInserted') }}</span>
-                          <strong class="text-emerald-600">{{ st.inserted_count }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statMatched') }}</span>
-                          <strong class="text-navy">{{ st.matched_count }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statSkipped') }}</span>
-                          <strong>{{ st.skipped_existing }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalOps') }}</span>
-                          <strong>{{ st.total_operations }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTotalDays') }}</span>
-                          <strong>{{ st.total_days }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statTemplatesCount') }}</span>
-                          <strong>{{ st.templates_count }}</strong>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statStartDate') }}</span>
-                          <span>{{ st.start_date }}</span>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statEndDate') }}</span>
-                          <span>{{ st.end_date }}</span>
-                        </div>
-                        <div>
-                          <span class="text-slate-500 block text-[10px]">{{ lang.t('admin.commercial.statDuration') }}</span>
-                          <span>{{ st.duration_ms }}ms</span>
-                        </div>
-                      </div>
-                    </details>
-                  }
-                </div>
-              }
-            </div>
-          }
-
-          <!-- Summary Stats -->
-          @if (itineraryMaterializeSummary(); as sum) {
-            <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-2">
-              <div class="flex items-center gap-2 font-bold text-emerald-800">
-                <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.t('admin.commercial.statHeader') }}</span>
-              </div>
-              <div class="grid grid-cols-3 gap-2 font-mono text-center">
-                <div class="p-2 bg-white rounded-lg border border-emerald-100">
-                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.statInserted') }}</span>
-                  <strong class="text-emerald-600 text-sm">+{{ sum.totalInserted }}</strong>
-                </div>
-                <div class="p-2 bg-white rounded-lg border border-emerald-100">
-                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.statMatched') }}</span>
-                  <strong class="text-navy text-sm">{{ sum.totalMatched }}</strong>
-                </div>
-                <div class="p-2 bg-white rounded-lg border border-emerald-100">
-                  <span class="text-[10px] text-slate-500 block">{{ lang.t('admin.commercial.legsCompleted') }}</span>
-                  <strong class="text-slate-800 text-sm">{{ sum.completedCount }}/{{ itin.legs.length }}</strong>
-                </div>
-              </div>
-            </div>
-          }
-
-          <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              (click)="closeMaterializeItineraryModal()"
-              [disabled]="submittingItineraryMaterialize()"
-              class="btn-ghost text-xs !py-2 !px-4"
-            >
-              <span>{{ lang.t('admin.commercial.btnClose') }}</span>
-            </button>
-            <button
-              type="button"
-              (click)="executeItineraryMaterialize()"
-              [disabled]="submittingItineraryMaterialize() || !isItineraryMaterializeDaysValid()"
-              class="btn-gold text-xs !py-2 !px-5 font-bold inline-flex items-center gap-2"
-            >
-              @if (submittingItineraryMaterialize()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-                <span>{{ lang.t('admin.commercial.btnMaterializing') }}</span>
-              } @else if (hasItineraryMaterializeErrors()) {
-                <app-icon name="refreshcw" class="w-4 h-4" />
-                <span>{{ lang.t('admin.commercial.btnRetryFailedLegs') }}</span>
-              } @else {
-                <app-icon name="calendar" class="w-4 h-4" />
-                <span>{{ lang.t('admin.commercial.btnExecuteMaterialize') }}</span>
-              }
-            </button>
-          </div>
-        </div>
-      </div>
-    }
   `,
 })
 export class CommercialFlightsComponent implements OnInit {
   readonly api = inject(ApiService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
-  protected readonly String = String;
+  private readonly router = inject(Router);
 
-  // Tabs
-  activeTab = signal<'discovery' | 'routes' | 'templates'>('discovery');
+  @ViewChild('advancedTools') advancedTools?: CommercialAdvancedToolsComponent;
 
-  // TAB 1: Network Discovery
+  // STEP 1: Discovery Search Parameters
   discOrigin = signal<string>('HAN');
   discDestination = signal<string>('SGN');
   discDepartureDate = signal<string>(new Date().toISOString().slice(0, 10));
@@ -1925,7 +280,8 @@ export class CommercialFlightsComponent implements OnInit {
   discoveryResponse = signal<CommercialNetworkDiscoveryResponse | null>(null);
   discoveryError = signal<string | null>(null);
 
-  // Guided Multi-Leg Commercialization Queue
+  // STEP 2 & 3: Selected Itinerary & Leg Queue State
+  selectedItinerary = signal<CommercialNetworkItinerary | null>(null);
   loadingLegSourceKey = signal<string | null>(null);
   commercializeQueue = signal<{
     itineraryKey: string;
@@ -1933,14 +289,10 @@ export class CommercialFlightsComponent implements OnInit {
     currentIndex: number;
   } | null>(null);
 
-  // Materialize Itinerary Modal
-  itineraryMaterializing = signal<CommercialNetworkItinerary | null>(null);
+  // STEP 4: Itinerary Materialization State
   itineraryMaterializeDays = signal<number>(30);
   itineraryMaterializeStartDate = signal<string>('');
   submittingItineraryMaterialize = signal<boolean>(false);
-  hasItineraryMaterializeErrors = computed(() => {
-    return this.itineraryMaterializeProgress().some((p) => p.status === 'ERROR');
-  });
   itineraryMaterializeProgress = signal<
     Array<{
       legIndex: number;
@@ -1956,14 +308,21 @@ export class CommercialFlightsComponent implements OnInit {
     completedCount: number;
   } | null>(null);
 
-  // KPI & Global Catalog
+  hasItineraryMaterializeErrors = computed(() => {
+    return this.itineraryMaterializeProgress().some((p) => p.status === 'ERROR');
+  });
+
+  // Global Catalogs & KPIs
   templates = signal<CommercialScheduleTemplate[]>([]);
   matchingRoutesCount = signal<number>(0);
+  aircraftLayouts = signal<CommercialAircraftLayout[]>([]);
+
   activeTemplatesCount = computed(() => this.templates().filter((t) => t.is_active).length);
   commercializedRoutesCount = computed(() => {
     const set = new Set(this.templates().map((t) => t.source_route_key).filter(Boolean));
     return set.size;
   });
+
   templateMapByRouteKey = computed(() => {
     const map = new Map<string, CommercialScheduleTemplate>();
     for (const t of this.templates()) {
@@ -1974,10 +333,71 @@ export class CommercialFlightsComponent implements OnInit {
     return map;
   });
 
-  // Aircraft Layouts (backend authoritative)
-  aircraftLayouts = signal<CommercialAircraftLayout[]>([]);
+  // Derived Predicates for Progressive Disclosure
+  allCommercialized = computed(() => {
+    const itin = this.selectedItinerary();
+    if (!itin || !itin.legs || itin.legs.length === 0) return false;
+    const map = this.templateMapByRouteKey();
+    return itin.legs.every((l) => map.has(l.source_key));
+  });
 
-  // TAB 1: RouteRef Explorer
+  allReadyToPublish = computed(() => {
+    const itin = this.selectedItinerary();
+    if (!itin || !itin.legs || itin.legs.length === 0) return false;
+    const map = this.templateMapByRouteKey();
+    return itin.legs.every((l) => {
+      const tpl = map.get(l.source_key);
+      return !!tpl && tpl.is_active === true;
+    });
+  });
+
+  hasInactiveTemplate = computed(() => {
+    const itin = this.selectedItinerary();
+    if (!itin || !itin.legs) return false;
+    const map = this.templateMapByRouteKey();
+    return itin.legs.some((l) => {
+      const tpl = map.get(l.source_key);
+      return !!tpl && !tpl.is_active;
+    });
+  });
+
+  uncommercializedCount = computed(() => {
+    const itin = this.selectedItinerary();
+    if (!itin || !itin.legs) return 0;
+    const map = this.templateMapByRouteKey();
+    return itin.legs.filter((l) => !map.has(l.source_key)).length;
+  });
+
+  // Stepper State
+  step1Done = computed(() => {
+    const resp = this.discoveryResponse();
+    return !!resp && Array.isArray(resp.itineraries) && resp.itineraries.length > 0;
+  });
+
+  step2Done = computed(() => {
+    return this.selectedItinerary() !== null;
+  });
+
+  step3Done = computed(() => {
+    return this.selectedItinerary() !== null && this.allReadyToPublish();
+  });
+
+  step4Done = computed(() => {
+    const sum = this.itineraryMaterializeSummary();
+    const itin = this.selectedItinerary();
+    if (!sum || !itin) return false;
+    return sum.completedCount === itin.legs.length && !this.hasItineraryMaterializeErrors();
+  });
+
+  currentStep = computed(() => {
+    if (this.step4Done()) return 4;
+    if (this.selectedItinerary() !== null && this.allReadyToPublish()) return 4;
+    if (this.selectedItinerary() !== null) return 3;
+    if (this.step1Done()) return 2;
+    return 1;
+  });
+
+  // Secondary Tools: RouteRef Explorer State
   routes = signal<AirLabsRouteRef[]>([]);
   routesLoading = signal<boolean>(false);
   filterDep = signal<string>('');
@@ -1986,33 +406,9 @@ export class CommercialFlightsComponent implements OnInit {
   routesPage = signal<number>(1);
   routesLimit = signal<number>(20);
   routesTotal = signal<number>(0);
-
   inspectingRoute = signal<AirLabsRouteRef | null>(null);
-  commercializingRoute = signal<AirLabsRouteRef | null>(null);
 
-  // Sync Modal
-  syncModalOpen = signal<boolean>(false);
-  syncDepIata = signal<string>('SGN');
-  syncLimit = signal<number>(200);
-  syncing = signal<boolean>(false);
-
-  // Commercialize Form
-  formFlightNumber = signal<string>('');
-  formAircraftType = signal<string>('');
-  formSelectedCabins = signal<Set<CabinClass>>(new Set([CabinClass.ECONOMY]));
-  formAllocatedSeats = signal<Record<string, number>>({});
-  formBasePrices = signal<Record<string, number | null>>({ [CabinClass.ECONOMY]: null });
-  formMaterializeImmediately = signal<boolean>(false);
-  submittingCommercialize = signal<boolean>(false);
-  formIncompatibleCabins = signal<CabinClass[]>([]);
-  formOvercapacityDetails = signal<Array<{ cabin: string; allocated: number; max: number }>>([]);
-
-  selectedAircraftLayout = computed(() => {
-    const code = this.formAircraftType();
-    return this.aircraftLayouts().find((l) => l.aircraft_type === code) || null;
-  });
-
-  // TAB 2: Templates
+  // Secondary Tools: Templates Catalog State
   templatesLoading = signal<boolean>(false);
   templateSearch = signal<string>('');
   filteredTemplates = computed(() => {
@@ -2028,7 +424,30 @@ export class CommercialFlightsComponent implements OnInit {
     );
   });
 
-  // Edit Template Drawer
+  // Single Airport Sync Modal State
+  syncModalOpen = signal<boolean>(false);
+  syncDepIata = signal<string>('SGN');
+  syncLimit = signal<number>(200);
+  syncing = signal<boolean>(false);
+
+  // Commercialize Route Drawer Form State
+  commercializingRoute = signal<AirLabsRouteRef | null>(null);
+  formFlightNumber = signal<string>('');
+  formAircraftType = signal<string>('');
+  formSelectedCabins = signal<Set<CabinClass>>(new Set([CabinClass.ECONOMY]));
+  formAllocatedSeats = signal<Record<string, number>>({});
+  formBasePrices = signal<Record<string, number | null>>({ [CabinClass.ECONOMY]: null });
+  formMaterializeImmediately = signal<boolean>(false);
+  submittingCommercialize = signal<boolean>(false);
+  formIncompatibleCabins = signal<CabinClass[]>([]);
+  formOvercapacityDetails = signal<Array<{ cabin: string; allocated: number; max: number }>>([]);
+
+  selectedAircraftLayout = computed(() => {
+    const code = this.formAircraftType();
+    return this.aircraftLayouts().find((l) => l.aircraft_type === code) || null;
+  });
+
+  // Edit Template Drawer Form State
   editingTemplate = signal<CommercialScheduleTemplate | null>(null);
   editFlightNumber = signal<string>('');
   editAircraftType = signal<string>('');
@@ -2045,7 +464,7 @@ export class CommercialFlightsComponent implements OnInit {
     return this.aircraftLayouts().find((l) => l.aircraft_type === code) || null;
   });
 
-  // Materialize Modal
+  // Single Template Materialize Modal State
   materializingTemplate = signal<CommercialScheduleTemplate | null>(null);
   materializeDays = signal<number>(30);
   materializeStartDate = signal<string>('');
@@ -2070,7 +489,7 @@ export class CommercialFlightsComponent implements OnInit {
     });
   }
 
-  // ===================== TEMPLATES CATALOG (EXHAUSTIVE) =====================
+  // ===================== TEMPLATES CATALOG =====================
   refreshTemplatesCatalog(): void {
     this.templatesLoading.set(true);
     this.api.fetchAllCommercialTemplates().subscribe({
@@ -2113,8 +532,8 @@ export class CommercialFlightsComponent implements OnInit {
       });
   }
 
-  onRoutesLimitChange(newLimit: number): void {
-    this.routesLimit.set(newLimit);
+  onFilterHasScheduleChange(val: boolean): void {
+    this.filterHasSchedule.set(val);
     this.loadRoutes(1);
   }
 
@@ -2122,66 +541,92 @@ export class CommercialFlightsComponent implements OnInit {
     this.inspectingRoute.set(r);
   }
 
-  viewTemplate(template: CommercialScheduleTemplate): void {
-    this.activeTab.set('templates');
-    this.templateSearch.set(template.flight_number);
-  }
+  // ===================== STEP 1: DISCOVERY SEARCH =====================
+  searchNetworkDiscovery(): void {
+    const origin = this.discOrigin().trim();
+    const dest = this.discDestination().trim();
+    const date = this.discDepartureDate().trim();
 
-  // ===================== ON-DEMAND AIRPORT SYNC =====================
-  openSyncModal(): void {
-    this.syncModalOpen.set(true);
-  }
-
-  executeAirportSync(): void {
-    const depIata = this.syncDepIata().trim().toUpperCase();
-    if (!depIata) {
-      this.toast.show(this.lang.t('admin.commercial.airportIataRequired'), 'warning');
+    if (!origin || !dest || !date) {
       return;
     }
 
-    this.syncing.set(true);
-    this.api.syncRoutesForAirport(depIata, this.syncLimit()).subscribe({
-      next: (res) => {
-        this.syncing.set(false);
-        this.syncModalOpen.set(false);
+    // Reset transient workflow state as required by Plan Review item 3
+    this.selectedItinerary.set(null);
+    this.commercializeQueue.set(null);
+    this.commercializingRoute.set(null);
+    this.loadingLegSourceKey.set(null);
+    this.itineraryMaterializeSummary.set(null);
+    this.itineraryMaterializeProgress.set([]);
 
-        const countStr = String(res.updated || 0);
-        if (res.complete === true) {
-          this.toast.show(
-            this.lang.t('admin.commercial.syncComplete')
-              .replace('{count}', countStr)
-              .replace('{airport}', res.dep_iata),
-            'success',
-          );
-        } else if (res.truncated === true) {
-          this.toast.show(
-            this.lang.t('admin.commercial.syncTruncated')
-              .replace('{count}', countStr)
-              .replace('{airport}', res.dep_iata),
-            'warning',
-          );
-        } else {
-          // complete === false && truncated === false
-          this.toast.show(
-            this.lang.t('admin.commercial.syncIncomplete')
-              .replace('{count}', countStr)
-              .replace('{airport}', res.dep_iata),
-            'warning',
-          );
-        }
+    this.isDiscovering.set(true);
+    this.discoveryError.set(null);
+    this.discoveryResponse.set(null);
 
-        // Refresh RouteRef table
-        this.filterDep.set(depIata);
-        this.loadRoutes(1);
-      },
-      error: (err) => {
-        this.syncing.set(false);
-        this.toast.show(err?.error?.message || this.lang.t('admin.commercial.errorSyncRoutes'), 'error');
-      },
-    });
+    this.api
+      .discoverCommercialNetwork({
+        origin,
+        destination: dest,
+        departure_date: date,
+        max_stops: this.discMaxStops() ?? undefined,
+      })
+      .subscribe({
+        next: (resp) => {
+          this.isDiscovering.set(false);
+          this.discoveryResponse.set(resp);
+        },
+        error: (err) => {
+          this.isDiscovering.set(false);
+          this.discoveryError.set(
+            err?.error?.message || this.lang.t('admin.commercial.discErrorGeneric'),
+          );
+        },
+      });
   }
 
-  // ===================== COMMERCIALIZATION WORKFLOW =====================
+  // ===================== STEP 2 & 3: ITINERARY SELECTION =====================
+  onSelectItinerary(itin: CommercialNetworkItinerary): void {
+    this.selectedItinerary.set(itin);
+    this.commercializeQueue.set(null);
+    this.itineraryMaterializeSummary.set(null);
+    const defaultStartDate =
+      this.discoveryResponse()?.departure_date || this.discDepartureDate() || new Date().toISOString().slice(0, 10);
+    this.itineraryMaterializeStartDate.set(defaultStartDate);
+    this.initializeItineraryMaterializeProgress(itin);
+  }
+
+  onChangeItinerary(): void {
+    this.selectedItinerary.set(null);
+    this.commercializeQueue.set(null);
+    this.loadingLegSourceKey.set(null);
+    this.itineraryMaterializeSummary.set(null);
+    this.itineraryMaterializeProgress.set([]);
+  }
+
+  onStepClick(step: number): void {
+    if (step === 1) {
+      // Step 1: Keep current search or let admin adjust
+    } else if (step === 2) {
+      // Allow returning to itinerary results
+      this.selectedItinerary.set(null);
+      this.commercializeQueue.set(null);
+      this.loadingLegSourceKey.set(null);
+    }
+  }
+
+  onViewTemplateFlightNumber(flightNumber: string): void {
+    this.templateSearch.set(flightNumber);
+    if (this.advancedTools) {
+      this.advancedTools.isOpen.set(true);
+      this.advancedTools.activeSubTab.set('templates');
+    }
+  }
+
+  onViewFlights(): void {
+    this.router.navigate(['/admin/flights']);
+  }
+
+  // ===================== COMMERCIALIZATION DRAWER & QUEUE =====================
   generateSuggestedFlightNumber(sourceFlightStr: string, queueOffset: number = 0): string {
     const digits = (sourceFlightStr || '').replace(/\D/g, '');
     let num = digits ? parseInt(digits, 10) : 100;
@@ -2205,7 +650,6 @@ export class CommercialFlightsComponent implements OnInit {
     const aptNumber = this.generateSuggestedFlightNumber(r.flight_number || r.flight_iata || '', offset);
     this.formFlightNumber.set(aptNumber);
 
-    // Select first aircraft layout by default (or A21N)
     const defaultLayout = this.aircraftLayouts().find((l) => l.aircraft_type === 'A21N') || this.aircraftLayouts()[0];
     if (defaultLayout) {
       this.formAircraftType.set(defaultLayout.aircraft_type);
@@ -2221,7 +665,6 @@ export class CommercialFlightsComponent implements OnInit {
       }
       this.formAllocatedSeats.set(seats);
 
-      // Section 12: Admin enters Economy fare; Premium can be left blank for automated pricing
       this.formBasePrices.set({
         [CabinClass.ECONOMY]: null,
         [CabinClass.BUSINESS]: null,
@@ -2238,15 +681,41 @@ export class CommercialFlightsComponent implements OnInit {
     this.commercializingRoute.set(null);
   }
 
-  getIncompatibleCabinsString(cabins: CabinClass[]): string {
-    return cabins.join(', ');
+  openCommercializeDrawerForLeg(leg: CommercialNetworkLeg, queueIndex: number = -1): void {
+    const reqKey = leg.source_key;
+    this.loadingLegSourceKey.set(reqKey);
+    this.api.getAirLabsRouteBySourceKey(reqKey).subscribe({
+      next: (routeRef) => {
+        if (this.loadingLegSourceKey() !== reqKey) return;
+        this.loadingLegSourceKey.set(null);
+        this.openCommercializeDrawer(routeRef, queueIndex);
+      },
+      error: () => {
+        if (this.loadingLegSourceKey() !== reqKey) return;
+        this.loadingLegSourceKey.set(null);
+        this.toast.show(this.lang.t('admin.commercial.errorLoadRouteRef'), 'error');
+      },
+    });
+  }
+
+  startItineraryCommercializeQueue(itinerary: CommercialNetworkItinerary): void {
+    const pendingLegs = itinerary.legs.filter((l) => !this.isLegCommercialized(l));
+    if (pendingLegs.length === 0) {
+      this.toast.show(this.lang.t('admin.commercial.allLegsCommercialized'), 'info');
+      return;
+    }
+    this.commercializeQueue.set({
+      itineraryKey: this.itinTrackKey(itinerary),
+      legs: pendingLegs,
+      currentIndex: 0,
+    });
+    this.openCommercializeDrawerForLeg(pendingLegs[0], 0);
   }
 
   onAircraftTypeSelected(aircraftType: string): void {
     this.formAircraftType.set(aircraftType);
     const layout = this.aircraftLayouts().find((l) => l.aircraft_type === aircraftType);
     if (!layout) return;
-
     this.recheckFormIncompatibility(layout);
   }
 
@@ -2335,18 +804,14 @@ export class CommercialFlightsComponent implements OnInit {
     const layout = this.selectedAircraftLayout();
     if (!layout) return false;
 
-    // Must not have incompatible cabins or overcapacity
     if (this.formIncompatibleCabins().length > 0) return false;
     if (this.formOvercapacityDetails().length > 0) return false;
 
-    // Economy price required, finite, >= 0
     const ecoPrice = this.formBasePrices()[CabinClass.ECONOMY];
     if (ecoPrice === null || ecoPrice === undefined || isNaN(Number(ecoPrice)) || Number(ecoPrice) < 0) return false;
 
-    // Must have Economy selected
     if (!this.formSelectedCabins().has(CabinClass.ECONOMY)) return false;
 
-    // Validate allocated seats for all selected cabins against physical capacity
     for (const c of this.formSelectedCabins()) {
       if (!layout.supported_cabins.includes(c)) return false;
 
@@ -2354,7 +819,6 @@ export class CommercialFlightsComponent implements OnInit {
       const maxCap = layout.cabin_capacities[c] || 0;
       if (!seats || seats < 1 || seats > maxCap) return false;
 
-      // Premium price: optional; if entered, must be finite > 0
       if (c !== CabinClass.ECONOMY) {
         const p = this.formBasePrices()[c];
         if (p !== null && p !== undefined && p !== ('' as any) && (isNaN(Number(p)) || Number(p) <= 0)) return false;
@@ -2384,9 +848,24 @@ export class CommercialFlightsComponent implements OnInit {
       aptech_flight_number: this.formFlightNumber().trim().toUpperCase(),
       aircraft_type: this.formAircraftType(),
       base_price_economy: ecoPrice,
-      base_price_business: prices[CabinClass.BUSINESS] !== null && prices[CabinClass.BUSINESS] !== undefined && prices[CabinClass.BUSINESS] !== ('' as any) ? Number(prices[CabinClass.BUSINESS]) : undefined,
-      base_price_club: prices[CabinClass.CLUB] !== null && prices[CabinClass.CLUB] !== undefined && prices[CabinClass.CLUB] !== ('' as any) ? Number(prices[CabinClass.CLUB]) : undefined,
-      base_price_first: prices[CabinClass.FIRST] !== null && prices[CabinClass.FIRST] !== undefined && prices[CabinClass.FIRST] !== ('' as any) ? Number(prices[CabinClass.FIRST]) : undefined,
+      base_price_business:
+        prices[CabinClass.BUSINESS] !== null &&
+        prices[CabinClass.BUSINESS] !== undefined &&
+        prices[CabinClass.BUSINESS] !== ('' as any)
+          ? Number(prices[CabinClass.BUSINESS])
+          : undefined,
+      base_price_club:
+        prices[CabinClass.CLUB] !== null &&
+        prices[CabinClass.CLUB] !== undefined &&
+        prices[CabinClass.CLUB] !== ('' as any)
+          ? Number(prices[CabinClass.CLUB])
+          : undefined,
+      base_price_first:
+        prices[CabinClass.FIRST] !== null &&
+        prices[CabinClass.FIRST] !== undefined &&
+        prices[CabinClass.FIRST] !== ('' as any)
+          ? Number(prices[CabinClass.FIRST])
+          : undefined,
       cabin_classes: cabinClasses,
       inventories,
     };
@@ -2394,15 +873,20 @@ export class CommercialFlightsComponent implements OnInit {
     this.api.commercializeAirLabsRoute(payload).subscribe({
       next: (createdTemplate) => {
         this.toast.show(
-          this.lang.t('admin.commercial.templateCreated')
+          this.lang
+            .t('admin.commercial.templateCreated')
             .replace('{route}', `${r.dep_iata} → ${r.arr_iata}`)
             .replace('{flightNumber}', createdTemplate.flight_number || createdTemplate.template_id),
           'success',
         );
 
-        // Update template catalog immediately & trigger reactive status across discovery
         this.templates.update((list) => [...list, createdTemplate]);
         this.refreshTemplatesCatalog();
+
+        const curItin = this.selectedItinerary();
+        if (curItin) {
+          this.initializeItineraryMaterializeProgress(curItin);
+        }
 
         const proceedAfterMaterialize = () => {
           const q = this.commercializeQueue();
@@ -2429,17 +913,14 @@ export class CommercialFlightsComponent implements OnInit {
           }
           this.submittingCommercialize.set(false);
           this.commercializingRoute.set(null);
-          if (this.activeTab() !== 'discovery') {
-            this.activeTab.set('templates');
-          }
         };
 
-        // Optional Sequential Step 2: Materialize immediately
         if (this.formMaterializeImmediately()) {
           this.api.materializeCommercialTemplate(createdTemplate.template_id, { days_ahead: 30 }).subscribe({
             next: (matRes) => {
               this.toast.show(
-                this.lang.t('admin.commercial.materializeSuccess')
+                this.lang
+                  .t('admin.commercial.materializeSuccess')
                   .replace('{inserted}', matRes.inserted_count.toString())
                   .replace('{matched}', matRes.matched_count.toString()),
                 'success',
@@ -2447,7 +928,6 @@ export class CommercialFlightsComponent implements OnInit {
               proceedAfterMaterialize();
             },
             error: (matErr) => {
-              // Partial success resilience: preserve template and guide admin
               this.toast.show(
                 `${this.lang.t('admin.commercial.partialMaterializeWarn')} (${matErr?.error?.message || this.lang.t('admin.commercial.errorMaterializeGeneric')})`,
                 'warning',
@@ -2466,7 +946,142 @@ export class CommercialFlightsComponent implements OnInit {
     });
   }
 
-  // ===================== TEMPLATE EDITING =====================
+  // ===================== STEP 4: ITINERARY MATERIALIZE =====================
+  onItineraryMaterializeDaysChange(newDays: number): void {
+    if (this.itineraryMaterializeDays() === newDays) return;
+    this.itineraryMaterializeDays.set(newDays);
+    this.itineraryMaterializeSummary.set(null);
+    const itin = this.selectedItinerary();
+    if (itin) {
+      this.initializeItineraryMaterializeProgress(itin);
+    }
+  }
+
+  onItineraryMaterializeStartDateChange(newDate: string): void {
+    if (this.itineraryMaterializeStartDate() === newDate) return;
+    this.itineraryMaterializeStartDate.set(newDate);
+    this.itineraryMaterializeSummary.set(null);
+    const itin = this.selectedItinerary();
+    if (itin) {
+      this.initializeItineraryMaterializeProgress(itin);
+    }
+  }
+
+  initializeItineraryMaterializeProgress(itin: CommercialNetworkItinerary): void {
+    const map = this.templateMapByRouteKey();
+    const progress = itin.legs.map((leg, idx) => {
+      const tpl = map.get(leg.source_key);
+      return {
+        legIndex: idx,
+        flightNumber: tpl ? tpl.flight_number : leg.flight_iata || leg.flight_number || `APT-Leg${idx + 1}`,
+        status: 'PENDING' as const,
+      };
+    });
+    this.itineraryMaterializeProgress.set(progress);
+  }
+
+  isItineraryMaterializeDaysValid(): boolean {
+    const d = this.itineraryMaterializeDays();
+    return Number.isInteger(d) && d >= 1 && d <= 330;
+  }
+
+  async executeItineraryMaterialize(): Promise<void> {
+    const itin = this.selectedItinerary();
+    if (!itin || !this.isItineraryMaterializeDaysValid() || !this.allReadyToPublish()) return;
+
+    const days = this.itineraryMaterializeDays();
+    const startDate = this.itineraryMaterializeStartDate().trim() || undefined;
+
+    this.submittingItineraryMaterialize.set(true);
+
+    let totalInserted = 0;
+    let totalMatched = 0;
+    let successCount = 0;
+
+    if (this.itineraryMaterializeProgress().length !== itin.legs.length) {
+      this.initializeItineraryMaterializeProgress(itin);
+    }
+
+    for (let i = 0; i < itin.legs.length; i++) {
+      const currentProgress = this.itineraryMaterializeProgress().find((p) => p.legIndex === i);
+      if (currentProgress && currentProgress.status === 'SUCCESS') {
+        if (currentProgress.stats) {
+          totalInserted += currentProgress.stats.inserted_count || 0;
+          totalMatched += currentProgress.stats.matched_count || 0;
+        }
+        successCount++;
+        continue;
+      }
+
+      const leg = itin.legs[i];
+      const tpl = this.templateMapByRouteKey().get(leg.source_key);
+      if (!tpl) {
+        this.updateItineraryLegProgress(i, 'ERROR', undefined, this.lang.t('admin.commercial.templateNotFound'));
+        continue;
+      }
+
+      this.updateItineraryLegProgress(i, 'RUNNING');
+
+      try {
+        const res = await firstValueFrom(
+          this.api.materializeCommercialTemplate(tpl.template_id, { days_ahead: days, start_date: startDate }),
+        );
+        totalInserted += res.inserted_count;
+        totalMatched += res.matched_count;
+        successCount++;
+        this.updateItineraryLegProgress(i, 'SUCCESS', res);
+      } catch (err: any) {
+        this.updateItineraryLegProgress(
+          i,
+          'ERROR',
+          undefined,
+          err?.error?.message || this.lang.t('admin.commercial.errorMaterializeGeneric'),
+        );
+      }
+    }
+
+    this.submittingItineraryMaterialize.set(false);
+    this.itineraryMaterializeSummary.set({
+      totalInserted,
+      totalMatched,
+      completedCount: successCount,
+    });
+
+    if (successCount === itin.legs.length) {
+      this.toast.show(
+        this.lang
+          .t('admin.commercial.materializeSummary')
+          .replace('{inserted}', String(totalInserted))
+          .replace('{matched}', String(totalMatched))
+          .replace('{total}', String(itin.legs.length)),
+        'success',
+      );
+    } else if (successCount > 0) {
+      this.toast.show(
+        this.lang
+          .t('admin.commercial.materializeSummary')
+          .replace('{inserted}', String(totalInserted))
+          .replace('{matched}', String(totalMatched))
+          .replace('{total}', String(itin.legs.length)),
+        'warning',
+      );
+    } else {
+      this.toast.show(this.lang.t('admin.commercial.errorMaterializeGeneric'), 'error');
+    }
+  }
+
+  private updateItineraryLegProgress(
+    legIndex: number,
+    status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'ERROR',
+    stats?: MaterializeTemplateResponse,
+    error?: string,
+  ): void {
+    this.itineraryMaterializeProgress.update((list) =>
+      list.map((item) => (item.legIndex === legIndex ? { ...item, status, stats, error } : item)),
+    );
+  }
+
+  // ===================== TEMPLATE EDIT DRAWER =====================
   openEditDrawer(t: CommercialScheduleTemplate): void {
     this.editingTemplate.set(t);
     this.editFlightNumber.set(t.flight_number);
@@ -2499,7 +1114,6 @@ export class CommercialFlightsComponent implements OnInit {
     this.editAircraftType.set(aircraftType);
     const layout = this.aircraftLayouts().find((l) => l.aircraft_type === aircraftType);
     if (!layout) return;
-
     this.recheckEditIncompatibility(layout);
   }
 
@@ -2589,7 +1203,6 @@ export class CommercialFlightsComponent implements OnInit {
     const layout = this.editAircraftLayout();
     if (!layout) return false;
 
-    // Must not have incompatible cabins or overcapacity
     if (this.editIncompatibleCabins().length > 0) return false;
     if (this.editOvercapacityDetails().length > 0) return false;
 
@@ -2631,7 +1244,6 @@ export class CommercialFlightsComponent implements OnInit {
     const resolvePremiumPrice = (cabin: CabinClass, originalVal?: number): number | null | undefined => {
       const inputVal = prices[cabin];
       if (inputVal === null || inputVal === undefined || (inputVal as any) === '') {
-        // Field is empty in the UI. If it was previously set, send null to clear it:
         if (originalVal !== undefined && originalVal !== null) {
           return null;
         }
@@ -2670,18 +1282,17 @@ export class CommercialFlightsComponent implements OnInit {
     });
   }
 
-  toggleTemplateStatus(t: CommercialScheduleTemplate): void {
-    const newStatus = !t.is_active;
-    this.api.toggleCommercialTemplateStatus(t.template_id, newStatus).subscribe({
+  onToggleTemplateStatus(evt: { id: string; isActive: boolean }): void {
+    this.api.toggleCommercialTemplateStatus(evt.id, evt.isActive).subscribe({
       next: () => {
-        // Section 16: Immutable signal update so active count KPI and table update reactively
         this.templates.update((list) =>
-          list.map((item) =>
-            item.template_id === t.template_id ? { ...item, is_active: newStatus } : item,
-          ),
+          list.map((item) => (item.template_id === evt.id ? { ...item, is_active: evt.isActive } : item)),
         );
         this.toast.show(
-          (newStatus ? this.lang.t('admin.commercial.templateStatusActive') : this.lang.t('admin.commercial.templateStatusInactive')).replace('{id}', t.template_id),
+          (evt.isActive
+            ? this.lang.t('admin.commercial.templateStatusActive')
+            : this.lang.t('admin.commercial.templateStatusInactive')
+          ).replace('{id}', evt.id),
           'info',
         );
       },
@@ -2691,7 +1302,7 @@ export class CommercialFlightsComponent implements OnInit {
     });
   }
 
-  // ===================== MATERIALIZATION =====================
+  // ===================== SINGLE TEMPLATE MATERIALIZE MODAL =====================
   openMaterializeModal(t: CommercialScheduleTemplate): void {
     this.materializingTemplate.set(t);
     this.materializeDays.set(30);
@@ -2722,7 +1333,8 @@ export class CommercialFlightsComponent implements OnInit {
         this.submittingMaterialize.set(false);
         this.materializeResult.set(res);
         this.toast.show(
-          this.lang.t('admin.commercial.materializeSuccess')
+          this.lang
+            .t('admin.commercial.materializeSuccess')
             .replace('{inserted}', res.inserted_count.toString())
             .replace('{matched}', res.matched_count.toString()),
           'success',
@@ -2735,311 +1347,67 @@ export class CommercialFlightsComponent implements OnInit {
     });
   }
 
-  // ===================== HELPERS =====================
-  cabinAsEnum(val: string): CabinClass {
-    return val as CabinClass;
+  // ===================== ON-DEMAND AIRPORT SYNC =====================
+  openSyncModal(): void {
+    this.syncModalOpen.set(true);
   }
 
-  // Section 8: Real provider operating days normalization (mon, tuesday, 1, daily, etc.)
-  normalizeOperatingDays(days?: string[]): Set<number> {
-    const active = new Set<number>();
-    if (!days || !Array.isArray(days)) return active;
-
-    for (const raw of days) {
-      if (!raw) continue;
-      const d = raw.trim().toLowerCase();
-      if (d === 'daily') {
-        for (let i = 1; i <= 7; i++) active.add(i);
-        continue;
-      }
-      if (d === '1' || d === 'mon' || d === 'monday') active.add(1);
-      else if (d === '2' || d === 'tue' || d === 'tuesday') active.add(2);
-      else if (d === '3' || d === 'wed' || d === 'wednesday') active.add(3);
-      else if (d === '4' || d === 'thu' || d === 'thursday') active.add(4);
-      else if (d === '5' || d === 'fri' || d === 'friday') active.add(5);
-      else if (d === '6' || d === 'sat' || d === 'saturday') active.add(6);
-      else if (d === '7' || d === 'sun' || d === 'sunday') active.add(7);
-      // Unknown provider value: do not fabricate a day
-    }
-    return active;
-  }
-
-  formatDayChips(days?: string[]): Array<{ dayNum: number; label: string; active: boolean }> {
-    const activeSet = this.normalizeOperatingDays(days);
-    return [1, 2, 3, 4, 5, 6, 7].map((num) => ({
-      dayNum: num,
-      label: this.getDayLabel(num),
-      active: activeSet.has(num),
-    }));
-  }
-
-  formatTemplateDaysChips(daysOfWeek?: number[]): Array<{ dayNum: number; label: string; active: boolean }> {
-    const activeSet = new Set(daysOfWeek || []);
-    return [1, 2, 3, 4, 5, 6, 7].map((num) => ({
-      dayNum: num,
-      label: this.getDayLabel(num),
-      active: activeSet.has(num),
-    }));
-  }
-
-  getDayLabel(d: number): string {
-    const map: Record<number, string> = {
-      1: this.lang.t('admin.commercial.daysMonday'),
-      2: this.lang.t('admin.commercial.daysTuesday'),
-      3: this.lang.t('admin.commercial.daysWednesday'),
-      4: this.lang.t('admin.commercial.daysThursday'),
-      5: this.lang.t('admin.commercial.daysFriday'),
-      6: this.lang.t('admin.commercial.daysSaturday'),
-      7: this.lang.t('admin.commercial.daysSunday'),
-    };
-    return map[d] || d.toString();
-  }
-
-  // Section 12: Truthful fare display. Economy shows explicit fare; unpriced premium shows "Auto pricing"
-  formatCabinFareDisplay(ecoPrice: number, cabin: CabinClass, t: CommercialScheduleTemplate): string {
-    if (cabin === CabinClass.ECONOMY) {
-      return this.formatCurrency(ecoPrice);
-    }
-    let explicitPrice: number | undefined;
-    if (cabin === CabinClass.BUSINESS) explicitPrice = t.base_price_business;
-    else if (cabin === CabinClass.CLUB) explicitPrice = t.base_price_club;
-    else if (cabin === CabinClass.FIRST) explicitPrice = t.base_price_first;
-
-    if (explicitPrice !== undefined && explicitPrice !== null && !isNaN(explicitPrice) && explicitPrice > 0) {
-      return this.formatCurrency(explicitPrice);
-    }
-    return this.lang.t('admin.commercial.autoPricing');
-  }
-
-  formatCurrency(val?: number): string {
-    if (val === undefined || val === null || isNaN(val)) return '-';
-    return `${val.toLocaleString('vi-VN')} ₫`;
-  }
-
-  // ===================== TAB 1: NETWORK DISCOVERY =====================
-  searchNetworkDiscovery(): void {
-    const origin = this.discOrigin().trim();
-    const dest = this.discDestination().trim();
-    const date = this.discDepartureDate().trim();
-
-    if (!origin || !dest || !date) {
+  executeAirportSync(): void {
+    const depIata = this.syncDepIata().trim().toUpperCase();
+    if (!depIata) {
+      this.toast.show(this.lang.t('admin.commercial.airportIataRequired'), 'warning');
       return;
     }
 
-    this.isDiscovering.set(true);
-    this.discoveryError.set(null);
-    this.discoveryResponse.set(null);
+    this.syncing.set(true);
+    this.api.syncRoutesForAirport(depIata, this.syncLimit()).subscribe({
+      next: (res) => {
+        this.syncing.set(false);
+        this.syncModalOpen.set(false);
 
-    this.api
-      .discoverCommercialNetwork({
-        origin,
-        destination: dest,
-        departure_date: date,
-        max_stops: this.discMaxStops() ?? undefined,
-      })
-      .subscribe({
-        next: (resp) => {
-          this.isDiscovering.set(false);
-          this.discoveryResponse.set(resp);
-        },
-        error: (err) => {
-          this.isDiscovering.set(false);
-          this.discoveryError.set(
-            err?.error?.message || this.lang.t('admin.commercial.discErrorGeneric'),
+        const countStr = String(res.updated || 0);
+        if (res.complete === true) {
+          this.toast.show(
+            this.lang
+              .t('admin.commercial.syncComplete')
+              .replace('{count}', countStr)
+              .replace('{airport}', res.dep_iata),
+            'success',
           );
-        },
-      });
-  }
-
-  openCommercializeDrawerForLeg(leg: CommercialNetworkLeg, queueIndex: number = -1): void {
-    this.loadingLegSourceKey.set(leg.source_key);
-    this.api.getAirLabsRouteBySourceKey(leg.source_key).subscribe({
-      next: (routeRef) => {
-        this.loadingLegSourceKey.set(null);
-        this.openCommercializeDrawer(routeRef, queueIndex);
-      },
-      error: () => {
-        this.loadingLegSourceKey.set(null);
-        this.toast.show(this.lang.t('admin.commercial.errorLoadRouteRef'), 'error');
-      },
-    });
-  }
-
-  startItineraryCommercializeQueue(itinerary: CommercialNetworkItinerary): void {
-    const pendingLegs = itinerary.legs.filter((l) => !this.isLegCommercialized(l));
-    if (pendingLegs.length === 0) {
-      this.toast.show(this.lang.t('admin.commercial.allLegsCommercialized'), 'info');
-      return;
-    }
-    this.commercializeQueue.set({
-      itineraryKey: this.itinTrackKey(itinerary),
-      legs: pendingLegs,
-      currentIndex: 0,
-    });
-    this.openCommercializeDrawerForLeg(pendingLegs[0], 0);
-  }
-
-  openMaterializeItineraryModal(itin: CommercialNetworkItinerary): void {
-    this.itineraryMaterializing.set(itin);
-    this.itineraryMaterializeDays.set(30);
-    this.itineraryMaterializeStartDate.set(
-      this.discoveryResponse()?.departure_date || this.discDepartureDate() || new Date().toISOString().slice(0, 10),
-    );
-    this.itineraryMaterializeSummary.set(null);
-
-    const progress = itin.legs.map((leg, idx) => {
-      const tpl = this.templateMapByRouteKey().get(leg.source_key);
-      return {
-        legIndex: idx,
-        flightNumber: tpl ? tpl.flight_number : (leg.flight_iata || leg.flight_number || `APT-Leg${idx + 1}`),
-        status: 'PENDING' as const,
-      };
-    });
-    this.itineraryMaterializeProgress.set(progress);
-  }
-
-  closeMaterializeItineraryModal(): void {
-    if (this.submittingItineraryMaterialize()) return;
-    this.itineraryMaterializing.set(null);
-    this.itineraryMaterializeProgress.set([]);
-    this.itineraryMaterializeSummary.set(null);
-  }
-
-  isItineraryMaterializeDaysValid(): boolean {
-    const d = this.itineraryMaterializeDays();
-    return Number.isInteger(d) && d >= 1 && d <= 330;
-  }
-
-  async executeItineraryMaterialize(): Promise<void> {
-    const itin = this.itineraryMaterializing();
-    if (!itin || !this.isItineraryMaterializeDaysValid()) return;
-
-    const days = this.itineraryMaterializeDays();
-    const startDate = this.itineraryMaterializeStartDate().trim() || undefined;
-
-    this.submittingItineraryMaterialize.set(true);
-
-    let totalInserted = 0;
-    let totalMatched = 0;
-    let successCount = 0;
-
-    for (let i = 0; i < itin.legs.length; i++) {
-      const currentProgress = this.itineraryMaterializeProgress().find((p) => p.legIndex === i);
-      // Skip already materialized legs on retry
-      if (currentProgress && currentProgress.status === 'SUCCESS') {
-        if (currentProgress.stats) {
-          totalInserted += currentProgress.stats.inserted_count || 0;
-          totalMatched += currentProgress.stats.matched_count || 0;
+        } else if (res.truncated === true) {
+          this.toast.show(
+            this.lang
+              .t('admin.commercial.syncTruncated')
+              .replace('{count}', countStr)
+              .replace('{airport}', res.dep_iata),
+            'warning',
+          );
+        } else {
+          this.toast.show(
+            this.lang
+              .t('admin.commercial.syncIncomplete')
+              .replace('{count}', countStr)
+              .replace('{airport}', res.dep_iata),
+            'warning',
+          );
         }
-        successCount++;
-        continue;
-      }
 
-      const leg = itin.legs[i];
-      const tpl = this.templateMapByRouteKey().get(leg.source_key);
-      if (!tpl) {
-        this.updateItineraryLegProgress(i, 'ERROR', undefined, this.lang.t('admin.commercial.templateNotFound'));
-        continue;
-      }
-
-      this.updateItineraryLegProgress(i, 'RUNNING');
-
-      try {
-        const res = await firstValueFrom(
-          this.api.materializeCommercialTemplate(tpl.template_id, { days_ahead: days, start_date: startDate }),
-        );
-        totalInserted += res.inserted_count;
-        totalMatched += res.matched_count;
-        successCount++;
-        this.updateItineraryLegProgress(i, 'SUCCESS', res);
-      } catch (err: any) {
-        this.updateItineraryLegProgress(
-          i,
-          'ERROR',
-          undefined,
-          err?.error?.message || this.lang.t('admin.commercial.errorMaterializeGeneric'),
-        );
-      }
-    }
-
-    this.submittingItineraryMaterialize.set(false);
-    this.itineraryMaterializeSummary.set({
-      totalInserted,
-      totalMatched,
-      completedCount: successCount,
+        this.filterDep.set(depIata);
+        this.loadRoutes(1);
+      },
+      error: (err) => {
+        this.syncing.set(false);
+        this.toast.show(err?.error?.message || this.lang.t('admin.commercial.errorSyncRoutes'), 'error');
+      },
     });
-
-    if (successCount === itin.legs.length) {
-      this.toast.show(
-        this.lang.t('admin.commercial.materializeSummary')
-          .replace('{inserted}', String(totalInserted))
-          .replace('{matched}', String(totalMatched))
-          .replace('{total}', String(itin.legs.length)),
-        'success',
-      );
-    } else if (successCount > 0) {
-      this.toast.show(
-        this.lang.t('admin.commercial.materializeSummary')
-          .replace('{inserted}', String(totalInserted))
-          .replace('{matched}', String(totalMatched))
-          .replace('{total}', String(itin.legs.length)),
-        'warning',
-      );
-    } else {
-      this.toast.show(this.lang.t('admin.commercial.errorMaterializeGeneric'), 'error');
-    }
   }
 
-  private updateItineraryLegProgress(
-    legIndex: number,
-    status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'ERROR',
-    stats?: MaterializeTemplateResponse,
-    error?: string,
-  ): void {
-    this.itineraryMaterializeProgress.update((list) =>
-      list.map((item) =>
-        item.legIndex === legIndex
-          ? { ...item, status, stats, error }
-          : item,
-      ),
-    );
-  }
-
+  // ===================== UTILITY METHODS =====================
   itinTrackKey(itin: CommercialNetworkItinerary): string {
     return itin.legs.map((l) => l.source_key).join('>');
   }
 
-  formatDuration(minutes: number): string {
-    if (!minutes || minutes <= 0) return this.lang.t('admin.commercial.durationNA');
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
-  }
-
-  formatDays(days?: Array<number | string>): string {
-    if (!days || days.length === 0) return this.lang.t('admin.commercial.notAvailable');
-    return days
-      .map((d) => {
-        const num = typeof d === 'number' ? d : parseInt(d, 10);
-        return isNaN(num) ? String(d) : this.getDayLabel(num) || String(d);
-      })
-      .join(', ');
-  }
-
-  isItineraryFullyCommercialized(itin: CommercialNetworkItinerary): boolean {
-    return itin.legs.every((l) => this.isLegCommercialized(l));
-  }
-
-  getUncommercializedLegsCount(itin: CommercialNetworkItinerary): number {
-    return itin.legs.filter((l) => !this.isLegCommercialized(l)).length;
-  }
-
   isLegCommercialized(leg: CommercialNetworkLeg): boolean {
     return this.templateMapByRouteKey().has(leg.source_key);
-  }
-
-  viewTemplateByFlightNumber(flightNumber: string): void {
-    this.templateSearch.set(flightNumber);
-    this.activeTab.set('templates');
   }
 }

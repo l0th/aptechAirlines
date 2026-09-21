@@ -194,7 +194,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           </div>
         </header>
 
-        <main class="flex-1 p-6 overflow-y-auto">
+        <main class="flex-1 p-6 overflow-y-auto min-w-0">
           <router-outlet />
         </main>
       </div>
