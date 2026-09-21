@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import * as https from 'https';
-import tzlookup from 'tz-lookup';
+import tzlookup = require('tz-lookup');
 import {
   AIRPORT_REFERENCE_DATA,
   CURATED_NEAREST_OVERLAYS,

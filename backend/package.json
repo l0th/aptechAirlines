@@ -15,7 +15,9 @@
     "test": "jest",
     "seed:phase-a": "ts-node src/scripts/seed-phase-a.ts",
     "migrate:phase-b": "ts-node src/scripts/migrate-phase-b-seats.ts --execute",
-    "migrate:phase-b:dry-run": "ts-node src/scripts/migrate-phase-b-seats.ts --dry-run"
+    "migrate:phase-b:dry-run": "ts-node src/scripts/migrate-phase-b-seats.ts --dry-run",
+    "repair:reference-data:dry-run": "ts-node src/scripts/repair-reference-data.ts --dry-run",
+    "repair:reference-data": "ts-node src/scripts/repair-reference-data.ts --execute"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
