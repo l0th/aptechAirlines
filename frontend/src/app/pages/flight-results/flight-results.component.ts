@@ -1936,8 +1936,10 @@ export function isValidCalendarDate(val: any): boolean {
       [routeInfo]="seatMapRouteInfo()"
       [passengerList]="generatedPassengerList()"
       [initialSeats]="seatMapInitialSeats()"
+      [allowedCabinClass]="seatMapAllowedCabinClass()"
       (closeEvent)="isSeatMapOpen.set(false)"
       (seatsConfirmed)="handleSeatsConfirmed($event)"
+      (seatAssignmentsSanitized)="handleSeatsSanitized($event)"
     />
   `,
 })
@@ -2204,6 +2206,7 @@ export class FlightResultsComponent implements OnInit {
   readonly seatMapFlightId = signal('');
   readonly seatMapFlightNumber = signal('');
   readonly seatMapRouteInfo = signal('');
+  readonly seatMapAllowedCabinClass = signal('');
 
   readonly selectedFlight = signal<FormattedFlightResult | null>(null);
   readonly selectedReturnFlight = signal<FormattedFlightResult | null>(null);
@@ -2742,6 +2745,7 @@ export class FlightResultsComponent implements OnInit {
     this.seatMapTarget.set('ONWARD');
     // Ghế của chuyến trước không được dính lại.
     this.assignedSeats.set({});
+    this.seatMapAllowedCabinClass.set(flight.cabin_class || '');
     this.openSeatMapFor(flight.flight_id, flight.flight_number, `${flight.origin_iata} - ${flight.dest_iata}`);
   }
 
@@ -2750,6 +2754,7 @@ export class FlightResultsComponent implements OnInit {
     this.selectedReturnFlight.set(flight);
     this.seatMapTarget.set('RETURN');
     this.returnSeats.set({});
+    this.seatMapAllowedCabinClass.set(flight.cabin_class || '');
     this.openSeatMapFor(flight.flight_id, flight.flight_number, `${flight.origin_iata} - ${flight.dest_iata}`);
   }
 
@@ -2768,6 +2773,8 @@ export class FlightResultsComponent implements OnInit {
     this.assignedSeats.set({});
     this.connectingLeg2Seats.set({});
     this.connectingSeatsByLeg.set({});
+    const leg1Cabin = option.legs[0]?.inventory?.cabin_class || '';
+    this.seatMapAllowedCabinClass.set(leg1Cabin);
     this.openSeatMapFor(
       option.legs[0].flight.flight_id,
       option.legs[0].flight.flight_number,
@@ -2794,6 +2801,8 @@ export class FlightResultsComponent implements OnInit {
     this.selectedReturnConnecting.set(option);
     this.returnConnectingSeatsByLeg.set({});
     this.seatMapTarget.set('RETURN_CONNECTING_LEG_1');
+    const leg1Cabin = option.legs[0]?.inventory?.cabin_class || '';
+    this.seatMapAllowedCabinClass.set(leg1Cabin);
     this.openSeatMapFor(
       option.legs[0].flight.flight_id,
       option.legs[0].flight.flight_number,
@@ -2834,7 +2843,9 @@ export class FlightResultsComponent implements OnInit {
       const nextIndex = legIndex + 1;
       if (nextIndex < option.legs.length) {
         const next = option.legs[nextIndex].flight;
+        const nextCabin = option.legs[nextIndex].inventory?.cabin_class || '';
         setTimeout(() => {
+          this.seatMapAllowedCabinClass.set(nextCabin);
           this.seatMapTarget.set(`CONNECTING_LEG_${nextIndex + 1}`);
           this.openSeatMapFor(next.flight_id, next.flight_number, `${next.origin_iata} - ${next.dest_iata}`);
         }, 50);
@@ -2928,7 +2939,9 @@ export class FlightResultsComponent implements OnInit {
       const nextIndex = legIndex + 1;
       if (nextIndex < option.legs.length) {
         const next = option.legs[nextIndex].flight;
+        const nextCabin = option.legs[nextIndex].inventory?.cabin_class || '';
         setTimeout(() => {
+          this.seatMapAllowedCabinClass.set(nextCabin);
           this.seatMapTarget.set(`RETURN_CONNECTING_LEG_${nextIndex + 1}`);
           this.openSeatMapFor(next.flight_id, next.flight_number, `${next.origin_iata} - ${next.dest_iata}`);
         }, 50);
@@ -3146,6 +3159,27 @@ export class FlightResultsComponent implements OnInit {
     this.seatMapFlightNumber.set(flightNumber || '');
     this.seatMapRouteInfo.set(routeInfo || '');
     this.isSeatMapOpen.set(!!flightId);
+  }
+
+  handleSeatsSanitized(seats: Record<number, string>): void {
+    const target = this.seatMapTarget();
+    if (target.startsWith('CONNECTING_LEG_')) {
+      const legIndex = Number(target.slice('CONNECTING_LEG_'.length)) - 1;
+      if (Number.isInteger(legIndex)) {
+        this.connectingSeatsByLeg.update((m) => ({ ...m, [legIndex]: seats }));
+        if (legIndex === 0) this.assignedSeats.set(seats);
+        if (legIndex === 1) this.connectingLeg2Seats.set(seats);
+      }
+    } else if (target.startsWith('RETURN_CONNECTING_LEG_')) {
+      const legIndex = Number(target.slice('RETURN_CONNECTING_LEG_'.length)) - 1;
+      if (Number.isInteger(legIndex)) {
+        this.returnConnectingSeatsByLeg.update((m) => ({ ...m, [legIndex]: seats }));
+      }
+    } else if (target === 'RETURN') {
+      this.returnSeats.set(seats);
+    } else {
+      this.assignedSeats.set(seats);
+    }
   }
 
   private countDistinctFlights(flights?: FormattedFlightResult[]): number {

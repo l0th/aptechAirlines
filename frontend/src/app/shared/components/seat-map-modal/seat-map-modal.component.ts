@@ -44,7 +44,14 @@ export interface PassengerSeatSelection {
                     {{ flightNumber || seatMapData()?.flight_number }}
                   </span>
                 </h3>
-                <p class="text-xs text-slate-300">{{ routeInfo }} • {{ aircraftModel || seatMapData()?.aircraft_model || this.lang.t('lookup.unknownAircraft') }}</p>
+                <p class="text-xs text-slate-300 flex items-center gap-2">
+                  <span>{{ routeInfo }} • {{ aircraftModel || seatMapData()?.aircraft_model || this.lang.t('lookup.unknownAircraft') }}</span>
+                  @if (allowedCabinClass) {
+                    <span class="text-[10px] bg-amber-500/20 text-gold border border-gold/40 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      {{ allowedCabinClass }}
+                    </span>
+                  }
+                </p>
               </div>
             </div>
 
@@ -147,6 +154,16 @@ export interface PassengerSeatSelection {
                     </div>
                     <span class="text-slate-500 font-medium">{{ lang.t('seatmap.legend.occupiedDesc') }}</span>
                   </div>
+
+                  <!-- Mismatched Cabin / Locked -->
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-5 h-5 rounded-md bg-slate-200 text-slate-400 border border-slate-300 flex items-center justify-center text-[10px] font-bold">
+                      <app-icon name="lock" class="w-3 h-3 text-slate-400" />
+                    </div>
+                    <span class="text-slate-500 font-medium">
+                      {{ lang.t('seatmap.legend.lockedOtherCabin') }}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -230,12 +247,18 @@ export interface PassengerSeatSelection {
                                 type="button"
                                 [disabled]="isSeatDisabled(seat)"
                                 (click)="selectSeat(seat)"
+                                [class]="getSeatClasses(seat, row)"
                                 [title]="getSeatTooltip(seat, row)"
-                                [ngClass]="getSeatClasses(seat, row)"
-                                class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex flex-col items-center justify-center text-[10px] sm:text-xs font-bold transition-all duration-150 cursor-pointer disabled:cursor-not-allowed"
+                                class="w-8 h-9 sm:w-9 sm:h-10 rounded-lg flex flex-col items-center justify-center relative font-mono text-xs font-bold transition-all"
                               >
+                                <!-- Seat Code Label -->
+                                <span class="text-[11px] leading-none">{{ seat.seat_code }}</span>
+
+                                <!-- Seat State Icons -->
                                 @if (seat.is_occupied) {
-                                  <app-icon name="lock" class="w-3 h-3 text-slate-500" />
+                                  <app-icon name="lock" class="w-3 h-3 text-slate-400" />
+                                } @else if (!isCabinAllowed(seat.cabin_class)) {
+                                  <app-icon name="lock" class="w-3 h-3 text-slate-400" />
                                 } @else if (isSeatSelectedByActive(seat.seat_code)) {
                                   <app-icon name="armchair" class="w-3.5 h-3.5 text-navy" />
                                 } @else {
@@ -292,7 +315,7 @@ export interface PassengerSeatSelection {
 
               <button
                 (click)="confirmSelection()"
-                class="btn-gold !py-2.5 !px-6 text-xs sm:text-sm"
+                class="btn-gold !py-2.5 !px-6 text-xs sm:text-sm font-bold"
               >
                 <app-icon name="checkcircle2" class="w-4 h-4" />
                 <span>{{ lang.t('seatmap.confirmBtn') }}</span>
@@ -313,13 +336,14 @@ export class SeatMapModalComponent implements OnChanges {
   @Input() aircraftModel = '';
   @Input() passengerList: Array<{ name: string; type?: string }> = [{ name: 'Passenger 1' }];
   @Input() initialSeats: Record<number, string> = {};
+  @Input() allowedCabinClass?: CabinClass | string | null = null;
 
   @Output() closeEvent = new EventEmitter<void>();
   @Output() seatsConfirmed = new EventEmitter<Record<number, string>>();
+  @Output() seatAssignmentsSanitized = new EventEmitter<Record<number, string>>();
 
   private readonly api = inject(ApiService);
   readonly lang = inject(LanguageService);
-  private readonly toast = inject(ToastService);
 
   readonly loading = signal(false);
   readonly seatMapData = signal<SeatMapResponse | null>(null);
@@ -327,12 +351,26 @@ export class SeatMapModalComponent implements OnChanges {
   readonly assignedSeats = signal<Record<number, string>>({});
 
   readonly selectedCount = computed(() => Object.keys(this.assignedSeats()).length);
+  readonly selectedSeatsDisplay = computed(() => `${this.selectedCount()}/${this.passengerList.length} ${this.lang.t('seatmap.seatsCount')}`);
+  readonly hasValidSelection = computed(() => this.selectedCount() > 0);
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen'] && this.isOpen) {
       this.assignedSeats.set({ ...this.initialSeats });
+      this.activePassengerIndex.set(0);
       if (this.flightId) {
         this.fetchSeatMap();
+      }
+    } else if (changes['initialSeats'] && this.isOpen) {
+      this.assignedSeats.set({ ...this.initialSeats });
+      const data = this.seatMapData();
+      if (data) {
+        this.sanitizeInitialAssignments(data);
+      }
+    } else if (changes['allowedCabinClass'] && this.isOpen) {
+      const data = this.seatMapData();
+      if (data) {
+        this.sanitizeInitialAssignments(data);
       }
     }
   }
@@ -343,12 +381,51 @@ export class SeatMapModalComponent implements OnChanges {
       next: (data) => {
         this.seatMapData.set(data);
         this.loading.set(false);
+        if (data) {
+          this.sanitizeInitialAssignments(data);
+        }
       },
       error: () => {
         this.seatMapData.set(null);
         this.loading.set(false);
       },
     });
+  }
+
+  /**
+   * Sanitizes initial seat assignments against the actual seat map data and allowedCabinClass.
+   * Purges seats that are:
+   * 1. Not found in layout
+   * 2. Marked is_occupied
+   * 3. Belonging to a cabin class that does NOT match allowedCabinClass (fail-safe)
+   *
+   * Immediately notifies parent components via seatAssignmentsSanitized output so
+   * invalid seats are wiped from parent state even if the modal is closed without "Confirm".
+   */
+  sanitizeInitialAssignments(data: SeatMapResponse): void {
+    const current = { ...this.assignedSeats() };
+    let changed = false;
+    const allSeats = new Map<string, SeatItem>();
+    for (const row of data.rows || []) {
+      for (const s of row.seats || []) {
+        if (s.seat_code) {
+          allSeats.set(s.seat_code.toUpperCase(), s);
+        }
+      }
+    }
+
+    for (const [idxStr, code] of Object.entries(current)) {
+      const seat = allSeats.get((code || '').toUpperCase());
+      if (!seat || seat.is_occupied || !this.isCabinAllowed(seat.cabin_class)) {
+        delete current[Number(idxStr)];
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.assignedSeats.set(current);
+      this.seatAssignmentsSanitized.emit(current);
+    }
   }
 
   displayRows = computed<SeatRow[]>(() => {
@@ -359,9 +436,28 @@ export class SeatMapModalComponent implements OnChanges {
     return row.seats.find((s) => s.column === col);
   }
 
+  normalizeCabin(cabin?: string | null): string {
+    return (cabin || '').trim().toUpperCase();
+  }
+
+  /**
+   * FAIL-SAFE CABIN INTEGRITY RULE:
+   * If allowedCabinClass is missing, null, or empty, ALL seats are disallowed (fail closed).
+   * If seatCabin is missing, null, or empty, the seat is NEVER inferred as ECONOMY and is disallowed (fail closed).
+   * Otherwise, the seat's cabin must strictly match the allowed cabin class.
+   */
+  isCabinAllowed(seatCabin?: string | null): boolean {
+    const allowed = this.normalizeCabin(this.allowedCabinClass);
+    const actual = this.normalizeCabin(seatCabin);
+    if (!allowed || !actual) return false;
+    return actual === allowed;
+  }
+
   isSeatDisabled(seat?: SeatItem): boolean {
     if (!seat) return true;
-    return seat.is_occupied;
+    if (seat.is_occupied) return true;
+    if (!this.isCabinAllowed(seat.cabin_class)) return true;
+    return false;
   }
 
   isSeatSelectedByActive(seatCode?: string): boolean {
@@ -386,45 +482,79 @@ export class SeatMapModalComponent implements OnChanges {
       return 'bg-slate-300 text-slate-500 border border-slate-300 opacity-80';
     }
 
-    // 2. Currently selected by active passenger (Gold Glow ring)
+    // 2. Mismatched Cabin Class (Disabled / Locked with reduced opacity)
+    if (!this.isCabinAllowed(seat.cabin_class)) {
+      return 'bg-slate-200/70 text-slate-400 border border-slate-300 cursor-not-allowed opacity-40';
+    }
+
+    // 3. Currently selected by active passenger (Gold Glow ring)
     if (isCurrentActive) {
       return 'bg-amber-400 text-navy ring-4 ring-amber-400 font-extrabold seat-glow border-2 border-amber-600 shadow-md scale-105';
     }
 
-    // 3. Selected by another passenger in group
+    // 4. Selected by another passenger in group
     if (isSelectedByOther) {
       return 'bg-amber-300 text-navy border-2 border-amber-500 font-bold opacity-90';
     }
 
-    // 4. Business class by cabin_class (Gold)
-    if (seat.cabin_class === CabinClass.BUSINESS || (seat.cabin_class as string) === 'BUSINESS') {
+    // 5. Business class by cabin_class (Gold)
+    if (this.normalizeCabin(seat.cabin_class) === 'BUSINESS') {
       return 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm border border-amber-600 hover:scale-105';
     }
 
-    // 5. Emergency Exit rows (Sky Blue)
+    // 6. Emergency Exit rows (Sky Blue)
     if (seat.is_exit_row || row.is_exit_row) {
       return 'bg-sky-600 hover:bg-sky-700 text-white shadow-sm border border-sky-700 hover:scale-105';
     }
 
-    // 6. Standard available seat (Emerald green)
+    // 7. Standard available seat (Emerald green)
     return 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm border border-emerald-600 hover:scale-105';
+  }
+
+  getCabinDisplayLabel(cabin: string): string {
+    const c = this.normalizeCabin(cabin);
+    if (!c) return '';
+    if (c === 'ECONOMY') return this.lang.t('search.economy');
+    if (c === 'BUSINESS') return this.lang.t('search.business');
+    if (c === 'CLUB') return this.lang.t('search.club');
+    if (c === 'FIRST') return this.lang.t('search.first');
+    return c;
   }
 
   getSeatTooltip(seat: SeatItem | undefined, row: SeatRow): string {
     if (!seat) return '';
     if (seat.is_occupied) return `${this.lang.t('seatmap.seat')} ${seat.seat_code}: ${this.lang.t('seatmap.occupied')}`;
-    let type = this.lang.t('seatmap.economy');
-    if (seat.cabin_class === CabinClass.BUSINESS || (seat.cabin_class as string) === 'BUSINESS') {
-      type = this.lang.t('seatmap.business');
-    } else if (seat.is_exit_row || row.is_exit_row) {
-      type = this.lang.t('seatmap.exitRow');
+
+    const seatCabin = this.normalizeCabin(seat.cabin_class);
+    const allowedCabin = this.normalizeCabin(this.allowedCabinClass);
+
+    if (!allowedCabin) {
+      return this.lang.t('seatmap.tooltipCabinUndefined');
+    }
+
+    if (!this.isCabinAllowed(seat.cabin_class)) {
+      if (!seatCabin) {
+        return this.lang.t('seatmap.tooltipSeatCabinUnavailable');
+      }
+      const seatCabinLabel = this.getCabinDisplayLabel(seatCabin);
+      const allowedCabinLabel = this.getCabinDisplayLabel(allowedCabin);
+      return this.lang
+        .t('seatmap.tooltipCabinMismatch')
+        .replace('{seat}', seat.seat_code)
+        .replace('{seatCabin}', seatCabinLabel)
+        .replace('{allowedCabin}', allowedCabinLabel);
+    }
+
+    let type = this.getCabinDisplayLabel(seatCabin) || this.lang.t('search.economy');
+    if (seat.is_exit_row || row.is_exit_row) {
+      type = `${type} • ${this.lang.t('seatmap.exitRow')}`;
     }
     const feeStr = seat.fee ? ` • +${seat.fee.toLocaleString()} VND` : '';
     return `${this.lang.t('seatmap.seat')} ${seat.seat_code} (${type}${feeStr})`;
   }
 
   selectSeat(seat?: SeatItem): void {
-    if (!seat || seat.is_occupied) return;
+    if (!seat || this.isSeatDisabled(seat)) return;
 
     const currentAssignments = { ...this.assignedSeats() };
     const pIdx = this.activePassengerIndex();

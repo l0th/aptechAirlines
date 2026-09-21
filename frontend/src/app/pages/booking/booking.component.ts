@@ -611,30 +611,9 @@ interface BookingContext {
                   {{ lang.t('booking.pricingSummaryTitle') }}
                 </h4>
 
-                <!-- Base Fare -->
-                <div class="flex items-center justify-between text-slate-600">
-                  <span>{{ lang.t('booking.baseFare') }} ({{ passengers.length }} {{ lang.isVietnamese() ? 'khách' : 'passengers' }}):</span>
-                  <span class="font-semibold text-slate-800">{{ baseFareAmount | currencyFormat }}</span>
-                </div>
-
-                <!-- Early-Booking Adjustment (percent + amount) -->
-                @if (earlyBirdAdjustment.percent !== 0) {
-                  <div class="flex items-center justify-between text-slate-600">
-                    <span>
-                      {{ lang.t('booking.earlyBirdAdjustment') }}
-                      <strong [ngClass]="earlyBirdAdjustment.percent < 0 ? 'text-emerald-600' : 'text-amber-600'">
-                        ({{ earlyBirdAdjustment.percent > 0 ? '+' : '' }}{{ earlyBirdAdjustment.percent }}%)
-                      </strong>:
-                    </span>
-                    <span class="font-bold font-mono" [ngClass]="earlyBirdAdjustment.amount < 0 ? 'text-emerald-600' : 'text-amber-600'">
-                      {{ earlyBirdAdjustment.amount > 0 ? '+' : '' }}{{ earlyBirdAdjustment.amount | currencyFormat }}
-                    </span>
-                  </div>
-                }
-
-                <!-- Subtotal / Applicable Fare -->
-                <div class="flex items-center justify-between text-slate-700 pt-1 border-t border-slate-100">
-                  <span>{{ lang.t('booking.currentTotalFare') }}:</span>
+                <!-- Current Fare (Clean customer total) -->
+                <div class="flex items-center justify-between text-slate-700">
+                  <span>{{ lang.isVietnamese() ? 'Giá vé hiện tại' : 'Current Fare' }} ({{ passengers.length }} {{ lang.isVietnamese() ? 'khách' : 'passenger(s)' }}):</span>
                   <span class="font-bold text-navy">{{ totalAmount | currencyFormat }}</span>
                 </div>
 
@@ -717,8 +696,10 @@ interface BookingContext {
         [routeInfo]="(context?.origin || '') + ' - ' + (context?.destination || '')"
         [passengerList]="getSeatMapPassengerList()"
         [initialSeats]="assignedSeatsMap()"
+        [allowedCabinClass]="seatMapCabinClass"
         (closeEvent)="isSeatMapOpen.set(false)"
         (seatsConfirmed)="handleSeatsConfirmed($event)"
+        (seatAssignmentsSanitized)="handleSeatsSanitized($event)"
       />
     }
   `,
@@ -785,31 +766,14 @@ export class BookingComponent implements OnInit {
     return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
 
-  get earlyBirdAdjustment(): { percent: number; amount: number; label: string } {
-    let percent = 0;
-    let label = '';
+  get seatMapCabinClass(): string {
     const ctx = this.context;
-    if (ctx?.flight && ctx.flight.early_bird_percent !== undefined) {
-      percent = ctx.flight.early_bird_percent;
-      label = ctx.flight.early_bird_label || '';
-    } else if (ctx?.connecting?.leg1?.inventory?.early_bird_percent !== undefined) {
-      percent = ctx.connecting.leg1.inventory.early_bird_percent;
-      label = ctx.connecting.leg1.inventory.early_bird_label || '';
+    if (!ctx) return '';
+    if (ctx.mode === 'CONNECTING' || ctx.connecting) {
+      const leg1 = ctx.connecting?.legs?.[0] || ctx.connecting?.leg1;
+      return leg1?.inventory?.cabin_class || '';
     }
-
-    if (percent === 0 || !this.totalAmount) {
-      return { percent: 0, amount: 0, label: label || (this.lang.isVietnamese() ? 'Giá chuẩn' : 'Standard fare') };
-    }
-
-    // Since totalAmount is already the early-booking price: totalAmount = baseFare * (1 + percent / 100)
-    const ratio = 1 + percent / 100;
-    const baseFare = Math.round(this.totalAmount / ratio);
-    const amount = this.totalAmount - baseFare;
-    return { percent, amount, label };
-  }
-
-  get baseFareAmount(): number {
-    return this.totalAmount - this.earlyBirdAdjustment.amount;
+    return ctx.flight?.cabin_class || '';
   }
 
   get frequentFlyerTier(): { tier: string; miles: number; discountPercent: number; estimatedDiscount: number } | null {
@@ -1168,6 +1132,20 @@ export class BookingComponent implements OnInit {
       });
     }
     this.toast.success(this.lang.isVietnamese() ? 'Đã cập nhật vị trí ghế ngồi cho từng hành khách' : 'Updated seat assignments for all passengers');
+  }
+
+  handleSeatsSanitized(seats: Record<number, string>): void {
+    let changed = false;
+    this.passengers.forEach((p, i) => {
+      const validSeat = seats[i] || '';
+      if (p.seat_code && p.seat_code !== validSeat) {
+        p.seat_code = validSeat;
+        changed = true;
+      }
+    });
+    if (changed && this.context) {
+      this.context.seats = { ...seats };
+    }
   }
 
   /**

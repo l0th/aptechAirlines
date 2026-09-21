@@ -10,6 +10,15 @@ import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
 import { PaginationComponent } from '../../shared/components/pagination/pagination.component';
 import { Flight, FlightStatus, CabinClass } from '../../core/models/flight.model';
 import { Airport } from '../../core/models/airport.model';
+import {
+  isValidIanaTimeZone,
+  utcToWallTime,
+  extractWallDate,
+  wallTimeToUtc,
+  computePhysicalDurationMinutes,
+  getTimezoneGmtOffset,
+  getTimezoneOffsetMinutes,
+} from '../../core/utils/timezone.util';
 
 /** Giá trị mặc định của form tạo/sửa chuyến bay (reset lại mỗi lần mở modal). */
 const FLIGHT_FORM_DEFAULTS = {
@@ -312,7 +321,44 @@ const FLIGHT_FORM_DEFAULTS = {
           </div>
 
           <form (ngSubmit)="saveFlightForm()" class="space-y-4 text-xs">
-            @if (!editingId()) {
+            @if (editingFlight()?.data_source === 'AIRLABS_COMMERCIALIZED') {
+              <!-- Commercial Flight Summary Card -->
+              <div class="p-4 bg-emerald-50/80 border border-emerald-300 rounded-2xl space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-600 text-white tracking-wider">
+                      {{ lang.t('admin.flights.commercialScheduleBadge') }}
+                    </span>
+                    <strong class="font-mono text-sm font-black text-navy">{{ editingFlight()?.flight_number }}</strong>
+                  </div>
+                  <a
+                    routerLink="/admin/commercial-flights"
+                    (click)="showFlightModal.set(false)"
+                    class="btn-navy text-[11px] !py-1 !px-3 font-bold inline-flex items-center gap-1.5"
+                  >
+                    <app-icon name="planetakeoff" class="w-3.5 h-3.5" />
+                    <span>{{ lang.t('admin.flights.openCommercialFlights') }}</span>
+                  </a>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-emerald-200/60 text-[11px]">
+                  <div>
+                    <span class="text-slate-500 block">{{ lang.t('admin.dashboard.route') }}</span>
+                    <strong class="text-slate-800 font-bold">{{ editingFlight()?.origin_iata }} &rarr; {{ editingFlight()?.dest_iata }}</strong>
+                  </div>
+                  <div>
+                    <span class="text-slate-500 block">{{ lang.t('admin.flights.flightDateLabel') }}</span>
+                    <strong class="text-slate-800 font-bold">{{ newFlight.departure_date }}</strong>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <span class="text-slate-500 block">{{ lang.t('admin.dashboard.aircraft') }}</span>
+                    <strong class="text-slate-800 font-bold">{{ formatAircraftDisplay(editingFlight()?.aircraft) }}</strong>
+                  </div>
+                </div>
+                <p class="text-[10px] text-emerald-800 leading-relaxed pt-1">
+                  {{ lang.t('admin.flights.commercialSyncDesc') }}
+                </p>
+              </div>
+            } @else if (!editingId()) {
               <div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
                 <app-icon name="alerttriangle" class="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                 <div class="space-y-1 text-slate-700 flex-1">
@@ -349,7 +395,8 @@ const FLIGHT_FORM_DEFAULTS = {
                   name="flight_number"
                   required
                   placeholder="VN-234"
-                  class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase"
+                  class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase disabled:opacity-60"
+                  [disabled]="!!editingId() && editingFlight()?.data_source === 'AIRLABS_COMMERCIALIZED'"
                 />
               </div>
 
@@ -389,47 +436,57 @@ const FLIGHT_FORM_DEFAULTS = {
             </datalist>
 
             <p class="text-[11px] text-slate-400 -mt-1">
-              {{ lang.isVietnamese() ? 'Mã IATA phải tồn tại trong CSDL sân bay (hiện có: HAN, SGN, DAD, CXR, PQC, HOI).' : 'IATA code must exist in airport database (currently: HAN, SGN, DAD, CXR, PQC, HOI).' }}
+              {{ lang.t('admin.flights.iataInputNotice') }}
               @if (editingId()) {
-                <span>{{ lang.isVietnamese() ? 'Không thể đổi sân bay đi/đến khi sửa chuyến bay.' : 'Cannot change origin/destination airports when editing a flight.' }}</span>
+                <span>{{ lang.t('admin.flights.iataNoChangeNotice') }}</span>
               }
             </p>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Ngày bay (YYYY-MM-DD)' : 'Departure Date (YYYY-MM-DD)' }}</label>
-                <input
-                  type="date"
-                  [(ngModel)]="newFlight.departure_date"
-                  name="departure_date"
-                  required
-                  class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                />
+                <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.flights.departureDateInputLabel') }}</label>
+                @if (editingFlight()?.data_source === 'AIRLABS_COMMERCIALIZED') {
+                  <div class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl font-mono text-slate-700 font-bold flex items-center justify-between">
+                    <span>{{ newFlight.departure_date || '—' }}</span>
+                    <span class="text-[10px] text-slate-500 uppercase font-sans font-medium px-2 py-0.5 bg-slate-200/70 rounded-full">{{ lang.isVietnamese() ? 'Tự động từ giờ bay' : 'From dep time' }}</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    {{ lang.isVietnamese() ? 'Ngày khai thác đồng bộ trực tiếp từ giờ cất cánh tại sân bay đi.' : 'Operating date is derived directly from origin departure time.' }}
+                  </p>
+                } @else {
+                  <input
+                    type="date"
+                    [(ngModel)]="newFlight.departure_date"
+                    name="departure_date"
+                    required
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                }
               </div>
 
               <div>
                 <label class="block font-semibold text-slate-600 mb-1 flex items-center justify-between">
                   <span>{{ lang.t('admin.flights.depTimeLocal') }}</span>
                   <span class="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                    {{ newFlight.origin_iata || 'DEP' }}: {{ getAirportGmtOffset(newFlight.origin_iata, newFlight.scheduled_departure) }}
+                    {{ newFlight.origin_iata || 'DEP' }}: {{ getAirportGmtOffset(newFlight.origin_iata, newFlight.scheduled_departure, editingFlight()?.scheduled_departure) }}
                   </span>
                 </label>
                 <input
                   type="datetime-local"
                   [(ngModel)]="newFlight.scheduled_departure"
-                  (change)="syncDepartureDate()"
+                  (ngModelChange)="syncDepartureDate()"
                   name="scheduled_departure"
                   required
                   class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                 />
-                <span class="text-[10px] text-slate-400 block mt-0.5">{{ getAirportTimeZone(newFlight.origin_iata) }}</span>
+                <span class="text-[10px] text-slate-400 block mt-0.5">{{ getAirportTimeZone(newFlight.origin_iata) || lang.t('admin.flights.timezoneUndefined') }}</span>
               </div>
 
               <div>
                 <label class="block font-semibold text-slate-600 mb-1 flex items-center justify-between">
                   <span>{{ lang.t('admin.flights.arrTimeLocal') }}</span>
                   <span class="text-[10px] font-mono text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                    {{ newFlight.dest_iata || 'ARR' }}: {{ getAirportGmtOffset(newFlight.dest_iata, newFlight.scheduled_arrival) }}
+                    {{ newFlight.dest_iata || 'ARR' }}: {{ getAirportGmtOffset(newFlight.dest_iata, newFlight.scheduled_arrival, editingFlight()?.scheduled_arrival) }}
                   </span>
                 </label>
                 <input
@@ -439,7 +496,7 @@ const FLIGHT_FORM_DEFAULTS = {
                   required
                   class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                 />
-                <span class="text-[10px] text-slate-400 block mt-0.5">{{ getAirportTimeZone(newFlight.dest_iata) }}</span>
+                <span class="text-[10px] text-slate-400 block mt-0.5">{{ getAirportTimeZone(newFlight.dest_iata) || lang.t('admin.flights.timezoneUndefined') }}</span>
               </div>
             </div>
 
@@ -468,124 +525,188 @@ const FLIGHT_FORM_DEFAULTS = {
 
               <div class="sm:col-span-2">
                 <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Số dặm bay (distance_miles)' : 'Flight Distance (distance_miles)' }}</label>
-                <input
-                  type="number"
-                  [(ngModel)]="distanceMiles"
-                  name="distance_miles"
-                  required
-                  min="0"
-                  step="1"
-                  placeholder="710"
-                  class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-                />
-                <p class="text-[11px] text-slate-400 mt-1">
-                  {{ lang.isVietnamese() ? 'Số dặm bay dùng để tính dặm SkyMiles tích luỹ cho khách (mặc định 710 cho HAN–SGN).' : 'Flight distance is used to calculate SkyMiles earned for passengers (default 710 for HAN-SGN).' }}
-                </p>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 gap-3 pb-2 mt-2">
-              <div>
-                <label class="block font-semibold text-slate-600 mb-1">
-                  {{ getFleetDropdownLabel() }} ({{ lang.t('admin.dashboard.aircraft') }})
-                </label>
-                <select
-                  [(ngModel)]="selectedFleetModel"
-                  (change)="onFleetModelChange()"
-                  name="fleetModel"
-                  class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                >
-                  <option value="">-- {{ getFleetDropdownLabel() }} --</option>
-                  @for (m of fleetModels(); track m.icao + m.model) {
-                    <option [value]="m.icao + '|' + m.model">{{ m.model }} ({{ m.icao }}) - {{ m.count }} {{ lang.isVietnamese() ? 'chiếc' : 'units' }}</option>
-                  }
-                  <option value="MANUAL">{{ lang.isVietnamese() ? 'Nhập tay' : 'Manual Entry' }}</option>
-                </select>
-              </div>
-            </div>
-
-            @if (selectedFleetModel === 'MANUAL') {
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-2 mt-2">
-                <div>
-                  <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Mã máy bay (Tùy chọn)' : 'Aircraft Model Code (Optional)' }}</label>
+                @if (editingFlight()?.data_source === 'AIRLABS_COMMERCIALIZED') {
+                  <div class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl font-mono text-slate-700 font-bold flex items-center justify-between">
+                    <span>{{ distanceMiles }} miles</span>
+                    <span class="text-[10px] text-slate-500 uppercase font-sans font-medium px-2 py-0.5 bg-slate-200/70 rounded-full">{{ lang.isVietnamese() ? 'Cố định' : 'Read-only' }}</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    {{ lang.isVietnamese() ? 'Khoảng cách bay thương mại cố định theo mẫu lịch để tính dặm SkyMiles.' : 'Commercial flight distance is fixed according to template for SkyMiles calculation.' }}
+                  </p>
+                } @else {
                   <input
-                    type="text"
-                    [(ngModel)]="newFlight.aircraft_model_code"
-                    name="aircraft_model_code"
-                    [placeholder]="lang.isVietnamese() ? 'VD: A321' : 'E.g.: A321'"
-                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase"
+                    type="number"
+                    [(ngModel)]="distanceMiles"
+                    name="distance_miles"
+                    required
+                    min="0"
+                    step="1"
+                    placeholder="710"
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
                   />
-                </div>
+                  <p class="text-[11px] text-slate-400 mt-1">
+                    {{ lang.isVietnamese() ? 'Số dặm bay dùng để tính dặm SkyMiles tích luỹ cho khách (mặc định 710 cho HAN–SGN).' : 'Flight distance is used to calculate SkyMiles earned for passengers (default 710 for HAN-SGN).' }}
+                  </p>
+                }
+              </div>
+            </div>
+
+            @if (editingFlight()?.data_source !== 'AIRLABS_COMMERCIALIZED') {
+              <div class="grid grid-cols-1 gap-3 pb-2 mt-2">
                 <div>
-                  <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Tên máy bay (Tùy chọn)' : 'Aircraft Model Name (Optional)' }}</label>
-                  <input
-                    type="text"
-                    [(ngModel)]="newFlight.aircraft_model_name"
-                    name="aircraft_model_name"
-                    [placeholder]="lang.isVietnamese() ? 'VD: Airbus A321' : 'E.g.: Airbus A321'"
+                  <label class="block font-semibold text-slate-600 mb-1">
+                    {{ getFleetDropdownLabel() }} ({{ lang.t('admin.dashboard.aircraft') }})
+                  </label>
+                  <select
+                    [(ngModel)]="selectedFleetModel"
+                    (change)="onFleetModelChange()"
+                    name="fleetModel"
                     class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
-                  />
+                  >
+                    <option value="">-- {{ getFleetDropdownLabel() }} --</option>
+                    @for (m of fleetModels(); track m.icao + m.model) {
+                      <option [value]="m.icao + '|' + m.model">{{ m.model }} ({{ m.icao }}) - {{ m.count }} {{ lang.isVietnamese() ? 'chiếc' : 'units' }}</option>
+                    }
+                    <option value="MANUAL">{{ lang.t('admin.flights.manualEntryOption') }}</option>
+                  </select>
                 </div>
               </div>
+
+              @if (selectedFleetModel === 'MANUAL') {
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-2 mt-2">
+                  <div>
+                    <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.flights.aircraftModelCodeLabel') }}</label>
+                    <input
+                      type="text"
+                      [(ngModel)]="newFlight.aircraft_model_code"
+                      name="aircraft_model_code"
+                      [placeholder]="lang.isVietnamese() ? 'VD: A321' : 'E.g.: A321'"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('admin.flights.aircraftModelNameLabel') }}</label>
+                    <input
+                      type="text"
+                      [(ngModel)]="newFlight.aircraft_model_name"
+                      name="aircraft_model_name"
+                      [placeholder]="lang.isVietnamese() ? 'VD: Airbus A321' : 'E.g.: Airbus A321'"
+                      class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                </div>
+              }
             }
 
+            @if (editingFlight()?.data_source === 'AIRLABS_COMMERCIALIZED') {
+              <!-- Read-only Commercial Cabins, Fares & Capacities -->
+              <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <div class="flex items-center justify-between">
+                  <h4 class="font-bold text-navy uppercase text-[11px] flex items-center gap-1.5">
+                    <app-icon name="tag" class="w-3.5 h-3.5 text-gold" />
+                    <span>{{ lang.t('admin.flights.seatsFaresConfig') }}</span>
+                  </h4>
+                  <span class="text-[10px] text-slate-500 font-medium px-2 py-0.5 bg-slate-200/60 rounded-full">
+                    {{ lang.t('admin.flights.fixedCapacityHint') }}
+                  </span>
+                </div>
 
-            <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-              <h4 class="font-bold text-navy uppercase text-[11px]">{{ lang.isVietnamese() ? 'Cấu hình Giá vé & Ghế' : 'Fares & Seats Configuration' }}</h4>
-              
-              <!-- Economy -->
-              <div class="grid grid-cols-3 gap-2 items-center">
-                <span class="font-bold text-slate-700">{{ lang.t('search.economy') }}:</span>
-                <input
-                  type="number"
-                  [(ngModel)]="econPrice"
-                  name="econPrice"
-                  required
-                  min="0"
-                  step="1000"
-                  [placeholder]="lang.isVietnamese() ? 'Giá vé VND (1200000)' : 'Fare VND (1200000)'"
-                  class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
-                />
-                <input
-                  type="number"
-                  [(ngModel)]="econSeats"
-                  name="econSeats"
-                  required
-                  min="1"
-                  step="1"
-                  [placeholder]="lang.isVietnamese() ? 'Số ghế (140)' : 'Seat count (140)'"
-                  class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
-                />
-              </div>
+                <!-- Dynamic Grid for ALL Existing Cabins -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  @for (inv of editingFlight()?.inventories || []; track inv._id || inv.cabin_class) {
+                    <div class="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between shadow-xs">
+                      <div class="space-y-1">
+                        <span class="inline-block px-2 py-0.5 text-[10px] font-bold uppercase rounded border" [ngClass]="getCabinBadgeClass(inv.cabin_class)">
+                          {{ getCabinLabel(inv.cabin_class) }}
+                        </span>
+                        <div class="text-[11px] font-mono text-slate-500">
+                          <span class="font-bold text-navy">{{ inv.allocated_seats }}</span> {{ lang.t('seatmap.seatsCount') }}
+                          <span class="text-slate-300 mx-1">|</span>
+                          <span class="text-emerald-700 font-medium">{{ inv.available_seats }} {{ lang.t('admin.flights.availableSeatsCount') }}</span>
+                        </div>
+                      </div>
+                      <div class="text-right">
+                        <span class="text-xs font-mono font-bold text-amber-600 block">{{ inv.base_price | currencyFormat }}</span>
+                        <span class="text-[9px] text-slate-400 uppercase font-medium">{{ lang.t('seatmap.baseFare') }}</span>
+                      </div>
+                    </div>
+                  }
+                </div>
 
-              <!-- Business -->
-              <div class="grid grid-cols-3 gap-2 items-center">
-                <span class="font-bold text-amber-700">{{ lang.t('search.business') }}:</span>
-                <input
-                  type="number"
-                  [(ngModel)]="busPrice"
-                  name="busPrice"
-                  required
-                  min="0"
-                  step="1000"
-                  [placeholder]="lang.isVietnamese() ? 'Giá vé VND (3500000)' : 'Fare VND (3500000)'"
-                  class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
-                />
-                <input
-                  type="number"
-                  [(ngModel)]="busSeats"
-                  name="busSeats"
-                  required
-                  min="1"
-                  step="1"
-                  [placeholder]="lang.isVietnamese() ? 'Số ghế (20)' : 'Seat count (20)'"
-                  class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
-                />
+                <!-- Explanatory text & CTA link to Commercial Templates -->
+                <div class="pt-2 border-t border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  <p class="text-[11px] text-slate-500 leading-relaxed flex-1">
+                    {{ lang.t('admin.flights.commercialManagedNotice') }}
+                  </p>
+                  <a
+                    routerLink="/admin/commercial-flights"
+                    (click)="showFlightModal.set(false)"
+                    class="btn-navy text-xs !py-1.5 !px-3 font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5"
+                  >
+                    <app-icon name="planetakeoff" class="w-3.5 h-3.5 text-gold" />
+                    <span>{{ lang.t('admin.flights.manageCommercialTemplates') }}</span>
+                  </a>
+                </div>
               </div>
-              <p class="text-[11px] text-slate-400">
-                {{ lang.isVietnamese() ? 'Giá vé là số không âm (VND), số ghế là số nguyên ≥ 1. Khi sửa chuyến bay, số ghế trống được điều chỉnh theo phần chênh lệch.' : 'Fares must be non-negative (VND), seat counts must be integers >= 1. When editing, available seats adjust by the difference.' }}
-              </p>
-            </div>
+            } @else {
+              <!-- Regular Manual Flight: Fares & Seats Editable Grid -->
+              <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                <h4 class="font-bold text-navy uppercase text-[11px]">{{ lang.t('admin.flights.manualSeatsFaresConfig') }}</h4>
+                
+                <!-- Economy -->
+                <div class="grid grid-cols-3 gap-2 items-center">
+                  <span class="font-bold text-slate-700">{{ lang.t('search.economy') }}:</span>
+                  <input
+                    type="number"
+                    [(ngModel)]="econPrice"
+                    name="econPrice"
+                    required
+                    min="0"
+                    step="1000"
+                    [placeholder]="lang.isVietnamese() ? 'Giá vé VND (1200000)' : 'Fare VND (1200000)'"
+                    class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
+                  />
+                  <input
+                    type="number"
+                    [(ngModel)]="econSeats"
+                    name="econSeats"
+                    required
+                    min="1"
+                    step="1"
+                    [placeholder]="lang.isVietnamese() ? 'Số ghế (140)' : 'Seat count (140)'"
+                    class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
+                  />
+                </div>
+
+                <!-- Business -->
+                <div class="grid grid-cols-3 gap-2 items-center">
+                  <span class="font-bold text-amber-700">{{ lang.t('search.business') }}:</span>
+                  <input
+                    type="number"
+                    [(ngModel)]="busPrice"
+                    name="busPrice"
+                    required
+                    min="0"
+                    step="1000"
+                    [placeholder]="lang.isVietnamese() ? 'Giá vé VND (3500000)' : 'Fare VND (3500000)'"
+                    class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
+                  />
+                  <input
+                    type="number"
+                    [(ngModel)]="busSeats"
+                    name="busSeats"
+                    required
+                    min="1"
+                    step="1"
+                    [placeholder]="lang.isVietnamese() ? 'Số ghế (20)' : 'Seat count (20)'"
+                    class="px-3 py-1.5 bg-white border border-slate-200 rounded-lg font-mono"
+                  />
+                </div>
+                <p class="text-[11px] text-slate-400">
+                  {{ lang.t('admin.flights.manualSeatsFaresHint') }}
+                </p>
+              </div>
+            }
 
             <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
               <button type="button" (click)="showFlightModal.set(false)" class="btn-ghost text-xs">{{ lang.t('common.cancel') }}</button>
@@ -597,7 +718,7 @@ const FLIGHT_FORM_DEFAULTS = {
                 @if (submitting()) {
                   <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
                 }
-                <span>{{ editingId() ? (lang.isVietnamese() ? 'Lưu thay đổi' : 'Save Changes') : (lang.isVietnamese() ? 'Tạo Chuyến Bay' : 'Create Flight') }}</span>
+                <span>{{ editingId() ? lang.t('admin.flights.saveChangesBtn') : lang.t('admin.flights.createFlightBtn') }}</span>
               </button>
             </div>
           </form>
@@ -685,35 +806,6 @@ export class FlightsManageComponent implements OnInit {
   selectedFleetModel = '';
   readonly currentAirlineCode = signal('VN');
 
-  readonly defaultAirportTzMap = new Map<string, string>([
-    ['HAN', 'Asia/Ho_Chi_Minh'],
-    ['SGN', 'Asia/Ho_Chi_Minh'],
-    ['DAD', 'Asia/Ho_Chi_Minh'],
-    ['CXR', 'Asia/Ho_Chi_Minh'],
-    ['PQC', 'Asia/Ho_Chi_Minh'],
-    ['HOI', 'Asia/Ho_Chi_Minh'],
-    ['SIN', 'Asia/Singapore'],
-    ['BKK', 'Asia/Bangkok'],
-    ['KUL', 'Asia/Kuala_Lumpur'],
-    ['NRT', 'Asia/Tokyo'],
-    ['ICN', 'Asia/Seoul'],
-    ['HKG', 'Asia/Hong_Kong'],
-    ['PVG', 'Asia/Shanghai'],
-    ['TPE', 'Asia/Taipei'],
-    ['MNL', 'Asia/Manila'],
-    ['CGK', 'Asia/Jakarta'],
-    ['DEL', 'Asia/Kolkata'],
-    ['DXB', 'Asia/Dubai'],
-    ['DOH', 'Asia/Qatar'],
-    ['LHR', 'Europe/London'],
-    ['CDG', 'Europe/Paris'],
-    ['FRA', 'Europe/Berlin'],
-    ['SYD', 'Australia/Sydney'],
-    ['MEL', 'Australia/Melbourne'],
-    ['LAX', 'America/Los_Angeles'],
-    ['JFK', 'America/New_York'],
-  ]);
-
   ngOnInit(): void {
     this.loadFlights();
     this.loadAirports();
@@ -757,6 +849,23 @@ export class FlightsManageComponent implements OnInit {
       return 'bg-blue-50 text-blue-700 border-blue-200';
     }
     return 'bg-slate-100 text-slate-500 border-slate-200';
+  }
+
+  getCabinLabel(cabin: string): string {
+    const c = (cabin || '').toUpperCase();
+    if (c === 'ECONOMY') return this.lang.isVietnamese() ? 'Phổ thông' : 'Economy';
+    if (c === 'BUSINESS') return this.lang.isVietnamese() ? 'Thương gia' : 'Business';
+    if (c === 'FIRST') return this.lang.isVietnamese() ? 'Hạng nhất' : 'First Class';
+    if (c === 'CLUB') return this.lang.isVietnamese() ? 'Hạng Club' : 'Club Class';
+    return c;
+  }
+
+  getCabinBadgeClass(cabin: string): string {
+    const c = (cabin || '').toUpperCase();
+    if (c === 'BUSINESS') return 'border-amber-200 bg-amber-50 text-amber-800';
+    if (c === 'FIRST') return 'border-purple-200 bg-purple-50 text-purple-800';
+    if (c === 'CLUB') return 'border-sky-200 bg-sky-50 text-sky-800';
+    return 'border-slate-200 bg-slate-50 text-slate-700';
   }
 
   delayText(reason?: string | null, minutes?: number | null): string {
@@ -886,10 +995,25 @@ export class FlightsManageComponent implements OnInit {
   }
 
   openCreateModal(): void {
-    const dep = new Date();
-    dep.setDate(dep.getDate() + 1);
-    dep.setHours(8, 0, 0, 0);
-    const arr = new Date(dep.getTime() + 130 * 60000);
+    const originTz = this.getAirportTimeZone('HAN');
+    const destTz = this.getAirportTimeZone('SGN');
+
+    if (!originTz) {
+      this.toast.error(this.lang.t('admin.flights.errOriginTzNotFound').replace('{origin}', 'HAN'));
+      return;
+    }
+    if (!destTz) {
+      this.toast.error(this.lang.t('admin.flights.errDestTzNotFound').replace('{dest}', 'SGN'));
+      return;
+    }
+
+    const now = new Date();
+    const depUtc = new Date(now.getTime() + 24 * 3600000);
+    depUtc.setUTCMinutes(0, 0, 0);
+    const arrUtc = new Date(depUtc.getTime() + 130 * 60000);
+
+    const depLocal = utcToWallTime(depUtc, originTz);
+    const arrLocal = utcToWallTime(arrUtc, destTz);
 
     this.editingId.set(null);
     this.editingFlight.set(null);
@@ -897,9 +1021,9 @@ export class FlightsManageComponent implements OnInit {
       flight_number: 'VN-' + Math.floor(100 + Math.random() * 900),
       origin_iata: 'HAN',
       dest_iata: 'SGN',
-      departure_date: this.toDateOnly(dep),
-      scheduled_departure: this.toDateTimeLocal(dep),
-      scheduled_arrival: this.toDateTimeLocal(arr),
+      departure_date: extractWallDate(depLocal) || '',
+      scheduled_departure: depLocal,
+      scheduled_arrival: arrLocal,
       aircraft_model_code: '',
       aircraft_model_name: '',
     };
@@ -920,6 +1044,22 @@ export class FlightsManageComponent implements OnInit {
   }
 
   openEditModal(fl: Flight): void {
+    const originTz = this.getAirportTimeZone(fl.origin_iata);
+    const destTz = this.getAirportTimeZone(fl.dest_iata);
+
+    if (!originTz) {
+      this.toast.error(this.lang.t('admin.flights.errOriginTzNotFound').replace('{origin}', fl.origin_iata));
+      return;
+    }
+    if (!destTz) {
+      this.toast.error(this.lang.t('admin.flights.errDestTzNotFound').replace('{dest}', fl.dest_iata));
+      return;
+    }
+
+    const depLocal = utcToWallTime(fl.scheduled_departure, originTz);
+    const arrLocal = utcToWallTime(fl.scheduled_arrival, destTz);
+    const wallDate = extractWallDate(depLocal);
+
     const econ = fl.inventories?.find((i) => i.cabin_class === CabinClass.ECONOMY);
     const bus = fl.inventories?.find((i) => i.cabin_class === CabinClass.BUSINESS);
 
@@ -929,11 +1069,9 @@ export class FlightsManageComponent implements OnInit {
       flight_number: fl.flight_number,
       origin_iata: fl.origin_iata,
       dest_iata: fl.dest_iata,
-      departure_date: fl.departure_date
-        ? String(fl.departure_date).slice(0, 10)
-        : this.toDateOnly(new Date(fl.scheduled_departure)),
-      scheduled_departure: this.toDateTimeLocal(fl.scheduled_departure),
-      scheduled_arrival: this.toDateTimeLocal(fl.scheduled_arrival),
+      departure_date: wallDate || (fl.departure_date ? String(fl.departure_date).slice(0, 10) : ''),
+      scheduled_departure: depLocal,
+      scheduled_arrival: arrLocal,
       aircraft_model_code: fl.aircraft?.model_code || '',
       aircraft_model_name: fl.aircraft?.model_name || '',
     };
@@ -980,69 +1118,49 @@ export class FlightsManageComponent implements OnInit {
   }
 
   getAirportTimeZone(iata?: string): string {
-    if (!iata) return 'Asia/Ho_Chi_Minh';
+    if (!iata) return '';
     const code = iata.trim().toUpperCase();
     const ap = this.airports().find((a) => a.iata_code === code);
-    return ap?.time_zone || this.defaultAirportTzMap.get(code) || 'Asia/Ho_Chi_Minh';
+    const candidate = ap?.time_zone || '';
+    return isValidIanaTimeZone(candidate) ? candidate : '';
   }
 
-  getAirportGmtOffset(iata?: string, refDateStr?: string): string {
+  getAirportGmtOffset(iata?: string, wallTime?: string, preferUtc?: string | Date): string {
     const tz = this.getAirportTimeZone(iata);
+    if (!tz) return '—';
     try {
-      const d = refDateStr ? new Date(refDateStr) : new Date();
-      const dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        timeZoneName: 'shortOffset',
-      });
-      const parts = dtf.formatToParts(isNaN(d.getTime()) ? new Date() : d);
-      const tzName = parts.find((p) => p.type === 'timeZoneName')?.value;
-      if (tzName) return tzName === 'GMT' ? 'GMT+0' : tzName;
-    } catch {}
-    return 'GMT+7';
-  }
-
-  getAirportOffsetMinutes(iata?: string, refDate?: Date): number {
-    const tz = this.getAirportTimeZone(iata);
-    try {
-      const d = refDate && !isNaN(refDate.getTime()) ? refDate : new Date();
-      const dtf = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        timeZoneName: 'longOffset',
-      });
-      const parts = dtf.formatToParts(d);
-      const tzName = parts.find((p) => p.type === 'timeZoneName')?.value;
-      if (!tzName || tzName === 'GMT') return 0;
-      const match = tzName.match(/GMT([+-])(\d{2}):(\d{2})/);
-      if (!match) return 0;
-      const sign = match[1] === '+' ? 1 : -1;
-      const hours = parseInt(match[2], 10);
-      const minutes = parseInt(match[3], 10);
-      return sign * (hours * 60 + minutes);
+      if (wallTime && wallTime.trim()) {
+        const res = wallTimeToUtc(wallTime, tz, preferUtc);
+        if (!res.success || !res.date) return '—';
+        return getTimezoneGmtOffset(tz, res.date);
+      }
+      return getTimezoneGmtOffset(tz);
     } catch {
-      return 420;
+      return '—';
     }
   }
 
   /**
-   * Thời gian bay ước tính (phút) sau khi đã hiệu chỉnh chênh lệch múi giờ giữa sân bay đi và đến.
-   * duration = (wall_arr - wall_dep) - (dest_offset - origin_offset)
+   * Thời gian bay vật lý (phút) giữa 2 mốc UTC của chuyến bay.
    */
   computedDurationMinutes(): number {
-    const depRaw = this.newFlight?.scheduled_departure;
-    const arrRaw = this.newFlight?.scheduled_arrival;
+    const depRaw = String(this.newFlight?.scheduled_departure ?? '').trim();
+    const arrRaw = String(this.newFlight?.scheduled_arrival ?? '').trim();
     if (!depRaw || !arrRaw) return 0;
 
-    const dep = new Date(depRaw);
-    const arr = new Date(arrRaw);
-    if (isNaN(dep.getTime()) || isNaN(arr.getTime())) return 0;
+    const originTz = this.getAirportTimeZone(this.newFlight?.origin_iata);
+    const destTz = this.getAirportTimeZone(this.newFlight?.dest_iata);
+    if (!originTz || !destTz) return 0;
 
-    const wallClockDiff = Math.round((arr.getTime() - dep.getTime()) / 60000);
-    const originOffset = this.getAirportOffsetMinutes(this.newFlight?.origin_iata, dep);
-    const destOffset = this.getAirportOffsetMinutes(this.newFlight?.dest_iata, arr);
-    const tzDiff = destOffset - originOffset;
+    const original = this.editingFlight();
+    const preferDep = original?.scheduled_departure ? new Date(original.scheduled_departure) : undefined;
+    const preferArr = original?.scheduled_arrival ? new Date(original.scheduled_arrival) : undefined;
 
-    const duration = wallClockDiff - tzDiff;
-    return duration > 0 ? duration : 0;
+    const depRes = wallTimeToUtc(depRaw, originTz, preferDep);
+    const arrRes = wallTimeToUtc(arrRaw, destTz, preferArr);
+    if (!depRes.success || !depRes.date || !arrRes.success || !arrRes.date) return 0;
+
+    return computePhysicalDurationMinutes(depRes.date, arrRes.date);
   }
 
   getDurationHint(): string {
@@ -1052,10 +1170,23 @@ export class FlightsManageComponent implements OnInit {
     const mins = duration % 60;
     const durStr = hours > 0 ? (mins > 0 ? `${hours}h ${mins}m` : `${hours}h`) : `${mins}m`;
 
-    const dep = new Date(this.newFlight?.scheduled_departure ?? '');
-    const arr = new Date(this.newFlight?.scheduled_arrival ?? '');
-    const originOffset = this.getAirportOffsetMinutes(this.newFlight?.origin_iata, dep);
-    const destOffset = this.getAirportOffsetMinutes(this.newFlight?.dest_iata, arr);
+    const originTz = this.getAirportTimeZone(this.newFlight?.origin_iata);
+    const destTz = this.getAirportTimeZone(this.newFlight?.dest_iata);
+    if (!originTz || !destTz) return durStr;
+
+    const depRaw = String(this.newFlight?.scheduled_departure ?? '').trim();
+    const arrRaw = String(this.newFlight?.scheduled_arrival ?? '').trim();
+    const original = this.editingFlight();
+    const preferDep = original?.scheduled_departure ? new Date(original.scheduled_departure) : undefined;
+    const preferArr = original?.scheduled_arrival ? new Date(original.scheduled_arrival) : undefined;
+
+    const depRes = wallTimeToUtc(depRaw, originTz, preferDep);
+    const arrRes = wallTimeToUtc(arrRaw, destTz, preferArr);
+    const depUtc = depRes.success && depRes.date ? depRes.date : new Date();
+    const arrUtc = arrRes.success && arrRes.date ? arrRes.date : new Date();
+
+    const originOffset = getTimezoneOffsetMinutes(originTz, depUtc);
+    const destOffset = getTimezoneOffsetMinutes(destTz, arrUtc);
     const diff = destOffset - originOffset;
 
     let diffStr = '0h';
@@ -1073,25 +1204,21 @@ export class FlightsManageComponent implements OnInit {
       .replace('{diff}', diffStr);
   }
 
-  /** Giữ departure_date khớp với ngày của giờ cất cánh. */
+  /** Giữ departure_date khớp với ngày địa phương của sân bay đi. */
   syncDepartureDate(): void {
-    const dep = new Date(this.newFlight?.scheduled_departure ?? '');
-    if (isNaN(dep.getTime())) return;
-    this.newFlight.departure_date = this.toDateOnly(dep);
+    const depRaw = String(this.newFlight?.scheduled_departure ?? '').trim();
+    const wallDate = extractWallDate(depRaw);
+    if (wallDate) {
+      this.newFlight.departure_date = wallDate;
+    }
   }
 
   saveFlightForm(): void {
     const depRaw = String(this.newFlight?.scheduled_departure ?? '').trim();
     const arrRaw = String(this.newFlight?.scheduled_arrival ?? '').trim();
-    const dep = new Date(depRaw);
-    const arr = new Date(arrRaw);
 
-    if (!depRaw || !arrRaw || isNaN(dep.getTime()) || isNaN(arr.getTime())) {
-      this.toast.error(this.lang.isVietnamese() ? 'Vui lòng chọn giờ cất cánh và giờ hạ cánh hợp lệ.' : 'Please select valid departure and arrival times.');
-      return;
-    }
-    if (arr.getTime() <= dep.getTime()) {
-      this.toast.error(this.lang.isVietnamese() ? 'Giờ hạ cánh phải sau giờ cất cánh.' : 'Arrival time must be after departure time.');
+    if (!depRaw || !arrRaw) {
+      this.toast.error(this.lang.isVietnamese() ? 'Vui lòng chọn giờ cất cánh và giờ hạ cánh.' : 'Please select departure and arrival times.');
       return;
     }
 
@@ -1109,57 +1236,142 @@ export class FlightsManageComponent implements OnInit {
       return;
     }
 
-    const miles = Number(this.distanceMiles);
-    if (!Number.isInteger(miles) || miles < 0) {
-      this.toast.error(this.lang.isVietnamese() ? 'Số dặm bay phải là số nguyên không âm.' : 'Flight distance must be a non-negative integer.');
+    const originTz = this.getAirportTimeZone(origin);
+    const destTz = this.getAirportTimeZone(dest);
+    if (!originTz) {
+      this.toast.error(this.lang.t('admin.flights.errOriginTzNotFound').replace('{origin}', origin));
+      return;
+    }
+    if (!destTz) {
+      this.toast.error(this.lang.t('admin.flights.errDestTzNotFound').replace('{dest}', dest));
       return;
     }
 
-    const econP = Number(this.econPrice);
-    const econS = Number(this.econSeats);
-    const busP = Number(this.busPrice);
-    const busS = Number(this.busSeats);
-    if (!Number.isFinite(econP) || econP < 0 || !Number.isFinite(busP) || busP < 0) {
-      this.toast.error(this.lang.isVietnamese() ? 'Giá vé phải là số không âm.' : 'Ticket fare must be a non-negative number.');
-      return;
-    }
-    if (!Number.isInteger(econS) || econS < 1 || !Number.isInteger(busS) || busS < 1) {
-      this.toast.error(this.lang.isVietnamese() ? 'Số ghế mỗi hạng phải là số nguyên lớn hơn hoặc bằng 1.' : 'Seat count for each cabin must be an integer >= 1.');
-      return;
-    }
-
-    const durationMinutes = Math.max(1, this.computedDurationMinutes());
     const original = this.editingFlight();
-    const inventories = this.buildInventories(original, econP, econS, busP, busS);
+    const preferDep = original?.scheduled_departure ? new Date(original.scheduled_departure) : undefined;
+    const preferArr = original?.scheduled_arrival ? new Date(original.scheduled_arrival) : undefined;
 
-    const basePayload: any = {
-      flight_number: flightNumber,
-      departure_date: this.toDateOnly(dep),
-      scheduled_departure: dep.toISOString(),
-      scheduled_arrival: arr.toISOString(),
-      duration_minutes: durationMinutes,
-      distance_miles: miles,
-      inventories,
-    };
+    const depRes = wallTimeToUtc(depRaw, originTz, preferDep);
+    if (!depRes.success || !depRes.date) {
+      if (depRes.error === 'NONEXISTENT_WALL_TIME') {
+        this.toast.error(
+          this.lang.t('admin.flights.errDepSpringForward').replace('{time}', depRaw).replace('{tz}', originTz)
+        );
+      } else if (depRes.error === 'AMBIGUOUS_WALL_TIME') {
+        this.toast.error(
+          this.lang.t('admin.flights.errDepFallBack').replace('{time}', depRaw).replace('{tz}', originTz)
+        );
+      } else {
+        this.toast.error(
+          this.lang.isVietnamese()
+            ? `Giờ cất cánh không hợp lệ: ${depRes.error}`
+            : `Invalid departure time: ${depRes.error}`
+        );
+      }
+      return;
+    }
 
-    const acCode = String(this.newFlight.aircraft_model_code || '').trim();
-    const acName = String(this.newFlight.aircraft_model_name || '').trim();
-    if (acCode || acName) {
-      basePayload.aircraft = {
-        model_code: acCode,
-        model_name: acName,
-        total_capacity: econS + busS,
+    const arrRes = wallTimeToUtc(arrRaw, destTz, preferArr);
+    if (!arrRes.success || !arrRes.date) {
+      if (arrRes.error === 'NONEXISTENT_WALL_TIME') {
+        this.toast.error(
+          this.lang.t('admin.flights.errArrSpringForward').replace('{time}', arrRaw).replace('{tz}', destTz)
+        );
+      } else if (arrRes.error === 'AMBIGUOUS_WALL_TIME') {
+        this.toast.error(
+          this.lang.t('admin.flights.errArrFallBack').replace('{time}', arrRaw).replace('{tz}', destTz)
+        );
+      } else {
+        this.toast.error(
+          this.lang.isVietnamese()
+            ? `Giờ hạ cánh không hợp lệ: ${arrRes.error}`
+            : `Invalid arrival time: ${arrRes.error}`
+        );
+      }
+      return;
+    }
+
+    const depUtc = depRes.date;
+    const arrUtc = arrRes.date;
+
+    if (arrUtc.getTime() <= depUtc.getTime()) {
+      this.toast.error(this.lang.t('admin.flights.errArrAfterDepUtc'));
+      return;
+    }
+
+    const wallDate = extractWallDate(depRaw);
+    if (!wallDate) {
+      this.toast.error(this.lang.t('admin.flights.errExtractLocalDate'));
+      return;
+    }
+
+    const isCommercial = original?.data_source === 'AIRLABS_COMMERCIALIZED';
+    const durationMinutes = Math.max(1, computePhysicalDurationMinutes(depUtc, arrUtc));
+
+    let payload: any;
+    if (isCommercial) {
+      // Chuyến bay thương mại AirLabs:
+      // Chỉ cập nhật các trường điều hành an toàn (ngày bay địa phương, giờ cất/hạ cánh UTC, thời lượng bay).
+      // TUYỆT ĐỐI KHÔNG gửi `flight_number`, `inventories`, `aircraft`, `distance_miles`, `origin_iata`, `dest_iata`.
+      // Bảo toàn nguyên vẹn subdocuments, _id của từng inventory và saga_markers trong MongoDB.
+      payload = {
+        departure_date: wallDate,
+        scheduled_departure: depUtc.toISOString(),
+        scheduled_arrival: arrUtc.toISOString(),
+        duration_minutes: durationMinutes,
       };
     } else {
-      if (id) {
-        basePayload.aircraft = null; // Clear aircraft if fields are empty on edit
+      const miles = Number(this.distanceMiles);
+      if (!Number.isInteger(miles) || miles < 0) {
+        this.toast.error(this.lang.isVietnamese() ? 'Số dặm bay phải là số nguyên không âm.' : 'Flight distance must be a non-negative integer.');
+        return;
+      }
+
+      const econP = Number(this.econPrice);
+      const busP = Number(this.busPrice);
+      if (!Number.isFinite(econP) || econP < 0 || !Number.isFinite(busP) || busP < 0) {
+        this.toast.error(this.lang.isVietnamese() ? 'Giá vé phải là số không âm.' : 'Ticket fare must be a non-negative number.');
+        return;
+      }
+
+      const econS = Number(this.econSeats);
+      const busS = Number(this.busSeats);
+      if (!Number.isInteger(econS) || econS < 1 || !Number.isInteger(busS) || busS < 1) {
+        this.toast.error(this.lang.isVietnamese() ? 'Số ghế mỗi hạng phải là số nguyên lớn hơn hoặc bằng 1.' : 'Seat count for each cabin must be an integer >= 1.');
+        return;
+      }
+
+      const inventories = this.buildInventories(original, econP, econS, busP, busS);
+
+      payload = {
+        flight_number: flightNumber,
+        departure_date: wallDate,
+        scheduled_departure: depUtc.toISOString(),
+        scheduled_arrival: arrUtc.toISOString(),
+        duration_minutes: durationMinutes,
+        distance_miles: miles,
+        inventories,
+      };
+
+      const acCode = String(this.newFlight.aircraft_model_code || '').trim();
+      const acName = String(this.newFlight.aircraft_model_name || '').trim();
+      if (acCode || acName) {
+        payload.aircraft = {
+          model_code: acCode,
+          model_name: acName,
+          total_capacity: econS + busS,
+        };
+      } else {
+        if (id) {
+          payload.aircraft = null; // Clear aircraft if fields are empty on edit
+        }
       }
     }
 
     const request$ = id
-      ? this.api.updateFlight(id, basePayload)
+      ? this.api.updateFlight(id, payload)
       : this.api.createFlight({
-          ...basePayload,
+          ...payload,
           origin_iata: origin,
           dest_iata: dest,
         });
@@ -1169,13 +1381,17 @@ export class FlightsManageComponent implements OnInit {
       next: () => {
         this.submitting.set(false);
         this.showFlightModal.set(false);
-        const successMsg = id ? (this.lang.isVietnamese() ? `Đã cập nhật chuyến bay ${flightNumber}!` : `Updated flight ${flightNumber}!`) : (this.lang.isVietnamese() ? `Đã thêm chuyến bay ${flightNumber} thành công!` : `Successfully added flight ${flightNumber}!`);
+        const successMsg = id
+          ? (this.lang.isVietnamese() ? `Đã cập nhật chuyến bay ${flightNumber}!` : `Updated flight ${flightNumber}!`)
+          : (this.lang.isVietnamese() ? `Đã thêm chuyến bay ${flightNumber} thành công!` : `Successfully added flight ${flightNumber}!`);
         this.toast.success(successMsg);
         this.loadFlights();
       },
       error: (err) => {
         this.submitting.set(false);
-        const fallback = id ? (this.lang.isVietnamese() ? 'Không thể cập nhật chuyến bay.' : 'Failed to update flight.') : (this.lang.isVietnamese() ? 'Không thể tạo chuyến bay.' : 'Failed to create flight.');
+        const fallback = id
+          ? (this.lang.isVietnamese() ? 'Không thể cập nhật chuyến bay.' : 'Failed to update flight.')
+          : (this.lang.isVietnamese() ? 'Không thể tạo chuyến bay.' : 'Failed to create flight.');
         this.toast.error(this.describeError(err, fallback));
       },
     });
@@ -1224,19 +1440,6 @@ export class FlightsManageComponent implements OnInit {
     };
 
     return [make(CabinClass.ECONOMY, econP, econS), make(CabinClass.BUSINESS, busP, busS)];
-  }
-
-  /** `datetime-local` cần chuỗi giờ ĐỊA PHƯƠNG dạng YYYY-MM-DDTHH:mm. */
-  private toDateTimeLocal(value: string | Date): string {
-    const d = value instanceof Date ? value : new Date(value);
-    if (isNaN(d.getTime())) return '';
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-
-  private toDateOnly(d: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
   /** err.error.message của NestJS có thể là string hoặc mảng lỗi validate. */

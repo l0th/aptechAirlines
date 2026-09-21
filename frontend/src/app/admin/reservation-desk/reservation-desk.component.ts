@@ -1206,8 +1206,10 @@ interface StaffPassengerForm {
           [aircraftModel]="seatMapAircraftModel()"
           [passengerList]="seatMapPassengerList()"
           [initialSeats]="seatMapInitialSeats()"
+          [allowedCabinClass]="seatMapAllowedCabinClass()"
           (closeEvent)="showSeatMapModal.set(false)"
           (seatsConfirmed)="onSeatsConfirmed($event)"
+          (seatAssignmentsSanitized)="onSeatsSanitized($event)"
         />
       }
     </div>
@@ -1265,6 +1267,7 @@ export class ReservationDeskComponent implements OnInit {
   readonly seatMapAircraftModel = signal('');
   readonly seatMapPassengerList = signal<Array<{ name: string; type?: string }>>([]);
   readonly seatMapInitialSeats = signal<Record<number, string>>({});
+  readonly seatMapAllowedCabinClass = signal('');
   activeSeatLeg: 'OUTBOUND' | 'RETURN' = 'OUTBOUND';
 
   // Reschedule State
@@ -1499,6 +1502,15 @@ export class ReservationDeskComponent implements OnInit {
     });
     this.seatMapInitialSeats.set(initialSeats);
 
+    let allowedCabin = '';
+    if (outboundDirect) {
+      allowedCabin = outboundDirect.cabin_class || '';
+    } else if (outboundConnecting) {
+      const actualInventory = this.resolveConnectingInventory(outboundConnecting.inventories, this.searchCabin);
+      allowedCabin = actualInventory?.cabin_class || '';
+    }
+    this.seatMapAllowedCabinClass.set(allowedCabin);
+
     this.showSeatMapModal.set(true);
   }
 
@@ -1515,6 +1527,21 @@ export class ReservationDeskComponent implements OnInit {
     this.toast.success(this.lang.isVietnamese() ? 'Đã gán ghế thành công' : 'Seats assigned successfully');
   }
 
+  onSeatsSanitized(assigned: Record<number, string>): void {
+    const list = [...this.passengersList()];
+    let modified = false;
+    list.forEach((p, idx) => {
+      const validSeat = assigned[idx] || '';
+      if (p.outbound_seat && p.outbound_seat !== validSeat) {
+        p.outbound_seat = validSeat;
+        modified = true;
+      }
+    });
+    if (modified) {
+      this.passengersList.set(list);
+    }
+  }
+
   // ===================== STEP 5: FINALIZE (HOLD OR BUY) =====================
   canHold(): boolean {
     const depStr =
@@ -1529,10 +1556,18 @@ export class ReservationDeskComponent implements OnInit {
     return Math.floor(diffDays) > 14;
   }
 
+  resolveConnectingInventory(
+    inventories?: FlightInventory[],
+    requestedCabin?: string,
+  ): FlightInventory | null {
+    if (!inventories || inventories.length === 0) return null;
+    const match = inventories.find((i) => i.cabin_class === requestedCabin);
+    return match || inventories[0] || null;
+  }
+
   pickConnectingInventoryId(inventories?: FlightInventory[], cabinClass?: string): string {
-    if (!inventories || inventories.length === 0) return '';
-    const match = inventories.find((i) => i.cabin_class === cabinClass);
-    return match?._id || (match as any)?.id || inventories[0]._id || (inventories[0] as any).id || '';
+    const inv = this.resolveConnectingInventory(inventories, cabinClass);
+    return inv?._id || (inv as any)?.id || '';
   }
 
   calculatedTotalPartyPrice(): number {
@@ -1555,7 +1590,7 @@ export class ReservationDeskComponent implements OnInit {
   getConnectingPartyPrice(route: ConnectingRouteOption): number {
     let total = 0;
     for (const leg of route.legs || []) {
-      const inv = leg.inventories?.find((i) => i.cabin_class === this.searchCabin) || leg.inventories?.[0];
+      const inv = this.resolveConnectingInventory(leg.inventories, this.searchCabin);
       const base = Number(inv?.base_price || 0);
       total += (base * this.adultCount) + (base * 0.75 * this.childCount) + (base * 0.85 * this.seniorCount);
     }
