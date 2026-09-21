@@ -579,7 +579,6 @@ export class FlightGeneratorService {
           dateStr,
           tpl.std_dep_time,
           originTz,
-          tpl.source_dep_time_utc,
         );
       } else if (tpl.source_dep_time_utc) {
         // Find UTC date matching operating date dateStr in originTz
@@ -610,60 +609,47 @@ export class FlightGeneratorService {
       let scheduledArrivalUtc: Date;
       let durationMinutes: number;
 
-      if (tpl.std_arr_time) {
-        // 1. Local arrival chronology
+      if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
+        // 1. Physical chronology: prefer actual source duration across DST boundaries
+        durationMinutes = tpl.source_duration_minutes;
+        scheduledArrivalUtc = new Date(depTimeMs + durationMinutes * 60000);
+      } else if (tpl.std_arr_time) {
+        // 2. Local arrival wall-time resolution with concrete destination timezone
         let bestArrivalUtc: Date | null = null;
         let bestDurationMinutes = Infinity;
-        let lastError: Error | null = null;
+        let firstCandidateError: Error | null = null;
 
         for (const arrDayOffset of [0, 1, 2]) {
           const candCal = new Date(Date.UTC(yearStr, Number(monthStr) - 1, Number(dayStr) + arrDayOffset));
           const candArrDateStr = `${candCal.getUTCFullYear()}-${String(candCal.getUTCMonth() + 1).padStart(2, '0')}-${String(candCal.getUTCDate()).padStart(2, '0')}`;
           let candArrUtc: Date;
           try {
-            candArrUtc = resolveLocalWallTimeToUtc(candArrDateStr, tpl.std_arr_time, destTz, tpl.source_arr_time_utc);
+            candArrUtc = resolveLocalWallTimeToUtc(candArrDateStr, tpl.std_arr_time, destTz);
           } catch (err: any) {
-            lastError = err;
+            if (!firstCandidateError) {
+              firstCandidateError = err;
+            }
             continue;
           }
           const diffMinutes = Math.round((candArrUtc.getTime() - depTimeMs) / 60000);
 
-          if (diffMinutes >= 20 && diffMinutes <= 1440) {
-            if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
-              const currentBestDiff = Math.abs(bestDurationMinutes - tpl.source_duration_minutes);
-              const thisDiff = Math.abs(diffMinutes - tpl.source_duration_minutes);
-              if (thisDiff < currentBestDiff) {
-                bestArrivalUtc = candArrUtc;
-                bestDurationMinutes = diffMinutes;
-              }
-            } else if (diffMinutes < bestDurationMinutes) {
-              bestArrivalUtc = candArrUtc;
-              bestDurationMinutes = diffMinutes;
-            }
+          if (diffMinutes >= 20 && diffMinutes <= 1440 && diffMinutes < bestDurationMinutes) {
+            bestArrivalUtc = candArrUtc;
+            bestDurationMinutes = diffMinutes;
           }
         }
 
         if (bestArrivalUtc) {
           scheduledArrivalUtc = bestArrivalUtc;
           durationMinutes = bestDurationMinutes;
-        } else if (tpl.source_arr_time_utc && lastError) {
-          // Provider local/UTC conflict is a SOURCE ERROR - do not hide it by computing arrival from duration!
-          throw lastError;
-        } else if (lastError && lastError.message.includes('does not exist in timezone')) {
-          // Nonexistent provider local arrival time without authoritative UTC must not fall back to duration!
-          throw lastError;
-        } else if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0 && !tpl.source_arr_time_utc) {
-          // Only fall back to source_duration_minutes if source_arr_time_utc was absent and no nonexistent transition error occurred
-          durationMinutes = tpl.source_duration_minutes;
-          scheduledArrivalUtc = new Date(depTimeMs + durationMinutes * 60000);
         } else {
           throw new BadRequestException(
-            lastError?.message ||
-              `Schedule template "${tpl.template_id}" cannot resolve arrival chronology and lacks valid source duration`,
+            firstCandidateError?.message ||
+              `Schedule template "${tpl.template_id}" (${tpl.flight_number}) on operating date "${dateStr}" cannot resolve valid arrival chronology for local time "${tpl.std_arr_time}" in timezone "${destTz}".`,
           );
         }
       } else if (tpl.source_arr_time_utc) {
-        // 2. Issue 1: Provider UTC arrival clock directly
+        // 3. Provider UTC arrival clock directly
         const depCal = new Date(depTimeMs);
         const [arrH, arrM] = tpl.source_arr_time_utc.split(':').map(Number);
         const candidates: Date[] = [];
@@ -678,29 +664,16 @@ export class FlightGeneratorService {
 
         if (candidates.length === 0) {
           throw new BadRequestException(
-            `Cannot resolve arrival chronology from source_arr_time_utc "${tpl.source_arr_time_utc}" after departure ${scheduledDepartureUtc.toISOString()}`,
+            `Schedule template "${tpl.template_id}" (${tpl.flight_number}) on operating date "${dateStr}": cannot resolve arrival chronology from source_arr_time_utc "${tpl.source_arr_time_utc}" after departure ${scheduledDepartureUtc.toISOString()}`,
           );
         }
 
-        if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
-          candidates.sort((a, b) => {
-            const durA = Math.abs((a.getTime() - depTimeMs) / 60000 - tpl.source_duration_minutes!);
-            const durB = Math.abs((b.getTime() - depTimeMs) / 60000 - tpl.source_duration_minutes!);
-            return durA - durB;
-          });
-        } else {
-          candidates.sort((a, b) => a.getTime() - b.getTime());
-        }
-
+        candidates.sort((a, b) => a.getTime() - b.getTime());
         scheduledArrivalUtc = candidates[0];
         durationMinutes = Math.round((scheduledArrivalUtc.getTime() - depTimeMs) / 60000);
-      } else if (tpl.source_duration_minutes && tpl.source_duration_minutes > 0) {
-        // 3. Positive provider duration
-        durationMinutes = tpl.source_duration_minutes;
-        scheduledArrivalUtc = new Date(depTimeMs + durationMinutes * 60000);
       } else {
         throw new BadRequestException(
-          `Schedule template "${tpl.template_id}" lacks std_arr_time, source_arr_time_utc, and source_duration_minutes.`,
+          `Schedule template "${tpl.template_id}" (${tpl.flight_number}) on operating date "${dateStr}" lacks std_arr_time, source_arr_time_utc, and source_duration_minutes.`,
         );
       }
 

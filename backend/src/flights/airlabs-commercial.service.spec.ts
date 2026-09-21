@@ -1349,25 +1349,21 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
         arr_iata: 'HAN',
         dep_time: '08:00',
         arr_time: '10:00',
+        arr_time_utc: '01:00',
         days: ['daily'],
         duration: 120,
         aircraft_icao: 'A21N',
       });
 
-      const template = await commercialService.commercializeRoute({
-        source_key: 'airlabs_ARR_CONFLICT_WITH_DUR',
-        aptech_flight_number: 'APT660',
-        aircraft_type: 'A21N',
-        base_price_economy: 1000000,
-      });
-
-      // Conflicting source_arr_time_utc: 10:00 local in HAN (UTC+7) is 03:00 UTC, not 01:00 UTC
-      template.source_arr_time_utc = '01:00';
-      mockTemplates.set(template.template_id, template);
-
-      await expect(generatorService.generateForTemplate(template, '2026-10-01', 1)).rejects.toThrow(
-        BadRequestException,
-      );
+      // Commercialization must reject genuinely inconsistent provider local/UTC data despite positive duration
+      await expect(
+        commercialService.commercializeRoute({
+          source_key: 'airlabs_ARR_CONFLICT_WITH_DUR',
+          aptech_flight_number: 'APT660',
+          aircraft_type: 'A21N',
+          base_price_economy: 1000000,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('America/Los_Angeles 2026-03-08 03:30 resolves to 2026-03-08T10:30:00.000Z', () => {
