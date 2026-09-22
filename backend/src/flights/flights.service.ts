@@ -31,6 +31,7 @@ import { RouteScheduleValidatorService, ValidatedItinerary } from '../reference/
 import { UsersService } from '../users/users.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import { FLEET_LAYOUT_CATALOG } from '../seat-allocation/fleet-layout.catalog';
+import { MailService, ItineraryLegData, isValidMaskedCard } from '../mail/mail.service';
 
 /**
  * Enumerates all calendar dates (YYYY-MM-DD) inclusively from startDate through endDate.
@@ -75,6 +76,7 @@ export class FlightsService {
     @Optional() private readonly routeGraphService?: RouteGraphService,
     @Optional() private readonly routeScheduleValidatorService?: RouteScheduleValidatorService,
     @Optional() private readonly seatAllocationService?: SeatAllocationService,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   async findAll(status?: FlightStatus, origin?: string, dest?: string, commercialOnly = false): Promise<Flight[]> {
@@ -229,6 +231,13 @@ export class FlightsService {
   async update(id: string, updateFlightDto: UpdateFlightDto): Promise<FlightDocument> {
     const flight = await this.findById(id);
 
+    const preSnapshot = {
+      status: flight.status,
+      delay_reason: flight.delay_reason || '',
+      scheduled_departure: new Date(flight.scheduled_departure).getTime(),
+      scheduled_arrival: new Date(flight.scheduled_arrival).getTime(),
+    };
+
     // To parse times properly we need airports
     const originAirport = await this.airportsService.findByIata(flight.origin_iata);
     const destAirport = await this.airportsService.findByIata(flight.dest_iata);
@@ -262,12 +271,12 @@ export class FlightsService {
     if (updateFlightDto.distance_miles !== undefined) flight.distance_miles = updateFlightDto.distance_miles;
     if (updateFlightDto.status) {
       flight.status = updateFlightDto.status;
-      // C.2 Xoá delay_reason khi set lại SCHEDULED
-      if (updateFlightDto.status === FlightStatus.SCHEDULED) {
-        flight.delay_reason = '';
-      }
     }
-    if (updateFlightDto.delay_reason !== undefined) flight.delay_reason = updateFlightDto.delay_reason;
+    if (updateFlightDto.status === FlightStatus.SCHEDULED) {
+      flight.delay_reason = '';
+    } else if (updateFlightDto.delay_reason !== undefined) {
+      flight.delay_reason = updateFlightDto.delay_reason;
+    }
     if (updateFlightDto.inventories) flight.inventories = updateFlightDto.inventories as any;
 
     flight.is_manually_modified = true;
@@ -280,6 +289,16 @@ export class FlightsService {
         `Flight ${savedFlight.flight_number} (${savedFlight._id}) set to CANCELLED via update(). ` +
           `${cancelledBookings} booking(s) automatically cancelled, refunded and their seats released.`,
       );
+    } else {
+      const depShifted = new Date(savedFlight.scheduled_departure).getTime() !== preSnapshot.scheduled_departure;
+      const arrShifted = new Date(savedFlight.scheduled_arrival).getTime() !== preSnapshot.scheduled_arrival;
+      const statusBecameDelayed = savedFlight.status === FlightStatus.DELAYED && preSnapshot.status !== FlightStatus.DELAYED;
+      const delayReasonChanged = savedFlight.status === FlightStatus.DELAYED && savedFlight.delay_reason !== preSnapshot.delay_reason;
+      const recoveredToScheduled = savedFlight.status === FlightStatus.SCHEDULED && preSnapshot.status === FlightStatus.DELAYED;
+
+      if (depShifted || arrShifted || statusBecameDelayed || delayReasonChanged || recoveredToScheduled) {
+        await this.notifyDisruptedFlightBookings(savedFlight, preSnapshot);
+      }
     }
 
     return savedFlight;
@@ -309,8 +328,20 @@ export class FlightsService {
 
   async updateStatus(id: string, dto: UpdateFlightStatusDto): Promise<FlightDocument> {
     const flight = await this.findById(id);
+
+    const preSnapshot = {
+      status: flight.status,
+      delay_reason: flight.delay_reason || '',
+      scheduled_departure: new Date(flight.scheduled_departure).getTime(),
+      scheduled_arrival: new Date(flight.scheduled_arrival).getTime(),
+    };
+
     flight.status = dto.status;
-    if (dto.delay_reason !== undefined) flight.delay_reason = dto.delay_reason;
+    if (dto.status === FlightStatus.SCHEDULED) {
+      flight.delay_reason = '';
+    } else if (dto.delay_reason !== undefined) {
+      flight.delay_reason = dto.delay_reason;
+    }
     if (dto.actual_departure) flight.actual_departure = new Date(dto.actual_departure);
     if (dto.actual_arrival) flight.actual_arrival = new Date(dto.actual_arrival);
     const savedFlight = await flight.save();
@@ -327,9 +358,110 @@ export class FlightsService {
         `Flight ${savedFlight.flight_number} (${savedFlight._id}) set to CANCELLED. ` +
           `${cancelledBookings} booking(s) automatically cancelled, refunded and their seats released.`,
       );
+    } else {
+      const statusBecameDelayed = savedFlight.status === FlightStatus.DELAYED && preSnapshot.status !== FlightStatus.DELAYED;
+      const delayReasonChanged = savedFlight.status === FlightStatus.DELAYED && savedFlight.delay_reason !== preSnapshot.delay_reason;
+      const recoveredToScheduled = savedFlight.status === FlightStatus.SCHEDULED && preSnapshot.status === FlightStatus.DELAYED;
+
+      if (statusBecameDelayed || delayReasonChanged || recoveredToScheduled) {
+        await this.notifyDisruptedFlightBookings(savedFlight, preSnapshot);
+      }
     }
 
     return savedFlight;
+  }
+
+  private async notifyDisruptedFlightBookings(
+    flight: FlightDocument,
+    preSnapshot: {
+      status: string;
+      delay_reason: string;
+      scheduled_departure: number;
+      scheduled_arrival: number;
+    },
+  ): Promise<void> {
+    if (!this.mailService) return;
+
+    try {
+      const activeBookings = await this.bookingModel
+        .find({
+          'ticket_coupons.flight_id': flight._id,
+          status: { $in: [BookingStatus.BLOCKED, BookingStatus.CONFIRMED] },
+        })
+        .populate('user_id', 'email first_name last_name')
+        .exec();
+
+      if (!activeBookings || activeBookings.length === 0) return;
+
+      const originTz = await this.getAirportTimeZone(flight.origin_iata);
+      const destTz = await this.getAirportTimeZone(flight.dest_iata);
+
+      const originalDepLocal = formatLocalTime(new Date(preSnapshot.scheduled_departure), originTz);
+      const originalDepStr = originalDepLocal
+        ? `${originalDepLocal} (${originTz || 'UTC'})`
+        : `${new Date(preSnapshot.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+
+      const newDepLocal = formatLocalTime(flight.scheduled_departure, originTz);
+      const newDepStr = newDepLocal
+        ? `${newDepLocal} (${originTz || 'UTC'})`
+        : `${new Date(flight.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+
+      const originalArrLocal = formatLocalTime(new Date(preSnapshot.scheduled_arrival), destTz);
+      const originalArrStr = originalArrLocal
+        ? `${originalArrLocal} (${destTz || 'UTC'})`
+        : `${new Date(preSnapshot.scheduled_arrival).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+
+      const newArrLocal = formatLocalTime(flight.scheduled_arrival, destTz);
+      const newArrStr = newArrLocal
+        ? `${newArrLocal} (${destTz || 'UTC'})`
+        : `${new Date(flight.scheduled_arrival).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+
+      let disruptionType: 'DELAY' | 'SCHEDULE_CHANGE' | 'RECOVERY' = 'SCHEDULE_CHANGE';
+      if (flight.status === FlightStatus.DELAYED) {
+        disruptionType = 'DELAY';
+      } else if (flight.status === FlightStatus.SCHEDULED && preSnapshot.status === FlightStatus.DELAYED) {
+        disruptionType = 'RECOVERY';
+      }
+
+      for (const booking of activeBookings) {
+        try {
+          const user: any = booking.user_id;
+          const toEmail = user?.email;
+          if (!toEmail) continue;
+
+          const passengerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'Customer';
+
+          const sent = await this.mailService.sendFlightDisruptionEmail({
+            toEmail,
+            passengerName,
+            bookingReference: booking.pnr_code,
+            flightNumber: flight.flight_number,
+            origin: flight.origin_iata,
+            destination: flight.dest_iata,
+            disruptionType,
+            originalDepartureFormatted: originalDepStr,
+            newDepartureFormatted: newDepStr,
+            originalArrivalFormatted: originalArrStr,
+            newArrivalFormatted: newArrStr,
+            delayReason: flight.status === FlightStatus.SCHEDULED ? undefined : (flight.delay_reason || undefined),
+            statusText: flight.status,
+          });
+          if (!sent) {
+            this.logger.warn(
+              `Flight disruption email delivery returned false for booking ${booking.pnr_code} (${toEmail}) on flight ${flight.flight_number}.`,
+            );
+          }
+        } catch (singleMailErr: any) {
+          this.logger.error(
+            `Failed to send disruption email for booking ${booking.pnr_code}: ${singleMailErr?.message || singleMailErr}`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to process flight disruption notifications for flight ${flight.flight_number}: ${err?.message || err}`,
+      );
+    }
   }
 
   /** Cancellation code generator (same format as BookingsService.generateCode). */
@@ -367,6 +499,72 @@ export class FlightsService {
    *
    * @returns the number of bookings that were successfully cancelled.
    */
+  private async buildItineraryLegs(
+    ticketCoupons: any[],
+    affectedFlightId?: any,
+    affectedFlightNumber?: string,
+  ): Promise<ItineraryLegData[]> {
+    const legs: ItineraryLegData[] = [];
+    const seen = new Set<string>();
+
+    for (const coupon of ticketCoupons || []) {
+      if (!coupon.flight_id && !coupon.flight_number) continue;
+      const key = `${coupon.flight_number || ''}_${coupon.flight_id?.toString() || ''}_${coupon.inventory_id || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      let isAffected = false;
+      if (affectedFlightId && coupon.flight_id) {
+        isAffected = coupon.flight_id.toString() === affectedFlightId.toString();
+      } else if (affectedFlightNumber && coupon.flight_number) {
+        isAffected = coupon.flight_number === affectedFlightNumber;
+      }
+
+      try {
+        if (!coupon.flight_id) {
+          throw new Error('No flight_id');
+        }
+        const flight = await this.findById(coupon.flight_id.toString());
+        const originTz = await this.getAirportTimeZone(flight.origin_iata);
+        const destTz = await this.getAirportTimeZone(flight.dest_iata);
+
+        const depLocal = formatLocalTime(flight.scheduled_departure, originTz);
+        const arrLocal = formatLocalTime(flight.scheduled_arrival, destTz);
+
+        const depStr = depLocal
+          ? `${depLocal} (${originTz || 'UTC'})`
+          : `${new Date(flight.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+        const arrStr = arrLocal
+          ? `${arrLocal} (${destTz || 'UTC'})`
+          : (flight.scheduled_arrival
+              ? `${new Date(flight.scheduled_arrival).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`
+              : undefined);
+
+        legs.push({
+          flightNumber: flight.flight_number,
+          origin: flight.origin_iata,
+          destination: flight.dest_iata,
+          cabinClass: coupon.cabin_class,
+          departureTimeFormatted: depStr,
+          arrivalTimeFormatted: arrStr,
+          isAffected: !!isAffected,
+        });
+      } catch (err) {
+        if (coupon.flight_number) {
+          legs.push({
+            flightNumber: coupon.flight_number,
+            origin: coupon.origin || 'UNKNOWN',
+            destination: coupon.destination || 'UNKNOWN',
+            cabinClass: coupon.cabin_class,
+            departureTimeFormatted: 'Schedule unresolvable',
+            isAffected: !!isAffected,
+          });
+        }
+      }
+    }
+    return legs;
+  }
+
   async cancelBookingsForFlight(flight: FlightDocument): Promise<number> {
     const affectedBookings = await this.bookingModel
       .find({
@@ -440,12 +638,13 @@ export class FlightsService {
         }
 
         // Step 3: For CONFIRMED bookings, add full REFUND transaction & reset miles
+        let cardMasked: string | undefined = undefined;
         if (wasConfirmed) {
           if (booking.total_amount > 0) {
             const originalPayment = booking.payment_transactions?.find(
               (t: any) => t.transaction_type === 'PAYMENT' && t.status === 'SUCCESS',
             );
-            const cardMasked = originalPayment?.card_masked || 'AUTO-REFUND-FLIGHT-CANCELLED';
+            cardMasked = originalPayment?.card_masked || 'AUTO-REFUND-FLIGHT-CANCELLED';
 
             booking.payment_transactions.push({
               transaction_type: 'REFUND',
@@ -472,6 +671,54 @@ export class FlightsService {
         await booking.save();
 
         cancelledCount++;
+
+        // Step 6: Dispatch emergency cancellation email safely
+        if (this.mailService) {
+          try {
+            const user = await this.usersService.findById(booking.user_id.toString());
+            if (user?.email) {
+              const passengerName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Customer';
+              const originTz = await this.getAirportTimeZone(flight.origin_iata);
+              const localDep = formatLocalTime(flight.scheduled_departure, originTz);
+              const depFormatted = localDep ? `${localDep} (${originTz || 'UTC'})` : undefined;
+              const itinerary = await this.buildItineraryLegs(
+                booking.ticket_coupons,
+                flight._id,
+                flight.flight_number,
+              );
+
+              const sent = await this.mailService.sendCancellationEmail({
+                toEmail: user.email,
+                passengerName,
+                bookingReference: booking.pnr_code,
+                blockingNumber: booking.blocking_number || undefined,
+                confirmationNumber: booking.confirmation_number || undefined,
+                cancellationNumber: booking.cancellation_number!,
+                cancellationType: 'EMERGENCY_FLIGHT_CANCELLED',
+                originalBookingStatus: wasConfirmed ? 'CONFIRMED' : 'BLOCKED',
+                flightNumber: flight.flight_number,
+                origin: flight.origin_iata,
+                destination: flight.dest_iata,
+                departureTimeFormatted: depFormatted,
+                itinerary: itinerary.length > 0 ? itinerary : undefined,
+                refundAmount: wasConfirmed ? booking.total_amount : 0,
+                refundPercentage: wasConfirmed ? 100 : undefined,
+                currency: 'VND',
+                maskedCard: wasConfirmed && isValidMaskedCard(cardMasked) ? cardMasked : undefined,
+                reason: flight.delay_reason || 'Flight cancelled by airline operation',
+              });
+              if (!sent) {
+                this.logger.warn(
+                  `Emergency cancellation email delivery returned false for booking ${booking.pnr_code} (${user.email}); booking remains cancelled.`,
+                );
+              }
+            }
+          } catch (mailErr: any) {
+            this.logger.error(
+              `Failed to send emergency cancellation email for booking ${booking.pnr_code}: ${mailErr?.message || mailErr}`,
+            );
+          }
+        }
       } catch (err: any) {
         this.logger.error(
           `Failed to cancel booking ${booking.pnr_code || booking._id} during emergency flight cancellation: ${err?.message || err}. Initiating compensation rollback.`,

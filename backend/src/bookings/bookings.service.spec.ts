@@ -6,6 +6,7 @@ import { Booking } from './bookings.schema';
 import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
 import { PoliciesService } from '../policies/policies.service';
+import { MailService } from '../mail/mail.service';
 import { BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { BookingStatus, BookingType, PassengerType } from './bookings.schema';
 import { UserRole } from '../users/users.schema';
@@ -2686,4 +2687,393 @@ describe('BookingsService', () => {
       expect(errors2.find((e) => e.property === 'date_of_birth')?.constraints).toHaveProperty('isValidDateOfBirth');
     });
   });
+
+  describe('BookingsService - Email Lifecycle', () => {
+    let service: BookingsService;
+    let bookingModel: any;
+    let flightsService: any;
+    let usersService: any;
+    let policiesService: any;
+    let mailService: any;
+
+    beforeEach(async () => {
+      bookingModel = {
+        findOne: jest.fn(),
+        find: jest.fn(),
+      };
+
+      flightsService = {
+        findById: jest.fn().mockResolvedValue({
+          flight_number: 'VN101',
+          origin_iata: 'HAN',
+          dest_iata: 'SGN',
+          scheduled_departure: new Date('2026-10-28T07:00:00Z'),
+        }),
+        getAirportTimeZone: jest.fn().mockResolvedValue('Asia/Ho_Chi_Minh'),
+        updateAvailableSeats: jest.fn().mockResolvedValue(true),
+      };
+
+      usersService = {
+        findById: jest.fn().mockResolvedValue({
+          email: 'passenger@example.com',
+          first_name: 'John',
+          last_name: 'Doe',
+          sky_miles: 100,
+        }),
+        deductSkyMiles: jest.fn().mockResolvedValue(true),
+        setSkyMiles: jest.fn().mockResolvedValue(true),
+      };
+
+      policiesService = {
+        calculateRefundPercentage: jest.fn().mockResolvedValue(90),
+      };
+
+      mailService = {
+        sendCancellationEmail: jest.fn().mockResolvedValue(true),
+        sendExpiredHoldCancellationEmail: jest.fn().mockResolvedValue(true),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          BookingsService,
+          { provide: getModelToken(Booking.name), useValue: bookingModel },
+          { provide: FlightsService, useValue: flightsService },
+          { provide: UsersService, useValue: usersService },
+          { provide: PoliciesService, useValue: policiesService },
+          { provide: MailService, useValue: mailService },
+        ],
+      }).compile();
+
+      service = module.get<BookingsService>(BookingsService);
+    });
+
+    it('cancelTicket dispatches sendCancellationEmail for CONFIRMED booking with refund details', async () => {
+      const departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const mockBooking: any = {
+        _id: 'booking-1',
+        pnr_code: 'PNR-CONFIRMED',
+        confirmation_number: 'CNF-CONFIRMED-99',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.CONFIRMED,
+        total_amount: 1000000,
+        total_miles_accrued: 50,
+        passengers: [{ first_name: 'John', last_name: 'Doe' }],
+        ticket_coupons: [
+          {
+            flight_id: 'f1',
+            flight_number: 'VN101',
+            inventory_id: 'inv1',
+            cabin_class: 'ECONOMY',
+            fare_paid: 1000000,
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        payment_transactions: [
+          {
+            transaction_type: 'PAYMENT',
+            amount: 1000000,
+            card_masked: '411111******1111',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockBooking),
+      });
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: departure,
+      });
+
+      const result = await service.cancelTicket({ identifier: 'PNR-CONFIRMED' });
+
+      expect(result.cancellation_number).toBeDefined();
+      expect(mailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [callData] = mailService.sendCancellationEmail.mock.calls[0];
+      expect(callData.toEmail).toBe('passenger@example.com');
+      expect(callData.cancellationType).toBe('MANUAL_CONFIRMED');
+      expect(callData.confirmationNumber).toBe('CNF-CONFIRMED-99');
+      expect(callData.blockingNumber).toBeUndefined();
+      expect(callData.refundAmount).toBe(900000);
+      expect(callData.refundPercentage).toBe(90);
+      expect(callData.maskedCard).toBe('**** **** **** 1111');
+      expect(callData.departureTimeFormatted).toContain('(Asia/Ho_Chi_Minh)');
+    });
+
+    it('cancelTicket dispatches sendCancellationEmail for BLOCKED booking with 0 refund', async () => {
+      const departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const mockBooking: any = {
+        _id: 'booking-2',
+        pnr_code: 'PNR-BLOCKED',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.BLOCKED,
+        blocking_number: 'BLK-123',
+        total_amount: 1000000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Jane', last_name: 'Doe' }],
+        ticket_coupons: [
+          {
+            flight_id: 'f1',
+            flight_number: 'VN101',
+            inventory_id: 'inv1',
+            cabin_class: 'ECONOMY',
+            fare_paid: 1000000,
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        payment_transactions: [],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockBooking),
+      });
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: departure,
+      });
+
+      const result = await service.cancelTicket({ identifier: 'PNR-BLOCKED' });
+
+      expect(result.cancellation_number).toBeDefined();
+      expect(mailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [callData] = mailService.sendCancellationEmail.mock.calls[0];
+      expect(callData.cancellationType).toBe('MANUAL_BLOCKED');
+      expect(callData.blockingNumber).toBe('BLK-123');
+      expect(callData.confirmationNumber).toBeUndefined();
+      expect(callData.refundAmount).toBe(0);
+      expect(callData.refundPercentage).toBe(0);
+      expect(callData.maskedCard).toBeUndefined();
+    });
+
+    it('cancelTicket for zero-value CONFIRMED booking passes real refundPercentage (90) and 0 refundAmount without creating REFUND transaction', async () => {
+      const departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const mockBooking: any = {
+        _id: 'booking-zero-cnf',
+        pnr_code: 'PNR-ZERO-CONFIRMED',
+        confirmation_number: 'CNF-ZERO-99',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.CONFIRMED,
+        total_amount: 0,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Zero', last_name: 'Cost' }],
+        ticket_coupons: [
+          {
+            flight_id: 'f1',
+            flight_number: 'VN101',
+            inventory_id: 'inv1',
+            cabin_class: 'ECONOMY',
+            fare_paid: 0,
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        payment_transactions: [
+          {
+            transaction_type: 'PAYMENT',
+            amount: 0,
+            card_masked: '411111******1111',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockBooking),
+      });
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: departure,
+      });
+
+      policiesService.calculateRefundPercentage.mockResolvedValue(90);
+
+      const result = await service.cancelTicket({ identifier: 'PNR-ZERO-CONFIRMED' });
+
+      expect(result.cancellation_number).toBeDefined();
+      expect(result.refund_amount).toBe(0);
+      expect(result.refund_percentage).toBe(90);
+
+      // Verify no monetary REFUND transaction is created
+      const refundTxs = mockBooking.payment_transactions.filter((tx: any) => tx.transaction_type === 'REFUND');
+      expect(refundTxs.length).toBe(0);
+
+      expect(mailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [callData] = mailService.sendCancellationEmail.mock.calls[0];
+      expect(callData.cancellationType).toBe('MANUAL_CONFIRMED');
+      expect(callData.originalBookingStatus).toBe('CONFIRMED');
+      expect(callData.refundAmount).toBe(0);
+      expect(callData.refundPercentage).toBe(90);
+    });
+
+    it('cancelTicket succeeds normally even if mailService throws or returns false (isolation invariant)', async () => {
+      const departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+      const mockBooking: any = {
+        _id: 'booking-3',
+        pnr_code: 'PNR-ISOLATION',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.BLOCKED,
+        total_amount: 1000000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Error', last_name: 'User' }],
+        ticket_coupons: [
+          {
+            flight_id: 'f1',
+            flight_number: 'VN101',
+            inventory_id: 'inv1',
+            cabin_class: 'ECONOMY',
+            fare_paid: 1000000,
+            coupon_status: 'ACTIVE',
+          },
+        ],
+        payment_transactions: [],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(mockBooking),
+      });
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: departure,
+      });
+
+      // Case A: throws
+      mailService.sendCancellationEmail.mockRejectedValue(new Error('SMTP down'));
+      const resultA = await service.cancelTicket({ identifier: 'PNR-ISOLATION' });
+      expect(resultA.cancellation_number).toBeDefined();
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking.save).toHaveBeenCalled();
+
+      // Case B: returns false
+      mockBooking.status = BookingStatus.BLOCKED;
+      mailService.sendCancellationEmail.mockResolvedValue(false);
+      const resultB = await service.cancelTicket({ identifier: 'PNR-ISOLATION' });
+      expect(resultB.cancellation_number).toBeDefined();
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+    });
+
+    it('cancelExpiredBlockStrict dispatches sendExpiredHoldCancellationEmail and preserves isolation when mail fails', async () => {
+      const mockBooking: any = {
+        _id: 'booking-expired',
+        pnr_code: 'PNR-EXPIRED',
+        blocking_number: 'BLK-EXP-1',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.BLOCKED,
+        time_limit_deadline: new Date('2026-10-25T12:00:00Z'),
+        passengers: [{ first_name: 'John', last_name: 'Doe' }],
+        ticket_coupons: [
+          {
+            flight_id: 'f1',
+            flight_number: 'VN101',
+            inventory_id: 'inv1',
+            cabin_class: 'ECONOMY',
+          },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T07:00:00Z'),
+      });
+
+      // Successful mail send
+      await service.cancelExpiredBlockStrict(mockBooking);
+
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking.cancellation_number).toBeDefined();
+      expect(mailService.sendExpiredHoldCancellationEmail).toHaveBeenCalledTimes(1);
+      const [callData] = mailService.sendExpiredHoldCancellationEmail.mock.calls[0];
+      expect(callData.toEmail).toBe('passenger@example.com');
+      expect(callData.bookingReference).toBe('PNR-EXPIRED');
+      expect(callData.blockingNumber).toBe('BLK-EXP-1');
+
+      // Mail throwing error: cancellation remains saved, no rollback
+      mockBooking.status = BookingStatus.BLOCKED;
+      mailService.sendExpiredHoldCancellationEmail.mockRejectedValue(new Error('SMTP unreachable'));
+      await service.cancelExpiredBlockStrict(mockBooking);
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking.cancellation_number).toBeDefined();
+
+      // Mail returning false: cancellation remains saved, no rollback (Finding F6)
+      mockBooking.status = BookingStatus.BLOCKED;
+      mailService.sendExpiredHoldCancellationEmail.mockResolvedValue(false);
+      await service.cancelExpiredBlockStrict(mockBooking);
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking.cancellation_number).toBeDefined();
+    });
+
+    it('cancelExpiredBlockStrict formats holdDeadlineFormatted in origin timezone of earliest flight for multi-leg booking (Finding F2)', async () => {
+      const flightLater = {
+        flight_number: 'VN200',
+        origin_iata: 'NRT',
+        dest_iata: 'HAN',
+        scheduled_departure: new Date('2026-10-30T10:00:00.000Z'),
+      };
+      const flightEarlier = {
+        flight_number: 'VN100',
+        origin_iata: 'HAN',
+        dest_iata: 'NRT',
+        scheduled_departure: new Date('2026-10-28T01:00:00.000Z'),
+      };
+
+      flightsService.findById.mockImplementation((id: string) => {
+        if (id === 'f_later') return Promise.resolve(flightLater);
+        if (id === 'f_earlier') return Promise.resolve(flightEarlier);
+        return Promise.resolve(flightEarlier);
+      });
+
+      flightsService.getAirportTimeZone = jest.fn().mockImplementation((iata: string) => {
+        if (iata === 'NRT') return Promise.resolve('Asia/Tokyo');
+        if (iata === 'HAN') return Promise.resolve('Asia/Ho_Chi_Minh');
+        return Promise.resolve('UTC');
+      });
+
+      const mockBooking: any = {
+        _id: 'booking-expired-multileg',
+        pnr_code: 'PNR-EXP-MULTI',
+        blocking_number: 'BLK-EXP-MULTI',
+        user_id: new Types.ObjectId(),
+        status: BookingStatus.BLOCKED,
+        time_limit_deadline: new Date('2026-10-25T03:00:00.000Z'),
+        passengers: [{ first_name: 'Lan', last_name: 'Vu' }],
+        // Coupon 0 departs later (Tokyo), Coupon 1 departs earlier (Hanoi)
+        ticket_coupons: [
+          { flight_id: 'f_later', flight_number: 'VN200', inventory_id: 'inv2', cabin_class: 'ECONOMY' },
+          { flight_id: 'f_earlier', flight_number: 'VN100', inventory_id: 'inv1', cabin_class: 'ECONOMY' },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      mailService.sendExpiredHoldCancellationEmail.mockResolvedValue(true);
+
+      await service.cancelExpiredBlockStrict(mockBooking);
+
+      expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mailService.sendExpiredHoldCancellationEmail).toHaveBeenCalled();
+      const calls = mailService.sendExpiredHoldCancellationEmail.mock.calls;
+      const lastCall = calls[calls.length - 1][0];
+      // Deadline formatted in earliest leg's origin timezone (HAN -> Asia/Ho_Chi_Minh: UTC 03:00 + 7 = 10:00)
+      expect(lastCall.holdDeadlineFormatted).toContain('2026-10-25 10:00 (Asia/Ho_Chi_Minh)');
+      expect(lastCall.holdDeadlineFormatted).not.toContain('Asia/Tokyo');
+      // Primary leg shows earliest departing flight
+      expect(lastCall.flightNumber).toBe('VN100');
+    });
+  });
 });
+

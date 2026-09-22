@@ -11,6 +11,7 @@ import { SearchFlightDto } from './flights.dto';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 
 describe('FlightsService', () => {
   let service: FlightsService;
@@ -1534,6 +1535,712 @@ describe('FlightsService', () => {
       expect(res.dest_time_zone).toBeUndefined();
       expect(res.scheduled_departure_local).toBeUndefined();
       expect(res.scheduled_arrival_local).toBeUndefined();
+    });
+  });
+
+  describe('FlightsService - Email Lifecycle & Disruption', () => {
+    let lifecycleService: FlightsService;
+    let mockFlightModel: any;
+    let mockBookingModel: any;
+    let mockAirportsService: any;
+    let mockReferenceService: any;
+    let mockUsersService: any;
+    let mockMailService: any;
+
+    beforeEach(async () => {
+      mockFlightModel = {
+        findById: jest.fn(),
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn(),
+      };
+
+      mockBookingModel = {
+        find: jest.fn().mockReturnThis(),
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn(),
+      };
+
+      mockAirportsService = {
+        findByIata: jest.fn().mockImplementation((iata: string) => {
+          if (iata === 'HAN') return Promise.resolve({ iata_code: 'HAN', time_zone: 'Asia/Ho_Chi_Minh' });
+          if (iata === 'SGN') return Promise.resolve({ iata_code: 'SGN', time_zone: 'Asia/Ho_Chi_Minh' });
+          return Promise.resolve(null);
+        }),
+      };
+
+      mockReferenceService = {
+        expandLocation: jest.fn(),
+        findRouteNetworkConnections: jest.fn().mockResolvedValue([]),
+      };
+
+      mockUsersService = {
+        findById: jest.fn().mockImplementation((id: string) =>
+          Promise.resolve({
+            _id: id,
+            email: 'user@example.com',
+            first_name: 'Minh',
+            last_name: 'Tran',
+            sky_miles: 500,
+          }),
+        ),
+        deductSkyMiles: jest.fn().mockResolvedValue(true),
+        setSkyMiles: jest.fn().mockResolvedValue(true),
+      };
+
+      mockMailService = {
+        sendCancellationEmail: jest.fn().mockResolvedValue(true),
+        sendFlightDisruptionEmail: jest.fn().mockResolvedValue(true),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          FlightsService,
+          { provide: getModelToken(Flight.name), useValue: mockFlightModel },
+          { provide: getModelToken(Booking.name), useValue: mockBookingModel },
+          { provide: AirportsService, useValue: mockAirportsService },
+          { provide: ReferenceService, useValue: mockReferenceService },
+          { provide: UsersService, useValue: mockUsersService },
+          { provide: MailService, useValue: mockMailService },
+        ],
+      }).compile();
+
+      lifecycleService = module.get<FlightsService>(FlightsService);
+    });
+
+    it('cancelBookingsForFlight: CONFIRMED booking gets CNF in email, 100% refund, valid masked card', async () => {
+      const mockFlight: any = {
+        _id: 'flight-cancel-1',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        delay_reason: 'Technical engine issue',
+      };
+
+      const mockConfirmedBooking: any = {
+        _id: 'b-cnf',
+        pnr_code: 'PNR-EMG-CNF',
+        confirmation_number: 'CNF-EMG-111',
+        user_id: 'u1',
+        status: BookingStatus.CONFIRMED,
+        total_amount: 1500000,
+        total_miles_accrued: 75,
+        passengers: [{ first_name: 'Minh', last_name: 'Tran' }],
+        ticket_coupons: [
+          { flight_id: 'flight-cancel-1', flight_number: 'VN101', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [
+          { transaction_type: 'PAYMENT', status: 'SUCCESS', card_masked: '**** **** **** 9999' },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([mockConfirmedBooking]),
+      });
+
+      jest.spyOn(lifecycleService as any, 'updateAvailableSeats').mockResolvedValue(true);
+
+      const count = await lifecycleService.cancelBookingsForFlight(mockFlight);
+
+      expect(count).toBe(1);
+      expect(mockConfirmedBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockMailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendCancellationEmail.mock.calls[0];
+      expect(emailData.toEmail).toBe('user@example.com');
+      expect(emailData.cancellationType).toBe('EMERGENCY_FLIGHT_CANCELLED');
+      expect(emailData.confirmationNumber).toBe('CNF-EMG-111');
+      expect(emailData.blockingNumber).toBeUndefined();
+      expect(emailData.refundAmount).toBe(1500000);
+      expect(emailData.refundPercentage).toBe(100);
+      expect(emailData.maskedCard).toBe('**** **** **** 9999');
+      expect(emailData.flightNumber).toBe('VN101');
+      expect(emailData.reason).toBe('Technical engine issue');
+    });
+
+    it('cancelBookingsForFlight: BLOCKED booking gets BLK in email, 0 refund, no masked card', async () => {
+      const mockFlight: any = {
+        _id: 'flight-cancel-2',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        delay_reason: 'Operational schedule cancellation',
+      };
+
+      const mockBlockedBooking: any = {
+        _id: 'b-blk',
+        pnr_code: 'PNR-EMG-BLK',
+        blocking_number: 'BLK-EMG-222',
+        user_id: 'u1',
+        status: BookingStatus.BLOCKED,
+        total_amount: 1500000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Minh', last_name: 'Tran' }],
+        ticket_coupons: [
+          { flight_id: 'flight-cancel-2', flight_number: 'VN101', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([mockBlockedBooking]),
+      });
+
+      jest.spyOn(lifecycleService as any, 'updateAvailableSeats').mockResolvedValue(true);
+
+      const count = await lifecycleService.cancelBookingsForFlight(mockFlight);
+
+      expect(count).toBe(1);
+      expect(mockBlockedBooking.status).toBe(BookingStatus.CANCELLED);
+      expect(mockMailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendCancellationEmail.mock.calls[0];
+      expect(emailData.toEmail).toBe('user@example.com');
+      expect(emailData.cancellationType).toBe('EMERGENCY_FLIGHT_CANCELLED');
+      expect(emailData.blockingNumber).toBe('BLK-EMG-222');
+      expect(emailData.confirmationNumber).toBeUndefined();
+      expect(emailData.refundAmount).toBe(0);
+      expect(emailData.refundPercentage).toBeUndefined();
+      expect(emailData.maskedCard).toBeUndefined();
+    });
+
+    it('cancelBookingsForFlight: core cancellation fails before commit -> NO email sent', async () => {
+      const mockFlight: any = {
+        _id: 'flight-cancel-fail',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+      };
+
+      const mockBooking: any = {
+        _id: 'b-core-fail',
+        pnr_code: 'PNR-FAIL-COMMIT',
+        user_id: 'u1',
+        status: BookingStatus.CONFIRMED,
+        total_amount: 1000000,
+        total_miles_accrued: 50,
+        ticket_coupons: [
+          { flight_id: 'flight-cancel-fail', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [{ transaction_type: 'PAYMENT', status: 'SUCCESS' }],
+        save: jest.fn().mockRejectedValue(new Error('Database write error before commit')),
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([mockBooking]),
+      });
+      jest.spyOn(lifecycleService as any, 'updateAvailableSeats').mockResolvedValue(true);
+
+      const count = await lifecycleService.cancelBookingsForFlight(mockFlight);
+
+      expect(count).toBe(0);
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockMailService.sendCancellationEmail).not.toHaveBeenCalled();
+    });
+
+    it('cancelBookingsForFlight: mailService throws or returns false -> booking remains CANCELLED, count increments, no rollback', async () => {
+      const mockFlight: any = {
+        _id: 'flight-cancel-iso',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+      };
+
+      const mockBooking1: any = {
+        _id: 'b-mail-throw',
+        pnr_code: 'PNR-MAIL-THROW',
+        user_id: 'u1',
+        status: BookingStatus.BLOCKED,
+        total_amount: 1500000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Minh', last_name: 'Tran' }],
+        ticket_coupons: [
+          { flight_id: 'flight-cancel-iso', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      const mockBooking2: any = {
+        _id: 'b-mail-false',
+        pnr_code: 'PNR-MAIL-FALSE',
+        user_id: 'u1',
+        status: BookingStatus.BLOCKED,
+        total_amount: 1200000,
+        total_miles_accrued: 0,
+        passengers: [{ first_name: 'Minh', last_name: 'Tran' }],
+        ticket_coupons: [
+          { flight_id: 'flight-cancel-iso', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([mockBooking1, mockBooking2]),
+      });
+      jest.spyOn(lifecycleService as any, 'updateAvailableSeats').mockResolvedValue(true);
+
+      // First call throws, second returns false
+      mockMailService.sendCancellationEmail
+        .mockRejectedValueOnce(new Error('SMTP connection timed out'))
+        .mockResolvedValueOnce(false);
+
+      const count = await lifecycleService.cancelBookingsForFlight(mockFlight);
+
+      expect(count).toBe(2);
+      expect(mockBooking1.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking1.save).toHaveBeenCalled();
+      expect(mockBooking2.status).toBe(BookingStatus.CANCELLED);
+      expect(mockBooking2.save).toHaveBeenCalled();
+    });
+
+    it('cancelBookingsForFlight: multi-leg itinerary with same flight_number prefers flight_id when marking isAffected (Finding F3)', async () => {
+      const mockAffectedFlight: any = {
+        _id: 'flight-affected-1',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'DAD',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T09:30:00Z'),
+        delay_reason: 'Aircraft grounded for maintenance',
+      };
+
+      const mockOtherFlight: any = {
+        _id: 'flight-other-2',
+        flight_number: 'VN101',
+        origin_iata: 'DAD',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T12:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T13:30:00Z'),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockImplementation((id: string) => {
+        if (id === 'flight-affected-1') return Promise.resolve(mockAffectedFlight);
+        if (id === 'flight-other-2') return Promise.resolve(mockOtherFlight);
+        return Promise.resolve(mockAffectedFlight);
+      });
+
+      const mockBooking: any = {
+        _id: 'b-f3-test',
+        pnr_code: 'PNR-F3-TEST',
+        confirmation_number: 'CNF-F3-TEST',
+        user_id: 'u1',
+        status: BookingStatus.CONFIRMED,
+        total_amount: 2000000,
+        total_miles_accrued: 100,
+        passengers: [{ first_name: 'Minh', last_name: 'Tran' }],
+        // Both coupons have the SAME flight_number 'VN101' but DIFFERENT flight_id
+        ticket_coupons: [
+          { flight_id: 'flight-affected-1', flight_number: 'VN101', inventory_id: 'inv1', coupon_status: 'ACTIVE' },
+          { flight_id: 'flight-other-2', flight_number: 'VN101', inventory_id: 'inv2', coupon_status: 'ACTIVE' },
+        ],
+        payment_transactions: [{ transaction_type: 'PAYMENT', status: 'SUCCESS', card_masked: '**** **** **** 1234' }],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([mockBooking]),
+      });
+      jest.spyOn(lifecycleService as any, 'updateAvailableSeats').mockResolvedValue(true);
+
+      const count = await lifecycleService.cancelBookingsForFlight(mockAffectedFlight);
+
+      expect(count).toBe(1);
+      expect(mockMailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendCancellationEmail.mock.calls[0];
+      expect(emailData.itinerary).toBeDefined();
+      expect(emailData.itinerary.length).toBe(2);
+
+      // Leg 0 matches flight_id 'flight-affected-1' -> isAffected: true
+      expect(emailData.itinerary[0].flightNumber).toBe('VN101');
+      expect(emailData.itinerary[0].origin).toBe('HAN');
+      expect(emailData.itinerary[0].isAffected).toBe(true);
+
+      // Leg 1 has different flight_id 'flight-other-2' -> isAffected: false (even though flight_number matches)
+      expect(emailData.itinerary[1].flightNumber).toBe('VN101');
+      expect(emailData.itinerary[1].origin).toBe('DAD');
+      expect(emailData.itinerary[1].isAffected).toBe(false);
+    });
+
+    it('update() with ISO string scheduled_departure / scheduled_arrival succeeds without signature mismatch', async () => {
+      const existingFlight: any = {
+        _id: 'f-iso-1',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-active-iso',
+        pnr_code: 'PNR-ACTIVE-ISO',
+        user_id: { email: 'user@example.com', first_name: 'Minh', last_name: 'Tran' },
+        ticket_coupons: [{ flight_id: 'f-iso-1' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      // Update passes ISO strings (Finding 3 and 7)
+      const updated = await lifecycleService.update('f-iso-1', {
+        scheduled_departure: '2026-10-28T09:30:00Z',
+        scheduled_arrival: '2026-10-28T11:30:00Z',
+      });
+
+      expect(updated).toBeDefined();
+      expect(updated.scheduled_departure).toEqual(new Date('2026-10-28T09:30:00Z'));
+      expect(updated.scheduled_arrival).toEqual(new Date('2026-10-28T11:30:00Z'));
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendFlightDisruptionEmail.mock.calls[0];
+      expect(emailData.toEmail).toBe('user@example.com');
+      expect(emailData.disruptionType).toBe('SCHEDULE_CHANGE');
+    });
+
+    it('disruption notifications: departure time change triggers SCHEDULE_CHANGE', async () => {
+      const existingFlight: any = {
+        _id: 'f-dep-shift',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-dep',
+        pnr_code: 'PNR-DEP',
+        user_id: { email: 'dep@example.com', first_name: 'A', last_name: 'B' },
+        ticket_coupons: [{ flight_id: 'f-dep-shift' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      await lifecycleService.update('f-dep-shift', {
+        scheduled_departure: '2026-10-28T09:00:00Z',
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      expect(mockMailService.sendFlightDisruptionEmail.mock.calls[0][0].disruptionType).toBe('SCHEDULE_CHANGE');
+    });
+
+    it('disruption notifications: arrival time change triggers SCHEDULE_CHANGE', async () => {
+      const existingFlight: any = {
+        _id: 'f-arr-shift',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-arr',
+        pnr_code: 'PNR-ARR',
+        user_id: { email: 'arr@example.com', first_name: 'A', last_name: 'B' },
+        ticket_coupons: [{ flight_id: 'f-arr-shift' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      await lifecycleService.update('f-arr-shift', {
+        scheduled_arrival: '2026-10-28T11:00:00Z',
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      expect(mockMailService.sendFlightDisruptionEmail.mock.calls[0][0].disruptionType).toBe('SCHEDULE_CHANGE');
+    });
+
+    it('disruption notifications: no customer-facing change -> NO disruption email', async () => {
+      const existingFlight: any = {
+        _id: 'f-no-change',
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        distance_miles: 700,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([]),
+        }),
+      });
+
+      await lifecycleService.update('f-no-change', {
+        distance_miles: 720,
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).not.toHaveBeenCalled();
+    });
+
+    it('disruption notifications: SCHEDULED -> DELAYED sends disruption email', async () => {
+      const existingFlight: any = {
+        _id: 'f-delay-1',
+        flight_number: 'VN102',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        delay_reason: '',
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-delay-1',
+        pnr_code: 'PNR-DELAY-1',
+        user_id: { email: 'delay@example.com', first_name: 'An', last_name: 'Nguyen' },
+        ticket_coupons: [{ flight_id: 'f-delay-1' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      await lifecycleService.updateStatus('f-delay-1', {
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Late arrival of inbound aircraft',
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendFlightDisruptionEmail.mock.calls[0];
+      expect(emailData.disruptionType).toBe('DELAY');
+      expect(emailData.statusText).toBe(FlightStatus.DELAYED);
+      expect(emailData.delayReason).toBe('Late arrival of inbound aircraft');
+    });
+
+    it('disruption notifications: delay reason changes while DELAYED sends disruption email', async () => {
+      const existingFlight: any = {
+        _id: 'f-delay-2',
+        flight_number: 'VN102',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Weather warning',
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-delay-2',
+        pnr_code: 'PNR-DELAY-2',
+        user_id: { email: 'delay2@example.com', first_name: 'Binh', last_name: 'Le' },
+        ticket_coupons: [{ flight_id: 'f-delay-2' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      await lifecycleService.updateStatus('f-delay-2', {
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Extended weather hold',
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendFlightDisruptionEmail.mock.calls[0];
+      expect(emailData.delayReason).toBe('Extended weather hold');
+    });
+
+    it('disruption notifications: DELAYED -> SCHEDULED recovery sends recovery disruption email', async () => {
+      const existingFlight: any = {
+        _id: 'f-recovery',
+        flight_number: 'VN102',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Previous delay',
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-recovery',
+        pnr_code: 'PNR-RECOVERY',
+        user_id: { email: 'recovery@example.com', first_name: 'Chi', last_name: 'Do' },
+        ticket_coupons: [{ flight_id: 'f-recovery' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      await lifecycleService.updateStatus('f-recovery', {
+        status: FlightStatus.SCHEDULED,
+      });
+
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendFlightDisruptionEmail.mock.calls[0];
+      expect(emailData.disruptionType).toBe('RECOVERY');
+      expect(emailData.statusText).toBe(FlightStatus.SCHEDULED);
+      // Finding F5: delay_reason cleared from flight and undefined in recovery email
+      expect(existingFlight.delay_reason).toBe('');
+      expect(emailData.delayReason).toBeUndefined();
+    });
+
+    it('disruption notifications: CANCELLED suppresses generic disruption notification', async () => {
+      const existingFlight: any = {
+        _id: 'f-cancel-suppress',
+        flight_number: 'VN102',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+      jest.spyOn(lifecycleService, 'cancelBookingsForFlight').mockResolvedValue(1);
+
+      await lifecycleService.updateStatus('f-cancel-suppress', {
+        status: FlightStatus.CANCELLED,
+      });
+
+      expect(lifecycleService.cancelBookingsForFlight).toHaveBeenCalled();
+      expect(mockMailService.sendFlightDisruptionEmail).not.toHaveBeenCalled();
+    });
+
+    it('disruption notifications: mail service failure (throw or false) -> flight update still succeeds (Finding F6)', async () => {
+      const existingFlight: any = {
+        _id: 'f-mail-fail',
+        flight_number: 'VN102',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.SCHEDULED,
+        save: jest.fn().mockImplementation(function() { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-mail-fail',
+        pnr_code: 'PNR-MAIL-FAIL',
+        user_id: { email: 'fail@example.com', first_name: 'D', last_name: 'E' },
+        ticket_coupons: [{ flight_id: 'f-mail-fail' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      // Case A: mailService throws
+      mockMailService.sendFlightDisruptionEmail.mockRejectedValue(new Error('SMTP down'));
+
+      const result = await lifecycleService.updateStatus('f-mail-fail', {
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Weather',
+      });
+
+      expect(result).toBeDefined();
+      expect(result.status).toBe(FlightStatus.DELAYED);
+
+      // Case B: mailService returns false (Finding F6)
+      mockMailService.sendFlightDisruptionEmail.mockResolvedValue(false);
+
+      const resultFalse = await lifecycleService.updateStatus('f-mail-fail', {
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Technical',
+      });
+
+      expect(resultFalse).toBeDefined();
+      expect(resultFalse.status).toBe(FlightStatus.DELAYED);
+    });
+
+    it('PUT update() transitioning DELAYED -> SCHEDULED clears delay_reason and ignores stale supplied delay_reason (R4-3)', async () => {
+      const existingFlight: any = {
+        _id: 'f-put-recovery',
+        flight_number: 'VN105',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: new Date('2026-10-28T08:00:00Z'),
+        scheduled_arrival: new Date('2026-10-28T10:00:00Z'),
+        status: FlightStatus.DELAYED,
+        delay_reason: 'Weather',
+        save: jest.fn().mockImplementation(function () { return Promise.resolve(this); }),
+      };
+
+      jest.spyOn(lifecycleService, 'findById').mockResolvedValue(existingFlight);
+
+      const activeBooking: any = {
+        _id: 'b-put-recovery',
+        pnr_code: 'PNR-PUT-REC',
+        user_id: { email: 'recovery@example.com', first_name: 'Lan', last_name: 'Pham' },
+        ticket_coupons: [{ flight_id: 'f-put-recovery' }],
+      };
+
+      mockBookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([activeBooking]),
+        }),
+      });
+
+      const updated = await lifecycleService.update('f-put-recovery', {
+        status: FlightStatus.SCHEDULED,
+        delay_reason: 'Weather',
+      });
+
+      expect(updated).toBeDefined();
+      expect(updated.status).toBe(FlightStatus.SCHEDULED);
+      expect(updated.delay_reason).toBe('');
+      expect(mockMailService.sendFlightDisruptionEmail).toHaveBeenCalledTimes(1);
+      const [emailData] = mockMailService.sendFlightDisruptionEmail.mock.calls[0];
+      expect(emailData.disruptionType).toBe('RECOVERY');
+      expect(emailData.statusText).toBe(FlightStatus.SCHEDULED);
+      expect(emailData.delayReason).toBeUndefined();
     });
   });
 });

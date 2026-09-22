@@ -30,6 +30,7 @@ import { UserRole } from '../users/users.schema';
 import { PoliciesService } from '../policies/policies.service';
 import { applyPricing, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
 import { formatLocalTime } from '../common/timezone.util';
+import { MailService, ItineraryLegData } from '../mail/mail.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
   BookingSeatSagaOperation,
@@ -66,6 +67,7 @@ export class BookingsService {
     @Optional()
     @InjectModel(BookingSeatSagaOperation.name)
     private readonly sagaModel?: Model<BookingSeatSagaOperationDocument>,
+    @Optional() private readonly mailService?: MailService,
   ) {}
 
   private generateCode(prefix: string): string {
@@ -3057,6 +3059,56 @@ export class BookingsService {
     return flights;
   }
 
+  private async buildItineraryLegs(ticketCoupons: any[]): Promise<ItineraryLegData[]> {
+    const legs: ItineraryLegData[] = [];
+    const seen = new Set<string>();
+
+    for (const coupon of ticketCoupons || []) {
+      if (!coupon.flight_id) continue;
+      const key = `${coupon.flight_number || ''}_${coupon.flight_id.toString()}_${coupon.inventory_id || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      try {
+        const flight = await this.flightsService.findById(coupon.flight_id.toString());
+        const originTz = await this.flightsService.getAirportTimeZone(flight.origin_iata);
+        const destTz = await this.flightsService.getAirportTimeZone(flight.dest_iata);
+
+        const depLocal = formatLocalTime(flight.scheduled_departure, originTz);
+        const arrLocal = formatLocalTime(flight.scheduled_arrival, destTz);
+
+        const depStr = depLocal
+          ? `${depLocal} (${originTz || 'UTC'})`
+          : `${new Date(flight.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+        const arrStr = arrLocal
+          ? `${arrLocal} (${destTz || 'UTC'})`
+          : (flight.scheduled_arrival
+              ? `${new Date(flight.scheduled_arrival).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`
+              : undefined);
+
+        legs.push({
+          flightNumber: flight.flight_number,
+          origin: flight.origin_iata,
+          destination: flight.dest_iata,
+          cabinClass: coupon.cabin_class,
+          departureTimeFormatted: depStr,
+          arrivalTimeFormatted: arrStr,
+        });
+      } catch (err) {
+        if (coupon.flight_number) {
+          legs.push({
+            flightNumber: coupon.flight_number,
+            origin: 'UNKNOWN',
+            destination: 'UNKNOWN',
+            cabinClass: coupon.cabin_class,
+            departureTimeFormatted: 'Schedule unresolvable',
+          });
+        }
+      }
+    }
+    return legs;
+  }
+
   async cancelExpiredBlockStrict(booking: BookingDocument): Promise<void> {
     const originalStatus = booking.status;
     const originalCancelNum = booking.cancellation_number;
@@ -3084,6 +3136,79 @@ export class BookingsService {
       booking.status = originalStatus;
       booking.cancellation_number = originalCancelNum;
       throw saveError;
+    }
+
+    if (this.mailService) {
+      try {
+        const user = await this.usersService.findById(booking.user_id.toString());
+        if (user?.email) {
+          const passengerName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Customer';
+          const itinerary = await this.buildItineraryLegs(booking.ticket_coupons);
+          const firstLeg = itinerary[0];
+
+          // Finding F2: Find the actual earliest departure leg to resolve its origin timezone
+          let earliestFlight: any = null;
+          let minDepTime = Infinity;
+          for (const coupon of booking.ticket_coupons || []) {
+            if (!coupon.flight_id) continue;
+            try {
+              const flight = await this.flightsService.findById(coupon.flight_id.toString());
+              const depTime = new Date(flight.scheduled_departure).getTime();
+              if (depTime < minDepTime) {
+                minDepTime = depTime;
+                earliestFlight = flight;
+              }
+            } catch (_) {}
+          }
+
+          let originTz: string | undefined;
+          if (earliestFlight?.origin_iata) {
+            originTz = await this.flightsService.getAirportTimeZone(earliestFlight.origin_iata);
+          } else if (firstLeg?.origin && firstLeg.origin !== 'UNKNOWN') {
+            originTz = await this.flightsService.getAirportTimeZone(firstLeg.origin);
+          }
+
+          let holdDeadlineFormatted = '-';
+          if (booking.time_limit_deadline) {
+            const localDeadline = formatLocalTime(new Date(booking.time_limit_deadline), originTz);
+            holdDeadlineFormatted = localDeadline
+              ? `${localDeadline} (${originTz || 'UTC'})`
+              : `${new Date(booking.time_limit_deadline).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+          }
+
+          const primaryLeg = earliestFlight ? {
+            flightNumber: earliestFlight.flight_number,
+            origin: earliestFlight.origin_iata,
+            destination: earliestFlight.dest_iata,
+            departureTimeFormatted: formatLocalTime(earliestFlight.scheduled_departure, originTz)
+              ? `${formatLocalTime(earliestFlight.scheduled_departure, originTz)} (${originTz || 'UTC'})`
+              : undefined,
+          } : firstLeg;
+
+          const sent = await this.mailService.sendExpiredHoldCancellationEmail({
+            toEmail: user.email,
+            passengerName,
+            bookingReference: booking.pnr_code,
+            blockingNumber: booking.blocking_number,
+            cancellationNumber: booking.cancellation_number!,
+            holdDeadlineFormatted,
+            flightNumber: primaryLeg?.flightNumber,
+            origin: primaryLeg?.origin,
+            destination: primaryLeg?.destination,
+            departureTimeFormatted: primaryLeg?.departureTimeFormatted,
+            itinerary,
+          });
+          if (!sent) {
+            this.logger.warn(
+              `Expired hold cancellation email delivery returned false for booking ${booking.pnr_code} (${user.email}); booking remains cancelled.`,
+            );
+          }
+        }
+      } catch (mailErr: any) {
+        this.logger.error(
+          `Failed to send expired hold cancellation email for booking ${booking.pnr_code}: ${mailErr?.message || mailErr}`,
+        );
+      }
     }
   }
 
@@ -3437,6 +3562,7 @@ export class BookingsService {
     };
 
     const cancellationNumber = this.generateCode('CAN');
+    const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
     let seatsReleased = false;
     let skyMilesAdjusted = false;
 
@@ -3472,6 +3598,47 @@ export class BookingsService {
       await booking.save();
       if (this.seatAllocationService) {
         await this.seatAllocationService.releaseAllocations(booking._id).catch(() => {});
+      }
+
+      if (this.mailService) {
+        try {
+          const user = await this.usersService.findById(booking.user_id.toString());
+          if (user?.email) {
+            const passengerName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Customer';
+            const itinerary = await this.buildItineraryLegs(booking.ticket_coupons);
+            const firstLeg = itinerary[0];
+
+            const sent = await this.mailService.sendCancellationEmail({
+              toEmail: user.email,
+              passengerName,
+              bookingReference: booking.pnr_code,
+              blockingNumber: booking.blocking_number,
+              confirmationNumber: booking.confirmation_number,
+              cancellationNumber,
+              cancellationType: wasConfirmed ? 'MANUAL_CONFIRMED' : 'MANUAL_BLOCKED',
+              originalBookingStatus: wasConfirmed ? 'CONFIRMED' : 'BLOCKED',
+              flightNumber: firstLeg?.flightNumber,
+              origin: firstLeg?.origin,
+              destination: firstLeg?.destination,
+              departureTimeFormatted: firstLeg?.departureTimeFormatted,
+              itinerary,
+              refundAmount: wasConfirmed ? refundAmount : 0,
+              refundPercentage: wasConfirmed ? refundPercentage : 0,
+              currency: 'VND',
+              maskedCard: wasConfirmed ? refundCardMasked : undefined,
+              policyDeduction: wasConfirmed ? (100 - refundPercentage) : undefined,
+            });
+            if (!sent) {
+              this.logger.warn(
+                `Cancellation email delivery returned false for booking ${booking.pnr_code} (${user.email}); transaction remains successfully cancelled.`,
+              );
+            }
+          }
+        } catch (mailErr: any) {
+          this.logger.error(
+            `Failed to send cancellation email for booking ${booking.pnr_code}: ${mailErr?.message || mailErr}`,
+          );
+        }
       }
 
       const message = `Ticket successfully cancelled. Cancellation number: ${cancellationNumber}. Refund: ${refundAmount.toLocaleString('vi-VN')} VND (${refundPercentage}%).`;

@@ -33,6 +33,7 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
         dest_iata: 'SGN',
         scheduled_departure: departureDate,
       }),
+      getAirportTimeZone: jest.fn().mockResolvedValue('Asia/Ho_Chi_Minh'),
     };
 
     mailService = {
@@ -149,5 +150,126 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
     // Second booking succeeded: marked reminded and saved
     expect(succeedingBooking.is_reminder_sent).toBe(true);
     expect(succeedingBooking.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('Case 4: reminder email formats departure in origin airport-local timezone without host-OS skew', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-20T00:00:00.000Z'));
+    try {
+      const fixedUtcDeparture = new Date('2026-10-28T01:00:00.000Z');
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'VN101',
+        origin_iata: 'HAN',
+        dest_iata: 'SGN',
+        scheduled_departure: fixedUtcDeparture,
+      });
+      flightsService.getAirportTimeZone.mockResolvedValue('Asia/Ho_Chi_Minh');
+      bookingsService.getEarliestDeparture.mockResolvedValue(fixedUtcDeparture);
+
+      const mockBooking: any = {
+        pnr_code: 'PNR-TZ-TEST',
+        blocking_number: 'BLK-999',
+        status: BookingStatus.BLOCKED,
+        is_reminder_sent: false,
+        user_id: { email: 'passenger@example.com', first_name: '<John>', last_name: 'Doe' },
+        ticket_coupons: [{ flight_id: 'f1', flight_number: 'VN101', inventory_id: 'inv1', cabin_class: 'BUSINESS' }],
+        time_limit_deadline: new Date('2026-10-25T00:00:00.000Z'),
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([mockBooking]),
+        }),
+      });
+
+      mailService.sendBlockedTicketReminder.mockResolvedValue(true);
+
+      const sentCount = await scheduler.sendPendingReminders();
+
+      expect(sentCount).toBe(1);
+      expect(mailService.sendBlockedTicketReminder).toHaveBeenCalledTimes(1);
+      const [toEmail, body] = mailService.sendBlockedTicketReminder.mock.calls[0];
+      expect(toEmail).toBe('passenger@example.com');
+      // Verifies airport-local timezone is resolved and formatted deterministically (UTC 01:00 -> ICT 08:00)
+      expect(body).toContain('2026-10-28 08:00');
+      expect(body).toContain('(Asia/Ho_Chi_Minh)');
+      // Verifies HTML escaping on passenger name
+      expect(body).toContain('&lt;John&gt; Doe');
+      expect(body).not.toContain('<John>');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('Case 5: Multi-leg booking with non-chronological coupons resolves earliest departing leg origin timezone for reminder and deadline (Finding F2)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-20T00:00:00.000Z'));
+    try {
+      const flightLater = {
+        flight_number: 'VN200',
+        origin_iata: 'NRT',
+        dest_iata: 'HAN',
+        scheduled_departure: new Date('2026-10-30T10:00:00.000Z'),
+      };
+      const flightEarlier = {
+        flight_number: 'VN100',
+        origin_iata: 'HAN',
+        dest_iata: 'NRT',
+        scheduled_departure: new Date('2026-10-28T01:00:00.000Z'),
+      };
+
+      flightsService.findById.mockImplementation((id: string) => {
+        if (id === 'f_later') return Promise.resolve(flightLater);
+        if (id === 'f_earlier') return Promise.resolve(flightEarlier);
+        return Promise.resolve(flightEarlier);
+      });
+
+      flightsService.getAirportTimeZone.mockImplementation((iata: string) => {
+        if (iata === 'NRT') return Promise.resolve('Asia/Tokyo');
+        if (iata === 'HAN') return Promise.resolve('Asia/Ho_Chi_Minh');
+        return Promise.resolve('UTC');
+      });
+
+      bookingsService.getEarliestDeparture.mockResolvedValue(new Date('2026-10-28T01:00:00.000Z'));
+
+      // Coupon 0 is the LATER flight (Tokyo), Coupon 1 is the EARLIER flight (Hanoi)
+      const mockBooking: any = {
+        pnr_code: 'PNR-MULTI-TZ',
+        blocking_number: 'BLK-MULTI',
+        status: BookingStatus.BLOCKED,
+        is_reminder_sent: false,
+        user_id: { email: 'multileg@example.com', first_name: 'Lan', last_name: 'Vu' },
+        ticket_coupons: [
+          { flight_id: 'f_later', flight_number: 'VN200', inventory_id: 'inv2', cabin_class: 'ECONOMY' },
+          { flight_id: 'f_earlier', flight_number: 'VN100', inventory_id: 'inv1', cabin_class: 'ECONOMY' },
+        ],
+        time_limit_deadline: new Date('2026-10-25T03:00:00.000Z'),
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      bookingModel.find.mockReturnValue({
+        populate: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([mockBooking]),
+        }),
+      });
+
+      mailService.sendBlockedTicketReminder.mockResolvedValue(true);
+
+      const sentCount = await scheduler.sendPendingReminders();
+
+      expect(sentCount).toBe(1);
+      expect(mailService.sendBlockedTicketReminder).toHaveBeenCalledTimes(1);
+      const [toEmail, body] = mailService.sendBlockedTicketReminder.mock.calls[0];
+      expect(toEmail).toBe('multileg@example.com');
+      // Origin timezone of earliest physical flight (HAN -> Asia/Ho_Chi_Minh, UTC 01:00 -> 08:00)
+      expect(body).toContain('2026-10-28 08:00');
+      expect(body).toContain('(Asia/Ho_Chi_Minh)');
+      // Hold deadline formatted in earliest flight's origin timezone (UTC 03:00 + 7 = 10:00)
+      expect(body).toContain('<strong>Payment deadline:</strong> 2026-10-25 10:00 (Asia/Ho_Chi_Minh)');
+      expect(body).not.toContain('<strong>Payment deadline:</strong> 2026-10-25 12:00 (Asia/Tokyo)');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

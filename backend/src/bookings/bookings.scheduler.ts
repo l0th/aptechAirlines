@@ -5,7 +5,8 @@ import { Model } from 'mongoose';
 import { Booking, BookingDocument, BookingStatus } from './bookings.schema';
 import { BookingsService } from './bookings.service';
 import { FlightsService } from '../flights/flights.service';
-import { MailService } from '../mail/mail.service';
+import { MailService, escapeHtml } from '../mail/mail.service';
+import { formatLocalTime } from '../common/timezone.util';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
   BookingSeatSagaOperation,
@@ -143,31 +144,57 @@ export class BookingsScheduler {
     // Gather the distinct flight legs for the email
     const lines: string[] = [];
     const seen = new Set<string>();
+    let earliestLegOriginTz: string | undefined;
+    let minDepTime = Infinity;
+
     for (const coupon of booking.ticket_coupons) {
       const key = `${coupon.flight_number}_${coupon.inventory_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
       try {
         const flight = await this.flightsService.findById(coupon.flight_id.toString());
+        const originTz = await this.flightsService.getAirportTimeZone(flight.origin_iata);
+        const depTime = new Date(flight.scheduled_departure).getTime();
+        if (depTime < minDepTime) {
+          minDepTime = depTime;
+          earliestLegOriginTz = originTz;
+        }
+        const localDep = formatLocalTime(flight.scheduled_departure, originTz);
+        const depStr = localDep
+          ? `${localDep} (${originTz})`
+          : `${new Date(flight.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
         lines.push(
-          `<li>Flight ${flight.flight_number}: ${flight.origin_iata} → ${flight.dest_iata}, ` +
-            `departing ${new Date(flight.scheduled_departure).toLocaleString()} (${coupon.cabin_class})</li>`,
+          `<li>Flight ${escapeHtml(flight.flight_number)}: ${escapeHtml(flight.origin_iata)} → ${escapeHtml(flight.dest_iata)}, ` +
+            `departing ${escapeHtml(depStr)} (${escapeHtml(coupon.cabin_class)})</li>`,
         );
       } catch (e) {
-        lines.push(`<li>Flight ${coupon.flight_number} (${coupon.cabin_class})</li>`);
+        lines.push(`<li>Flight ${escapeHtml(coupon.flight_number)} (${escapeHtml(coupon.cabin_class)})</li>`);
       }
     }
 
     const passengerName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'Customer';
 
+    const localEarliest = formatLocalTime(earliestDeparture, earliestLegOriginTz);
+    const earliestStr = localEarliest
+      ? `${localEarliest} (${earliestLegOriginTz})`
+      : `${earliestDeparture.toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+
+    let deadlineStr = '-';
+    if (booking.time_limit_deadline) {
+      const localDeadline = formatLocalTime(new Date(booking.time_limit_deadline), earliestLegOriginTz);
+      deadlineStr = localDeadline
+        ? `${localDeadline} (${earliestLegOriginTz})`
+        : `${new Date(booking.time_limit_deadline).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
+    }
+
     return `
       <h2>Blocked Ticket Reminder</h2>
-      <p>Dear ${passengerName},</p>
+      <p>Dear ${escapeHtml(passengerName)},</p>
       <p>This is a reminder that you have a <strong>blocked (unpaid) ticket</strong> with departure on
-      <strong>${earliestDeparture.toLocaleString()}</strong> — 3 weeks or less away.</p>
-      <p><strong>Booking reference (PNR):</strong> ${booking.pnr_code}<br/>
-      <strong>Blocking number:</strong> ${booking.blocking_number || '-'}<br/>
-      <strong>Payment deadline:</strong> ${booking.time_limit_deadline ? new Date(booking.time_limit_deadline).toLocaleString() : '-'}</p>
+      <strong>${escapeHtml(earliestStr)}</strong> — 3 weeks or less away.</p>
+      <p><strong>Booking reference (PNR):</strong> ${escapeHtml(booking.pnr_code)}<br/>
+      <strong>Blocking number:</strong> ${escapeHtml(booking.blocking_number || '-')}<br/>
+      <strong>Payment deadline:</strong> ${escapeHtml(deadlineStr)}</p>
       <p>Your itinerary:</p>
       <ul>${lines.join('')}</ul>
       <p>Please confirm your ticket before the payment deadline. If you do not confirm in time,

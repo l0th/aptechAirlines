@@ -14,6 +14,7 @@ import { FlightGeneratorService } from './flight-generator.service';
 import { FlightsScheduler } from './flights.scheduler';
 import { AirlabsCommercialService } from './airlabs-commercial.service';
 import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module'
     ReferenceModule,
     UsersModule,
     SeatAllocationModule,
+    MailModule,
   ],
   controllers: [FlightsController],
   providers: [
