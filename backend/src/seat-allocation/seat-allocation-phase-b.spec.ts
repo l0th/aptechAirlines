@@ -5,7 +5,7 @@ import { ServiceUnavailableException, BadRequestException, InternalServerErrorEx
 import { FlightsService } from '../flights/flights.service';
 import { Flight, FlightDocument } from '../flights/flights.schema';
 import { BookingsService } from '../bookings/bookings.service';
-import { Booking, BookingDocument, BookingStatus, PassengerType } from '../bookings/bookings.schema';
+import { Booking, BookingDocument, BookingStatus, PassengerType, PaymentMethod } from '../bookings/bookings.schema';
 import { BookingsScheduler } from '../bookings/bookings.scheduler';
 import { SeatAllocationService } from './seat-allocation.service';
 import {
@@ -196,6 +196,7 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
       passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'John', last_name: 'Doe' }],
       legs: [{ flight_id: flightId.toString(), inventory_id: invId, leg_type: 'OUTBOUND' }],
       is_block: false,
+      payment_method: PaymentMethod.PROFILE_CARD,
     };
 
     await bookingsService.createBooking(createDto);
@@ -437,6 +438,7 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
       passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'Alice', last_name: 'Smith' }],
       legs: [{ flight_id: flightId.toString(), inventory_id: invId, leg_type: 'OUTBOUND' }],
       is_block: false,
+      payment_method: PaymentMethod.PROFILE_CARD,
     };
 
     // createBooking should succeed in booking creation, but saga state must NOT be COMPLETED
@@ -744,6 +746,7 @@ describe('Phase B Acceptance Blockers & SAGA Matrix Spec', () => {
       passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'John', last_name: 'Doe' }],
       legs: [{ flight_id: flightId.toString(), inventory_id: invId, leg_type: 'OUTBOUND' }],
       is_block: false,
+      payment_method: PaymentMethod.PROFILE_CARD,
     };
 
     await expect(bookingsService.createBooking(createDto)).rejects.toThrow();

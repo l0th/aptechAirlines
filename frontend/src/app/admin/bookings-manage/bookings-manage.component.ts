@@ -50,6 +50,7 @@ interface AdminTicketCoupon {
 
 interface AdminPaymentTransaction {
   transaction_type?: string;
+  payment_method?: 'PROFILE_CARD' | 'PAYPAL';
   amount?: number;
   card_masked?: string;
   status?: string;
@@ -459,8 +460,19 @@ interface AdminItinerary {
                 @for (t of sb.payment_transactions || []; track $index) {
                   <div class="p-2.5 bg-slate-50 rounded-xl flex items-center justify-between">
                     <div>
-                      <span class="font-bold" [ngClass]="transactionClass(t.transaction_type)">{{ t.transaction_type }}</span>
-                      <span class="text-[10px] text-slate-400 block">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-bold" [ngClass]="transactionClass(t.transaction_type)">{{ t.transaction_type }}</span>
+                        @if (t.payment_method === 'PROFILE_CARD') {
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {{ lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card' }}
+                          </span>
+                        } @else if (t.payment_method === 'PAYPAL') {
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            PayPal
+                          </span>
+                        }
+                      </div>
+                      <span class="text-[10px] text-slate-400 block mt-0.5">
                         {{ t.card_masked || 'N/A' }} • {{ t.status || 'SUCCESS' }}
                         @if (t.created_at) {
                           <span> • {{ t.created_at | date: 'dd/MM/yyyy HH:mm' }}</span>
@@ -794,19 +806,9 @@ export class BookingsManageComponent implements OnInit {
       return;
     }
 
-    const promptMsg = this.lang.isVietnamese() ? `Nhập số thẻ thanh toán để xác nhận vé ${blockingNumber} (12-19 chữ số):` : `Enter payment card number to confirm ticket ${blockingNumber} (12-19 digits):`;
-    const rawCard = prompt(promptMsg, '');
-    if (rawCard === null) return;
-    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
-    if (!cardRegex.test(rawCard.trim())) {
-      this.toast.error(this.lang.t('admin.bookings.invalidCardNumber'));
-      return;
-    }
-    const creditCard = rawCard.trim();
-
     this.submitting.set(true);
     this.api
-      .confirmBooking({ blocking_number: blockingNumber, credit_card_number: creditCard })
+      .confirmBooking({ blocking_number: blockingNumber, payment_method: 'PROFILE_CARD' })
       .subscribe({
         next: () => {
           this.submitting.set(false);

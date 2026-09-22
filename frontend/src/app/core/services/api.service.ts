@@ -321,7 +321,7 @@ export class ApiService {
     is_block: boolean;
     passengers: any[];
     legs: any[];
-    credit_card_number?: string;
+    payment_method?: 'PROFILE_CARD' | 'PAYPAL';
     seat_requests?: Array<{
       passenger_index: number;
       flight_id: string;
@@ -334,7 +334,7 @@ export class ApiService {
 
   confirmBooking(data: {
     blocking_number: string;
-    credit_card_number: string;
+    payment_method: 'PROFILE_CARD' | 'PAYPAL';
   }): Observable<Booking> {
     return this.http.post<Booking>(`${this.baseUrl}/bookings/confirm`, data);
   }
@@ -347,7 +347,7 @@ export class ApiService {
     new_return_flight_id?: string;
     new_return_inventory_id?: string;
     new_return_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
-    credit_card_number?: string;
+    payment_method?: 'PROFILE_CARD' | 'PAYPAL';
     seat_requests?: Array<{
       passenger_index: number;
       flight_id: string;

@@ -13,7 +13,7 @@ import {
   registerDecorator,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BookingType, PassengerType } from './bookings.schema';
+import { BookingType, PassengerType, PaymentMethod } from './bookings.schema';
 import {
   CREDIT_CARD_MESSAGE,
   CREDIT_CARD_REGEX,
@@ -165,9 +165,8 @@ export class CreateBookingDto {
   seat_requests?: SeatSelectionRequestDto[];
 
   @IsOptional()
-  @IsString()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
-  credit_card_number?: string;
+  @IsEnum(PaymentMethod)
+  payment_method?: PaymentMethod;
 }
 
 export class ConfirmTicketDto {
@@ -175,10 +174,9 @@ export class ConfirmTicketDto {
   @IsNotEmpty()
   blocking_number: string;
 
-  @IsString()
-  @IsNotEmpty()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
-  credit_card_number: string;
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  payment_method?: PaymentMethod;
 }
 
 export class RescheduleTicketDto {
@@ -225,9 +223,8 @@ export class RescheduleTicketDto {
   seat_requests?: SeatSelectionRequestDto[];
 
   @IsOptional()
-  @IsString()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
-  credit_card_number?: string;
+  @IsEnum(PaymentMethod)
+  payment_method?: PaymentMethod;
 }
 
 export class CancelTicketDto {

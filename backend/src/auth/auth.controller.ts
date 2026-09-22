@@ -2,7 +2,7 @@ import { Body, Controller, Get, Post, Request, UseGuards } from '@nestjs/common'
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './auth.dto';
 import { JwtAuthGuard } from './auth.guard';
-import { UsersService } from '../users/users.service';
+import { UsersService, toSafeUserResponse } from '../users/users.service';
 
 @Controller('auth')
 export class AuthController {
@@ -25,8 +25,6 @@ export class AuthController {
   @Get('me')
   async getProfile(@Request() req) {
     const user = await this.usersService.findById(req.user.sub);
-    const userObj = user.toObject();
-    delete userObj.password_hash;
-    return userObj;
+    return toSafeUserResponse(user);
   }
 }

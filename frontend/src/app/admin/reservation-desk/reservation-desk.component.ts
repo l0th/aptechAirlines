@@ -218,11 +218,11 @@ interface StaffPassengerForm {
                     {{ selectedCustomer()?.sky_miles | number }} {{ lang.t('nav.miles') }}
                   </div>
                 </div>
-                @if (selectedCustomer()?.preferred_credit_card) {
+                @if (selectedCustomer()?.has_preferred_credit_card) {
                   <div class="border-l border-white/20 pl-4">
                     <div class="text-[10px] text-slate-300 uppercase tracking-wider">{{ lang.t('profile.creditCard') }}</div>
                     <div class="text-xs font-mono text-white">
-                      **** {{ selectedCustomer()?.preferred_credit_card?.slice(-4) }}
+                      {{ selectedCustomer()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
                     </div>
                   </div>
                 }
@@ -751,23 +751,32 @@ interface StaffPassengerForm {
                       {{ lang.t('admin.reservationDesk.buyDescription') }}
                     </p>
 
-                    <!-- Card input for clerk -->
-                    <div class="mt-3">
-                      <label class="block text-xs font-semibold text-slate-700 mb-1">{{ lang.t('profile.creditCard') }} {{ lang.t('admin.reservationDesk.creditCardDigits') }}</label>
-                      <input
-                        type="text"
-                        [(ngModel)]="paymentCardNumber"
-                        placeholder="4111 2222 3333 4444"
-                        class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-gold"
-                      />
+                    <!-- Customer Profile Card for clerk -->
+                    <div class="mt-3 p-3 bg-white/80 border border-slate-200 rounded-xl">
+                      <div class="text-[10px] text-slate-500 font-semibold uppercase">{{ lang.t('profile.creditCard') }}</div>
+                      <div class="text-xs font-mono text-navy font-bold mt-0.5">
+                        @if (selectedCustomer()?.has_preferred_credit_card) {
+                          {{ selectedCustomer()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                        } @else {
+                          <span class="text-amber-600 font-sans font-normal">{{ lang.isVietnamese() ? 'Khách hàng chưa có thẻ ưa thích trong hồ sơ' : 'No preferred card in customer profile' }}</span>
+                        }
+                      </div>
+                      <div class="text-[10px] text-slate-500 mt-1">
+                        {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
+                      </div>
+                      @if (!selectedCustomer()?.has_preferred_credit_card) {
+                        <div class="mt-2 p-2 bg-rose-50 border border-rose-200 rounded text-[11px] text-rose-700 font-medium">
+                          {{ lang.isVietnamese() ? 'Khách hàng chưa có thẻ tín dụng ưa thích trong hồ sơ. Không thể xuất vé trực tiếp.' : 'Customer has no preferred credit card in profile. Direct ticket purchase is unavailable.' }}
+                        </div>
+                      }
                     </div>
                   </div>
 
                   <button
                     type="button"
                     (click)="submitDirectPurchase()"
-                    [disabled]="submittingBooking()"
-                    class="btn-gold w-full !py-2.5 text-xs font-bold disabled:opacity-50"
+                    [disabled]="submittingBooking() || !selectedCustomer()?.has_preferred_credit_card"
+                    class="btn-gold w-full !py-2.5 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     @if (submittingBooking()) {
                       <app-icon name="refreshcw" class="w-3.5 h-3.5 animate-spin" />
@@ -1256,7 +1265,6 @@ export class ReservationDeskComponent implements OnInit {
 
   // Passengers list
   readonly passengersList = signal<StaffPassengerForm[]>([]);
-  paymentCardNumber = '';
   readonly submittingBooking = signal(false);
 
   // Seat Map Modal
@@ -1354,9 +1362,6 @@ export class ReservationDeskComponent implements OnInit {
 
   selectCustomer(cust: User): void {
     this.selectedCustomer.set(cust);
-    if (cust.preferred_credit_card) {
-      this.paymentCardNumber = cust.preferred_credit_card;
-    }
   }
 
   // ===================== STEP 2 & 3: TRIP SEARCH & FLIGHTS =====================
@@ -1773,15 +1778,11 @@ export class ReservationDeskComponent implements OnInit {
       return;
     }
     if (!this.validatePassengerForms()) return;
-
-    // Requirement 1.3.4: Payment Card validation (12-19 digits)
-    const cardRaw = this.paymentCardNumber.trim();
-    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
-    if (!cardRegex.test(cardRaw)) {
+    if (!this.selectedCustomer()?.has_preferred_credit_card) {
       this.toast.warning(
         this.lang.isVietnamese()
-          ? 'Số thẻ thanh toán không hợp lệ (cần 12–19 chữ số)'
-          : 'Invalid credit card number (12–19 digits required)',
+          ? 'Khách hàng chưa có thẻ tín dụng ưa thích trong hồ sơ. Vui lòng cập nhật hồ sơ khách hàng trước khi xuất vé ngay.'
+          : 'Customer does not have a preferred credit card in profile. Please update customer profile before instant purchase.',
       );
       return;
     }
@@ -1799,7 +1800,7 @@ export class ReservationDeskComponent implements OnInit {
       is_block: false,
       passengers: this.buildPassengerPayload(),
       legs: legs,
-      credit_card_number: cardRaw.replace(/\D/g, ''),
+      payment_method: 'PROFILE_CARD' as const,
     };
 
     this.api.createBooking(payload).subscribe({
@@ -2188,6 +2189,8 @@ export class ReservationDeskComponent implements OnInit {
         payload.new_return_inventory_id = this.selectedReplacementReturnFlight()!.inventory_id;
       }
     }
+
+    payload.payment_method = 'PROFILE_CARD';
 
     this.executingReschedule.set(true);
     this.api.rescheduleBooking(payload).subscribe({

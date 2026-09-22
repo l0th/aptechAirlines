@@ -648,6 +648,7 @@ export class FlightsService {
 
             booking.payment_transactions.push({
               transaction_type: 'REFUND',
+              ...(originalPayment?.payment_method ? { payment_method: originalPayment.payment_method } : {}),
               amount: booking.total_amount,
               card_masked: cardMasked,
               currency: 'VND',

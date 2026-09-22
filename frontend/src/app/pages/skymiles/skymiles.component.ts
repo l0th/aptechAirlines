@@ -153,13 +153,24 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
 
                   <div>
                     <label class="block font-semibold text-slate-600 mb-1">{{ lang.t('profile.creditCard') }}</label>
+                    @if (auth.currentUser()?.has_preferred_credit_card) {
+                      <div class="mb-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                        <span class="font-mono text-xs text-navy font-bold">{{ auth.currentUser()?.preferred_credit_card_masked }}</span>
+                        <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {{ lang.isVietnamese() ? 'Đã lưu' : 'Saved' }}
+                        </span>
+                      </div>
+                    }
                     <input
                       type="text"
                       maxlength="19"
                       [(ngModel)]="profileCreditCard"
-                      placeholder="4111 2222 3333 4444"
+                      [placeholder]="auth.currentUser()?.has_preferred_credit_card ? (lang.isVietnamese() ? 'Nhập số thẻ mới nếu muốn thay đổi' : 'Enter new card number to replace') : '4111 2222 3333 4444'"
                       class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-2 focus:ring-gold"
                     />
+                    <div class="text-[10px] text-slate-400 mt-1">
+                      {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
+                    </div>
                   </div>
 
                   <div class="sm:col-span-2">
@@ -421,7 +432,7 @@ export class SkyMilesComponent implements OnInit {
     this.profilePhone = u.phone_number || '';
     this.profileSex = u.sex || 'OTHER';
     this.profileAge = u.age ?? null;
-    this.profileCreditCard = u.preferred_credit_card || '';
+    this.profileCreditCard = '';
   }
 
   resetProfile(): void {
@@ -492,6 +503,7 @@ export class SkyMilesComponent implements OnInit {
     this.api.updateUser(u._id, dto).subscribe({
       next: () => {
         this.saving.set(false);
+        this.profileCreditCard = '';
         // Refresh the stored current user signal + localStorage
         this.auth.refreshProfile();
         this.toast.success(this.lang.t('profile.updateSuccess'));

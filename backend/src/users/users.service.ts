@@ -10,6 +10,26 @@ import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument, UserRole } from './users.schema';
 import { CreateUserDto, UpdateUserDto } from './users.dto';
+import { CREDIT_CARD_REGEX } from '../common/validation.constants';
+
+export function toSafeUserResponse(user: any): any {
+  if (!user) return null;
+  const raw = typeof user.toObject === 'function' ? user.toObject() : { ...user };
+  const card = typeof raw.preferred_credit_card === 'string' ? raw.preferred_credit_card.trim() : '';
+  const digits = card.replace(/\D/g, '');
+  const hasCard =
+    CREDIT_CARD_REGEX.test(card) &&
+    !/^(CARD-DEFAULT|SAVED-CARD|UNKNOWN|ORIGINAL-PAYMENT-CARD|\*)/i.test(card);
+  const masked = hasCard && digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : undefined;
+
+  delete raw.password_hash;
+  delete raw.preferred_credit_card;
+  return {
+    ...raw,
+    has_preferred_credit_card: hasCard,
+    preferred_credit_card_masked: masked,
+  };
+}
 
 @Injectable()
 export class UsersService {
@@ -17,7 +37,7 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
-  async findAll(search?: string, role?: UserRole): Promise<User[]> {
+  async findAll(search?: string, role?: UserRole): Promise<any[]> {
     const filter: any = {};
     if (role) {
       filter.role = role;
@@ -30,7 +50,8 @@ export class UsersService {
         { last_name: { $regex: search, $options: 'i' } },
       ];
     }
-    return this.userModel.find(filter).select('-password_hash').sort({ createdAt: -1 }).exec();
+    const users = await this.userModel.find(filter).select('-password_hash').sort({ createdAt: -1 }).exec();
+    return users.map((u) => toSafeUserResponse(u));
   }
 
   async findById(id: string): Promise<UserDocument> {

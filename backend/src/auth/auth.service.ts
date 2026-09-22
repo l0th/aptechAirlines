@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { UsersService } from '../users/users.service';
+import { UsersService, toSafeUserResponse } from '../users/users.service';
 import { LoginDto, RegisterDto } from './auth.dto';
 import { UserRole } from '../users/users.schema';
 
@@ -39,6 +39,8 @@ export class AuthService {
       last_name: user.last_name,
     };
 
+    const safeUser = toSafeUserResponse(user);
+
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -52,6 +54,8 @@ export class AuthService {
         last_name: user.last_name,
         sky_miles: user.sky_miles,
         role: user.role,
+        has_preferred_credit_card: safeUser?.has_preferred_credit_card ?? false,
+        preferred_credit_card_masked: safeUser?.preferred_credit_card_masked,
       },
     };
   }

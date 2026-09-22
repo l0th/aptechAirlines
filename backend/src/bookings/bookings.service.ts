@@ -15,6 +15,7 @@ import {
   BookingStatus,
   BookingType,
   PassengerType,
+  PaymentMethod,
 } from './bookings.schema';
 import { FlightDocument, FlightStatus, isCustomerBookableFlight } from '../flights/flights.schema';
 import {
@@ -23,6 +24,7 @@ import {
   CreateBookingDto,
   RescheduleTicketDto,
 } from './bookings.dto';
+import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { AirportsService } from '../airports/airports.service';
 import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
@@ -79,14 +81,14 @@ export class BookingsService {
     const filter: any = {};
     if (status) filter.status = status;
     if (userId) filter.user_id = new Types.ObjectId(userId);
-    return this.bookingModel.find(filter).sort({ createdAt: -1 }).populate('user_id', '-password_hash').exec();
+    return this.bookingModel.find(filter).sort({ createdAt: -1 }).populate('user_id', '-password_hash -preferred_credit_card').exec();
   }
 
   async findById(id: string): Promise<BookingDocument> {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid booking ID');
     }
-    const booking = await this.bookingModel.findById(id).populate('user_id', '-password_hash').exec();
+    const booking = await this.bookingModel.findById(id).populate('user_id', '-password_hash -preferred_credit_card').exec();
     if (!booking) {
       throw new NotFoundException(`Booking with ID ${id} not found`);
     }
@@ -223,6 +225,37 @@ export class BookingsService {
           'Departure is within 2 weeks (14 days). Ticket blocking is not permitted. You must buy the ticket directly.',
         );
       }
+    }
+
+    let maskedProfileCard: string | undefined = undefined;
+
+    // Correction 4: Purchase payment preflight before any saga creation or seat reservation mutation
+    if (!dto.is_block) {
+      if (!dto.payment_method) {
+        throw new BadRequestException('Payment method is required to purchase tickets.');
+      }
+      if (dto.payment_method === PaymentMethod.PAYPAL) {
+        throw new BadRequestException('PayPal payment is not yet active.');
+      }
+      if (dto.payment_method !== PaymentMethod.PROFILE_CARD) {
+        throw new BadRequestException('Unsupported payment method.');
+      }
+
+      const rawCard = (user.preferred_credit_card || '').trim();
+      const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
+      if (
+        !rawCard ||
+        placeholders.has(rawCard.toUpperCase()) ||
+        rawCard.startsWith('*') ||
+        !CREDIT_CARD_REGEX.test(rawCard)
+      ) {
+        throw new BadRequestException(
+          'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
+        );
+      }
+
+      const digits = rawCard.replace(/\D/g, '');
+      maskedProfileCard = `**** **** **** ${digits.slice(-4)}`;
     }
 
     // Pre-generate Booking ObjectId and SAGA Operation
@@ -508,17 +541,11 @@ export class BookingsService {
         deadline = new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000);
       } else {
         confirmationNumber = this.generateCode('CNF');
-        const rawCard = (dto.credit_card_number || user.preferred_credit_card || '').trim();
-        const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
-        if (!rawCard || placeholders.has(rawCard.toUpperCase()) || rawCard.startsWith('*')) {
-          throw new BadRequestException('Payment card is required to purchase tickets.');
-        }
-        const digits = rawCard.replace(/\D/g, '');
-        const maskedCard = digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : `**** **** **** ${rawCard.slice(-4)}`;
         paymentTransactions.push({
           transaction_type: 'PAYMENT',
+          payment_method: PaymentMethod.PROFILE_CARD,
           amount: totalAmount,
-          card_masked: maskedCard,
+          card_masked: maskedProfileCard!,
           status: 'SUCCESS',
           created_at: new Date(),
         });
@@ -706,13 +733,36 @@ export class BookingsService {
       payment_transactions: booking.payment_transactions.map((transaction: any) => ({ ...transaction })),
     };
 
-    const maskedCard =
-      dto.credit_card_number.length >= 4
-        ? `**** **** **** ${dto.credit_card_number.slice(-4)}`
-        : dto.credit_card_number;
+    if (!dto.payment_method) {
+      throw new BadRequestException('Payment method is required to confirm reservation.');
+    }
+    if (dto.payment_method === PaymentMethod.PAYPAL) {
+      throw new BadRequestException('PayPal payment is not yet active.');
+    }
+    if (dto.payment_method !== PaymentMethod.PROFILE_CARD) {
+      throw new BadRequestException('Unsupported payment method.');
+    }
+
+    const user = await this.usersService.findById(booking.user_id.toString());
+    const rawCard = (user?.preferred_credit_card || '').trim();
+    const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
+    if (
+      !rawCard ||
+      placeholders.has(rawCard.toUpperCase()) ||
+      rawCard.startsWith('*') ||
+      !CREDIT_CARD_REGEX.test(rawCard)
+    ) {
+      throw new BadRequestException(
+        'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
+      );
+    }
+
+    const digits = rawCard.replace(/\D/g, '');
+    const maskedCard = `**** **** **** ${digits.slice(-4)}`;
 
     booking.payment_transactions.push({
       transaction_type: 'PAYMENT',
+      payment_method: PaymentMethod.PROFILE_CARD,
       amount: booking.total_amount,
       card_masked: maskedCard,
       status: 'SUCCESS',
@@ -725,8 +775,6 @@ export class BookingsService {
       const flight = await this.flightsService.findById(coupon.flight_id.toString());
       totalMiles += flight.distance_miles;
     }
-
-    const user = await this.usersService.findById(booking.user_id.toString());
 
     const originalSkyMiles = user.sky_miles || 0;
     let skyMilesCredited = false;
@@ -776,9 +824,9 @@ export class BookingsService {
    */
   private async resolveRescheduleCard(
     booking: BookingDocument,
-    dtoCardNumber?: string,
+    paymentMethod?: PaymentMethod,
     isCharge: boolean = true,
-  ): Promise<string> {
+  ): Promise<{ maskedCard: string; paymentMethod?: PaymentMethod }> {
     const user = booking.user_id
       ? await this.usersService.findById(booking.user_id.toString())
       : null;
@@ -786,14 +834,32 @@ export class BookingsService {
     const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
 
     if (isCharge) {
-      const rawCard = (dtoCardNumber || user?.preferred_credit_card || '').trim();
-      if (!rawCard || placeholders.has(rawCard.toUpperCase()) || rawCard.startsWith('*')) {
+      if (!paymentMethod) {
+        throw new BadRequestException('Payment method is required for reschedule fare difference.');
+      }
+      if (paymentMethod === PaymentMethod.PAYPAL) {
+        throw new BadRequestException('PayPal Sandbox is not enabled yet. Please use profile card.');
+      }
+      if (paymentMethod !== PaymentMethod.PROFILE_CARD) {
+        throw new BadRequestException('Invalid payment method.');
+      }
+
+      const rawCard = (user?.preferred_credit_card || '').trim();
+      if (
+        !rawCard ||
+        placeholders.has(rawCard.toUpperCase()) ||
+        rawCard.startsWith('*') ||
+        !CREDIT_CARD_REGEX.test(rawCard)
+      ) {
         throw new BadRequestException('Payment card is required for reschedule fare difference.');
       }
       const digits = rawCard.replace(/\D/g, '');
-      return digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : `**** **** **** ${rawCard.slice(-4)}`;
+      return {
+        maskedCard: `**** **** **** ${digits.slice(-4)}`,
+        paymentMethod: PaymentMethod.PROFILE_CARD,
+      };
     } else {
-      // 1. Prefer original successful transaction's card_masked
+      // 1. Prefer original successful transaction's card_masked and payment_method
       if (Array.isArray(booking.payment_transactions) && booking.payment_transactions.length > 0) {
         const paymentTx = booking.payment_transactions
           .slice()
@@ -803,17 +869,23 @@ export class BookingsService {
         if (paymentTx?.card_masked) {
           const masked = paymentTx.card_masked.trim();
           if (masked && !placeholders.has(masked.toUpperCase())) {
-            return masked;
+            return {
+              maskedCard: masked,
+              paymentMethod: (paymentTx.payment_method as PaymentMethod) || undefined,
+            };
           }
         }
       }
 
-      // 2. Fall back to valid explicit / preferred card
-      const rawCard = (dtoCardNumber || user?.preferred_credit_card || '').trim();
-      if (rawCard && !placeholders.has(rawCard.toUpperCase()) && !rawCard.startsWith('*')) {
+      // 2. Fall back to valid preferred card if needed
+      const rawCard = (user?.preferred_credit_card || '').trim();
+      if (rawCard && !placeholders.has(rawCard.toUpperCase()) && !rawCard.startsWith('*') && CREDIT_CARD_REGEX.test(rawCard)) {
         const digits = rawCard.replace(/\D/g, '');
         if (digits.length >= 4) {
-          return `**** **** **** ${digits.slice(-4)}`;
+          return {
+            maskedCard: `**** **** **** ${digits.slice(-4)}`,
+            paymentMethod: PaymentMethod.PROFILE_CARD,
+          };
         }
       }
 
@@ -1409,20 +1481,22 @@ export class BookingsService {
 
       // Financial adjustment
       if (priceDiff > 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_CHARGE',
+          payment_method: resCard.paymentMethod,
           amount: priceDiff,
-          card_masked: maskedCard,
+          card_masked: resCard.maskedCard,
           status: 'SUCCESS',
           created_at: new Date(),
         });
       } else if (priceDiff < 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_REFUND',
+          payment_method: resCard.paymentMethod,
           amount: Math.abs(priceDiff),
-          card_masked: maskedCard,
+          card_masked: resCard.maskedCard,
           status: 'SUCCESS',
           created_at: new Date(),
         });
@@ -2206,16 +2280,24 @@ export class BookingsService {
 
       // Financial adjustment
       if (priceDiff > 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
         booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_CHARGE', amount: priceDiff,
-          card_masked: maskedCard, status: 'SUCCESS', created_at: new Date(),
+          transaction_type: 'RESCHEDULE_CHARGE',
+          payment_method: resCard.paymentMethod,
+          amount: priceDiff,
+          card_masked: resCard.maskedCard,
+          status: 'SUCCESS',
+          created_at: new Date(),
         });
       } else if (priceDiff < 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
         booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_REFUND', amount: Math.abs(priceDiff),
-          card_masked: maskedCard, status: 'SUCCESS', created_at: new Date(),
+          transaction_type: 'RESCHEDULE_REFUND',
+          payment_method: resCard.paymentMethod,
+          amount: Math.abs(priceDiff),
+          card_masked: resCard.maskedCard,
+          status: 'SUCCESS',
+          created_at: new Date(),
         });
       }
 
@@ -2771,20 +2853,22 @@ export class BookingsService {
       const priceDiff = newTotalAmount - booking.total_amount;
 
       if (priceDiff > 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, true);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_CHARGE',
+          payment_method: resCard.paymentMethod,
           amount: priceDiff,
-          card_masked: maskedCard,
+          card_masked: resCard.maskedCard,
           status: 'SUCCESS',
           created_at: new Date(),
         });
       } else if (priceDiff < 0) {
-        const maskedCard = await this.resolveRescheduleCard(booking, dto.credit_card_number, false);
+        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
         booking.payment_transactions.push({
           transaction_type: 'RESCHEDULE_REFUND',
+          payment_method: resCard.paymentMethod,
           amount: Math.abs(priceDiff),
-          card_masked: maskedCard,
+          card_masked: resCard.maskedCard,
           status: 'SUCCESS',
           created_at: new Date(),
         });
@@ -3454,6 +3538,7 @@ export class BookingsService {
     let refundPercentage = 0;
     let originalUserSkyMiles = 0;
     let refundCardMasked: string | undefined = undefined;
+    let refundPaymentMethod: PaymentMethod | undefined = undefined;
 
     if (booking.status === BookingStatus.CONFIRMED) {
       const earliestDeparture = await this.getEarliestDeparture(booking);
@@ -3487,6 +3572,7 @@ export class BookingsService {
         };
 
         let usableCard: string | undefined = undefined;
+        let usablePaymentMethod: PaymentMethod | undefined = undefined;
 
         if (Array.isArray(booking.payment_transactions) && booking.payment_transactions.length > 0) {
           const candidates: Array<{
@@ -3494,6 +3580,7 @@ export class BookingsService {
             index: number;
             timestamp: number;
             normalizedCard: string;
+            paymentMethod?: PaymentMethod;
           }> = [];
 
           booking.payment_transactions.forEach((tx: any, index: number) => {
@@ -3504,7 +3591,13 @@ export class BookingsService {
               if (normalized) {
                 const rawTime = tx?.created_at ? new Date(tx.created_at).getTime() : NaN;
                 const timestamp = isNaN(rawTime) ? -1 : rawTime;
-                candidates.push({ tx, index, timestamp, normalizedCard: normalized });
+                candidates.push({
+                  tx,
+                  index,
+                  timestamp,
+                  normalizedCard: normalized,
+                  paymentMethod: (tx.payment_method as PaymentMethod) || undefined,
+                });
               }
             }
           });
@@ -3523,6 +3616,7 @@ export class BookingsService {
             });
 
             usableCard = candidates[0].normalizedCard;
+            usablePaymentMethod = candidates[0].paymentMethod;
           }
         }
 
@@ -3530,6 +3624,7 @@ export class BookingsService {
           const normalized = normalizeCard(user.preferred_credit_card);
           if (normalized) {
             usableCard = normalized;
+            usablePaymentMethod = PaymentMethod.PROFILE_CARD;
           }
         }
 
@@ -3538,6 +3633,7 @@ export class BookingsService {
         }
 
         refundCardMasked = usableCard;
+        refundPaymentMethod = usablePaymentMethod;
       }
     } else if (booking.status === BookingStatus.BLOCKED) {
       refundPercentage = 0;
@@ -3574,6 +3670,7 @@ export class BookingsService {
         if (refundAmount > 0) {
           booking.payment_transactions.push({
             transaction_type: 'REFUND',
+            ...(refundPaymentMethod ? { payment_method: refundPaymentMethod } : {}),
             amount: refundAmount,
             card_masked: refundCardMasked!,
             currency: 'VND',
@@ -3705,7 +3802,7 @@ export class BookingsService {
           { cancellation_number: code },
         ],
       })
-      .populate('user_id', '-password_hash')
+      .populate('user_id', '-password_hash -preferred_credit_card')
       .exec();
 
     if (!booking) {

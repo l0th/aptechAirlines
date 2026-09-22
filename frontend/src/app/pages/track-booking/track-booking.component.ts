@@ -46,6 +46,7 @@ interface LocalPassenger {
 
 interface LocalPaymentTransaction {
   transaction_type: string;
+  payment_method?: string;
   amount: number;
   card_masked?: string;
   status?: string;
@@ -592,7 +593,14 @@ interface TrackedPassengerView {
                         [ngClass]="tx.transaction_type === 'REFUND' ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200/60'"
                       >
                         <div>
-                          <strong class="text-slate-800">{{ transactionLabel(tx.transaction_type) }}</strong>
+                          <div class="flex items-center gap-2">
+                            <strong class="text-slate-800">{{ transactionLabel(tx.transaction_type) }}</strong>
+                            @if (tx.payment_method) {
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-navy/5 text-navy border border-navy/10">
+                                {{ tx.payment_method === 'PROFILE_CARD' ? (lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card') : tx.payment_method }}
+                              </span>
+                            }
+                          </div>
                           <div class="text-[11px] text-slate-400">
                             {{ tx.card_masked || '—' }}
                             @if (tx.created_at) {
@@ -713,9 +721,9 @@ interface TrackedPassengerView {
 
           <p class="text-xs text-slate-500 mb-4 leading-relaxed">
             @if (lang.isVietnamese()) {
-              {{ lang.t('track.holdPaymentNotice1') }} <strong>{{ b.blocking_number }}</strong> {{ lang.t('track.holdPaymentNotice2') }}
+              Thanh toán mã giữ chỗ <strong>{{ b.blocking_number }}</strong> bằng thẻ tín dụng ưa thích trong hồ sơ để xuất vé chính thức.
             } @else {
-              Enter credit card details to convert hold booking <strong>{{ b.blocking_number }}</strong> into a confirmed ticket.
+              Pay for hold booking <strong>{{ b.blocking_number }}</strong> using your profile preferred credit card to confirm the ticket.
             }
           </p>
 
@@ -732,29 +740,44 @@ interface TrackedPassengerView {
           }
 
           <div class="space-y-3 text-xs mb-5">
-            <div>
-              <label class="block font-semibold text-slate-600 mb-1">
-                {{ lang.isVietnamese() ? 'Số thẻ tín dụng (16 số)' : 'Credit Card Number (16 digits)' }}
-              </label>
-              <input
-                type="text"
-                [(ngModel)]="confirmCardNumber"
-                placeholder="4111222233334444"
-                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gold font-mono"
-              />
+            <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+              <div>
+                <span class="block text-[11px] text-slate-500 font-medium">{{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích:' : 'Preferred Credit Card:' }}</span>
+                <strong class="text-xs text-navy font-mono">
+                  @if (auth.currentUser()?.has_preferred_credit_card) {
+                    {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                  } @else {
+                    <span class="text-rose-600 font-sans font-normal">{{ lang.isVietnamese() ? 'Chưa có thẻ trong hồ sơ' : 'No card on file' }}</span>
+                  }
+                </strong>
+              </div>
+              <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                {{ lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card' }}
+              </span>
             </div>
-            <div class="text-right text-xs">
-              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Số tiền cần thanh toán: ' : 'Amount to pay: ' }}</span>
-              <strong class="text-navy font-bold">{{ b.total_amount | currencyFormat }}</strong>
+
+            <div class="p-2.5 bg-amber-50/70 rounded-lg border border-amber-200/60 text-[11px] text-slate-600 leading-relaxed">
+              {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
+            </div>
+
+            @if (!auth.currentUser()?.has_preferred_credit_card) {
+              <div class="p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-[11px] text-rose-700 leading-relaxed font-medium">
+                {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng ưa thích trong Hồ sơ trước khi xác nhận thanh toán.' : 'Please update your preferred credit card in your Profile before confirming payment.' }}
+              </div>
+            }
+
+            <div class="flex items-center justify-between pt-1 text-xs">
+              <span class="text-slate-500">{{ lang.isVietnamese() ? 'Số tiền thanh toán:' : 'Amount to pay:' }}</span>
+              <strong class="text-navy font-bold text-sm">{{ b.total_amount | currencyFormat }}</strong>
             </div>
           </div>
 
           <div class="flex justify-end gap-3">
             <button (click)="showConfirmHoldModal.set(false)" class="btn-ghost text-xs">{{ lang.t('common.cancel') }}</button>
             <button
-              [disabled]="submittingAction()"
+              [disabled]="submittingAction() || !auth.currentUser()?.has_preferred_credit_card"
               (click)="executeConfirmHold()"
-              class="btn-gold text-xs !py-2.5 !px-5"
+              class="btn-gold text-xs !py-2.5 !px-5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               @if (submittingAction()) {
                 <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
@@ -1212,7 +1235,6 @@ export class TrackBookingComponent implements OnInit {
   readonly showRescheduleModal = signal(false);
   readonly showCancelModal = signal(false);
 
-  confirmCardNumber = '4111222233334444';
   cancelReason = this.lang.isVietnamese() ? this.lang.t('track.personalPlanChanged') || '' : 'Personal plans changed';
 
   // Reschedule alternatives
@@ -1610,14 +1632,11 @@ export class TrackBookingComponent implements OnInit {
     }
     if (!this.requireLogin()) return;
 
-    // Requirement 1.3.4: Validate credit card format (12-19 digits, digits/hyphens/spaces)
-    const cardRaw = (this.confirmCardNumber || '').trim();
-    const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
-    if (!cardRegex.test(cardRaw)) {
+    if (!this.auth.currentUser()?.has_preferred_credit_card) {
       this.toast.warning(
         this.lang.isVietnamese()
-          ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)'
-          : 'Invalid credit card number (12–19 digits required)',
+          ? 'Vui lòng cập nhật thẻ tín dụng ưa thích trong hồ sơ để thanh toán vé.'
+          : 'Please update your preferred credit card in your profile before confirming booking.',
       );
       return;
     }
@@ -1626,7 +1645,7 @@ export class TrackBookingComponent implements OnInit {
     this.api
       .confirmBooking({
         blocking_number: b.blocking_number,
-        credit_card_number: (this.confirmCardNumber || '').replace(/\s+/g, ''),
+        payment_method: 'PROFILE_CARD',
       })
       .subscribe({
         next: () => {
@@ -2342,6 +2361,8 @@ export class TrackBookingComponent implements OnInit {
       }
       payload.seat_requests = seatRequests;
     }
+
+    payload.payment_method = 'PROFILE_CARD';
 
     this.api.rescheduleBooking(payload).subscribe({
       next: (res: any) => {

@@ -397,87 +397,53 @@ interface BookingContext {
             <!-- Step 3: Payment Details (Only required if Buy Now) -->
             @if (!isBlock()) {
               <div class="card-luxury p-6 shadow-sm border-slate-200 animate-fade-in">
-                <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
                   <h3 class="text-base font-bold text-navy flex items-center gap-2">
                     <app-icon name="creditcard" class="w-5 h-5 text-gold" />
-                    <span>{{ lang.t('booking.cardInfo') }}</span>
+                    <span>{{ lang.isVietnamese() ? 'Phương thức thanh toán' : 'Payment Method' }}</span>
                   </h3>
                   <span class="text-xs text-emerald-600 font-semibold flex items-center gap-1">
                     <app-icon name="shieldcheck" class="w-4 h-4" />
-                    {{ lang.isVietnamese() ? 'Bảo mật 256-bit SSL' : '256-bit SSL Security' }}
+                    {{ lang.isVietnamese() ? 'Hồ sơ tài khoản' : 'Profile Account' }}
                   </span>
                 </div>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div class="sm:col-span-2">
-                    <label class="block font-semibold text-slate-600 mb-1">
-                      {{ lang.t('booking.cardNumber') }} <span class="text-rose-500">*</span>
-                    </label>
-                    <div class="relative">
-                      <app-icon name="creditcard" class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        [(ngModel)]="creditCardNumber"
-                        maxlength="19"
-                        placeholder="4111 2222 3333 4444"
-                        class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gold font-mono text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label class="block font-semibold text-slate-600 mb-1">
-                      {{ lang.t('booking.cardName') }}
-                    </label>
-                    <input
-                      type="text"
-                      [(ngModel)]="cardName"
-                      placeholder="NGUYEN VAN AN"
-                      class="w-full uppercase px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gold"
-                    />
-                  </div>
-
-                  <div class="grid grid-cols-2 gap-2">
-                    <div>
-                      <label class="block font-semibold text-slate-600 mb-1">
-                        {{ lang.t('booking.cardExp') }}
-                      </label>
-                      <input
-                        type="text"
-                        [(ngModel)]="cardExp"
-                        placeholder="12/28"
-                        maxlength="5"
-                        class="w-full text-center px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gold font-mono"
-                      />
+                <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-navy/5 flex items-center justify-center text-navy shrink-0">
+                      <app-icon name="creditcard" class="w-5 h-5 text-gold" />
                     </div>
                     <div>
-                      <label class="block font-semibold text-slate-600 mb-1">
-                        {{ lang.t('booking.cardCvv') }}
-                      </label>
-                      <input
-                        type="password"
-                        [(ngModel)]="cardCvv"
-                        placeholder="•••"
-                        maxlength="4"
-                        class="w-full text-center px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gold font-mono"
-                      />
+                      <div class="text-xs font-bold text-navy">
+                        {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích' : 'Preferred Credit Card' }}
+                      </div>
+                      <div class="text-xs text-slate-500 font-mono mt-0.5">
+                        @if (!auth.isAuthenticated()) {
+                          <span class="text-slate-500 font-sans font-medium">
+                            {{ lang.isVietnamese() ? 'Đăng nhập để sử dụng thẻ tín dụng ưa thích trong hồ sơ.' : 'Sign in to use the preferred credit card in your profile.' }}
+                          </span>
+                        } @else if (auth.currentUser()?.has_preferred_credit_card) {
+                          {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                        } @else {
+                          <span class="text-amber-600 font-sans font-medium">
+                            {{ lang.isVietnamese() ? 'Chưa có thẻ ưa thích trong hồ sơ' : 'No preferred card in profile' }}
+                          </span>
+                        }
+                      </div>
                     </div>
                   </div>
+                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60 self-start sm:self-auto">
+                    {{ lang.isVietnamese() ? 'Thẻ trong hồ sơ' : 'Profile Card' }}
+                  </span>
                 </div>
 
-                <div class="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-200/60 text-[11px] text-slate-500 space-y-1">
-                  <div>
-                    {{ lang.isVietnamese() ? 'Gợi ý kiểm thử: Sử dụng số thẻ visa mẫu ' : 'Testing hint: Use sample Visa card ' }}<strong>4111222233334444</strong>{{ lang.isVietnamese() ? ' (hệ thống mô phỏng thanh toán trực tuyến).' : ' (online payment simulation).' }}
-                  </div>
-                  <div>
-                    @if (lang.isVietnamese()) {
-                      {{ lang.t('booking.paymentMockNotice1') }}
-                      <strong>{{ lang.t('booking.paymentMockNotice2') }}</strong> {{ lang.t('booking.paymentMockNotice3') }}
-                    } @else {
-                      Expiration date &amp; CVV are only format-checked in the browser — the simulated system only requires
-                      the <strong>card number</strong> (12–19 digits) to process payment.
-                    }
-                  </div>
+                <div class="mt-4 p-3 bg-amber-50/60 rounded-xl border border-amber-200/50 text-[11px] text-slate-600 leading-relaxed">
+                  {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
+                  @if (auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
+                    <div class="mt-1.5 text-rose-600 font-medium">
+                      {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng trong trang Hồ sơ cá nhân trước khi thanh toán vé ngay.' : 'Please update your preferred credit card in your Profile before instant purchase.' }}
+                    </div>
+                  }
                 </div>
               </div>
             }
@@ -663,8 +629,8 @@ interface BookingContext {
                 <button
                   type="button"
                   (click)="submitBooking()"
-                  [disabled]="loading()"
-                  class="btn-gold w-full text-sm !py-3.5 uppercase tracking-wider font-bold"
+                  [disabled]="loading() || (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card)"
+                  class="btn-gold w-full text-sm !py-3.5 uppercase tracking-wider font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   @if (loading()) {
                     <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
@@ -677,6 +643,11 @@ interface BookingContext {
                     <span>{{ lang.t('booking.btnConfirm') }}</span>
                   }
                 </button>
+                @if (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
+                  <div class="mt-2 text-xs text-rose-600 text-center font-medium">
+                    {{ lang.isVietnamese() ? 'Cần cập nhật thẻ tín dụng ưa thích trong hồ sơ để mua vé ngay.' : 'A preferred credit card in your profile is required for instant purchase.' }}
+                  </div>
+                }
               </div>
 
             </div>
@@ -732,14 +703,8 @@ export class BookingComponent implements OnInit {
   PassengerType = PassengerType;
   LegType = LegType;
 
-  creditCardNumber = '';
-  cardName = '';
-  /** Collected for on-screen format validation only — never sent to the API. */
-  cardExp = '';
-  cardCvv = '';
-
   constructor() {
-    // Requirement 1.3.3: Reactively prefill passenger 1 and payment card when user logs in via auth modal
+    // Requirement 1.3.3: Reactively prefill passenger 1 name when user logs in via auth modal
     effect(() => {
       const u = this.auth.currentUser();
       if (u && this.passengers && this.passengers.length > 0) {
@@ -748,12 +713,6 @@ export class BookingComponent implements OnInit {
         }
         if (!this.passengers[0].last_name) {
           this.passengers[0].last_name = u.last_name || '';
-        }
-        if (!this.cardName && (u.first_name || u.last_name)) {
-          this.cardName = `${u.first_name || ''} ${u.last_name || ''}`.trim().toUpperCase();
-        }
-        if (!this.creditCardNumber && u.preferred_credit_card) {
-          this.creditCardNumber = u.preferred_credit_card;
         }
       }
     });
@@ -859,11 +818,6 @@ export class BookingComponent implements OnInit {
         this.passengers[0].last_name = u.last_name || '';
         this.passengers[0].id_card_or_passport = '';
       }
-      this.cardName = `${u.first_name || ''} ${u.last_name || ''}`.trim().toUpperCase();
-      this.creditCardNumber = u.preferred_credit_card || '';
-    } else {
-      this.creditCardNumber = '';
-      this.cardName = '';
     }
   }
 
@@ -1474,35 +1428,13 @@ export class BookingComponent implements OnInit {
     }
 
     if (!this.isBlock()) {
-      const cardRaw = this.creditCardNumber.trim();
-      if (!cardRaw) {
-        this.toast.warning(this.lang.isVietnamese() ? 'Vui lòng nhập số thẻ tín dụng thanh toán' : 'Please enter payment credit card number');
-        return;
-      }
-      const cardRegex = /^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/;
-      if (!cardRegex.test(cardRaw)) {
-        this.toast.warning(this.lang.isVietnamese() ? 'Số thẻ tín dụng không hợp lệ (cần 12–19 chữ số)' : 'Invalid credit card number (12–19 digits required)');
-        return;
-      }
-      // Requirement 1.3.4: Expiry format & future date check
-      if (this.cardExp.trim()) {
-        if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(this.cardExp.trim())) {
-          this.toast.warning(this.lang.isVietnamese() ? 'Ngày hết hạn thẻ không hợp lệ. Định dạng đúng: MM/YY' : 'Invalid expiration date. Expected format: MM/YY');
-          return;
-        }
-        const [mStr, yStr] = this.cardExp.trim().split('/');
-        const expMonth = parseInt(mStr, 10);
-        const expYear = 2000 + parseInt(yStr, 10);
-        const now = new Date();
-        const curYear = now.getFullYear();
-        const curMonth = now.getMonth() + 1;
-        if (expYear < curYear || (expYear === curYear && expMonth < curMonth)) {
-          this.toast.warning(this.lang.isVietnamese() ? 'Thẻ tín dụng đã hết hạn sử dụng' : 'Credit card has expired');
-          return;
-        }
-      }
-      if (this.cardCvv.trim() && !/^\d{3,4}$/.test(this.cardCvv.trim())) {
-        this.toast.warning(this.lang.isVietnamese() ? 'CVV không hợp lệ (cần 3–4 chữ số)' : 'Invalid CVV (3–4 digits required)');
+      const u = this.auth.currentUser();
+      if (!u?.has_preferred_credit_card) {
+        this.toast.warning(
+          this.lang.isVietnamese()
+            ? 'Vui lòng cập nhật thẻ tín dụng ưa thích trong hồ sơ trước khi mua vé.'
+            : 'Please update your preferred credit card in your profile before purchasing tickets.',
+        );
         return;
       }
     }
@@ -1523,8 +1455,7 @@ export class BookingComponent implements OnInit {
       passengers: this.buildPassengerPayload(),
       legs: legs,
       seat_requests: this.buildSeatRequests(legs),
-      // Only the card number is sent: the backend stores a masked value.
-      credit_card_number: this.isBlock() ? undefined : this.creditCardNumber.replace(/\D/g, ''),
+      payment_method: this.isBlock() ? undefined : ('PROFILE_CARD' as const),
     };
 
     this.api.createBooking(payload).subscribe({

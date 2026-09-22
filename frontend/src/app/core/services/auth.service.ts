@@ -89,12 +89,18 @@ export class AuthService {
    * Backend cũ trả `user.id` trong khi mọi component dùng `user._id`
    * (khớp document User và GET /api/auth/me). Chuẩn hoá tại đây để khách vừa
    * đăng nhập/đăng ký không bị coi là "chưa đăng nhập".
+   * Đồng thời loại bỏ triệt để raw preferred_credit_card và password_hash
+   * nếu còn tồn đọng trong phiên cũ hoặc response.
    */
   private normalizeUser(user: any): User {
-    if (user && !user._id && user.id) {
-      return { ...user, _id: user.id } as User;
+    if (!user || typeof user !== 'object') return user;
+    const sanitized: any = { ...user };
+    if (!sanitized._id && sanitized.id) {
+      sanitized._id = sanitized.id;
     }
-    return user as User;
+    delete sanitized.password_hash;
+    delete sanitized.preferred_credit_card;
+    return sanitized as User;
   }
 
   private getStoredToken(): string | null {
@@ -107,8 +113,19 @@ export class AuthService {
 
   private getStoredUser(): User | null {
     try {
-      const u = localStorage.getItem('auth_user');
-      return u ? this.normalizeUser(JSON.parse(u)) : null;
+      const rawStr = localStorage.getItem('auth_user');
+      if (!rawStr) return null;
+      const parsed = JSON.parse(rawStr);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      const hasUnsafeFields = 'preferred_credit_card' in parsed || 'password_hash' in parsed;
+      const sanitized = this.normalizeUser(parsed);
+
+      if (hasUnsafeFields) {
+        localStorage.setItem('auth_user', JSON.stringify(sanitized));
+      }
+
+      return sanitized;
     } catch {
       return null;
     }

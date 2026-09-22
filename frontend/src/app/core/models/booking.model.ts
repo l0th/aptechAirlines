@@ -103,6 +103,7 @@ export interface TicketCoupon {
 export interface PaymentTransaction {
   /** PAYMENT | REFUND | RESCHEDULE_CHARGE | RESCHEDULE_REFUND */
   transaction_type: string;
+  payment_method?: 'PROFILE_CARD' | 'PAYPAL';
   amount: number;
   currency?: string;
   card_masked: string;

@@ -11,12 +11,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { UsersService } from './users.service';
+import { UsersService, toSafeUserResponse } from './users.service';
 import { CreateUserDto, UpdateUserDto } from './users.dto';
-import { UserRole } from './users.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { UserRole } from './users.schema';
 
 // Staff roles allowed to list/read/create/delete user accounts
 const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
@@ -39,9 +39,7 @@ export class UsersController {
   @Roles(...STAFF_ROLES)
   async findOne(@Param('id') id: string) {
     const user = await this.usersService.findById(id);
-    const userObj = user.toObject();
-    delete userObj.password_hash;
-    return userObj;
+    return toSafeUserResponse(user);
   }
 
   @Post()
@@ -60,9 +58,7 @@ export class UsersController {
       );
     }
     const user = await this.usersService.create(createUserDto);
-    const userObj = user.toObject();
-    delete userObj.password_hash;
-    return userObj;
+    return toSafeUserResponse(user);
   }
 
   // Requirement 3.8 / least privilege: a user may update their own profile; only ADMIN/SUPER_ADMIN may update anyone
@@ -95,9 +91,7 @@ export class UsersController {
     }
 
     const user = await this.usersService.update(id, updateUserDto);
-    const userObj = user.toObject();
-    delete userObj.password_hash;
-    return userObj;
+    return toSafeUserResponse(user);
   }
 
   @Delete(':id')

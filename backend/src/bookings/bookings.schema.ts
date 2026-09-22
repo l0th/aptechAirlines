@@ -23,6 +23,11 @@ export enum PassengerType {
   SENIOR = 'SENIOR',
 }
 
+export enum PaymentMethod {
+  PROFILE_CARD = 'PROFILE_CARD',
+  PAYPAL = 'PAYPAL',
+}
+
 @Schema({ _id: false })
 export class Passenger {
   @Prop({ required: true })
@@ -113,6 +118,9 @@ export class PaymentTransaction {
 
   @Prop({ default: 'SUCCESS' })
   status: string;
+
+  @Prop({ type: String, enum: PaymentMethod, required: false })
+  payment_method?: PaymentMethod;
 
   @Prop({ default: () => new Date() })
   created_at: Date;

@@ -15,7 +15,8 @@ export interface User {
   address?: string;
   sex?: string;
   age?: number;
-  preferred_credit_card?: string;
+  has_preferred_credit_card?: boolean;
+  preferred_credit_card_masked?: string;
   sky_miles: number;
   role: UserRole;
   created_at?: string;

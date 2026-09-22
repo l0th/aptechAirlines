@@ -8,7 +8,7 @@ import { UsersService } from '../users/users.service';
 import { PoliciesService } from '../policies/policies.service';
 import { MailService } from '../mail/mail.service';
 import { BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
-import { BookingStatus, BookingType, PassengerType } from './bookings.schema';
+import { BookingStatus, BookingType, PassengerType, PaymentMethod } from './bookings.schema';
 import { UserRole } from '../users/users.schema';
 import { getBookingWindowLimits } from '../common/pricing.util';
 import { validate } from 'class-validator';
@@ -77,9 +77,10 @@ describe('BookingsService', () => {
         ],
         legs: [{ flight_id: 'f1', inventory_id: 'i1', leg_type: 'OUTBOUND' }],
         is_block: false,
+        payment_method: PaymentMethod.PROFILE_CARD,
       };
 
-      mockUser = { _id: 'user1', preferred_credit_card: '1234' };
+      mockUser = { _id: 'user1', preferred_credit_card: '4111222233334444' };
       usersService.findById.mockResolvedValue(mockUser);
 
       mockFlight = {
@@ -676,11 +677,11 @@ describe('BookingsService', () => {
       };
       bookingModel.exec.mockResolvedValue(mockBooking);
       flightsService.findById.mockResolvedValue({ distance_miles: 500 });
-      usersService.findById.mockResolvedValue({ sky_miles: 1000 });
+      usersService.findById.mockResolvedValue({ sky_miles: 1000, preferred_credit_card: '4111222233334444' });
     });
 
     it('blocked -> confirmed with new confirmation_number and miles added', async () => {
-      await service.confirmTicket({ blocking_number: 'BLK-1', credit_card_number: '1234' } as any);
+      await service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD });
       expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
       expect(mockBooking.confirmation_number).toBeDefined();
       expect(mockBooking.total_miles_accrued).toBe(500);
@@ -698,7 +699,7 @@ describe('BookingsService', () => {
         if (id === 'f2') return Promise.resolve({ distance_miles: 600 });
       });
 
-      const res = await service.confirmTicket({ blocking_number: 'BLK-1', credit_card_number: '4321' });
+      const res = await service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD });
       expect(res.status).toBe(BookingStatus.CONFIRMED);
       expect(res.confirmation_number).toBeDefined();
       expect(flightsService.reserveSeats).not.toHaveBeenCalled(); // No double reservation!
@@ -708,7 +709,7 @@ describe('BookingsService', () => {
 
     it('expired deadline -> booking auto-cancelled and seats released', async () => {
       mockBooking.time_limit_deadline = new Date(Date.now() - 100000); // expired
-      await expect(service.confirmTicket({ blocking_number: 'BLK-1', credit_card_number: '1234' } as any)).rejects.toThrow(BadRequestException);
+      await expect(service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD })).rejects.toThrow(BadRequestException);
       expect(mockBooking.status).toBe(BookingStatus.CANCELLED);
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1); // 1 passenger
     });
@@ -718,7 +719,7 @@ describe('BookingsService', () => {
       flightsService.updateAvailableSeats.mockRejectedValue(new Error('seat release failed'));
 
       await expect(
-        service.confirmTicket({ blocking_number: 'BLK-1', credit_card_number: '1234' } as any),
+        service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD }),
       ).rejects.toThrow('seat release failed');
 
       expect(mockBooking.status).toBe(BookingStatus.BLOCKED);
@@ -731,7 +732,7 @@ describe('BookingsService', () => {
       mockBooking.save.mockRejectedValue(new Error('mongo save failed'));
 
       await expect(
-        service.confirmTicket({ blocking_number: 'BLK-1', credit_card_number: '1234' } as any),
+        service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD }),
       ).rejects.toThrow('mongo save failed');
 
       expect(flightsService.updateAvailableSeats.mock.calls).toEqual([
@@ -894,7 +895,7 @@ describe('BookingsService', () => {
     it('3. booking.save fails -> new seats released (updateAvailableSeats called with +passengerCount on new flight)', async () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
+        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
       ).rejects.toThrow('DB error');
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 1);
     });
@@ -902,7 +903,7 @@ describe('BookingsService', () => {
     it('4. booking.save fails -> old seats untouched because old seats are never released pre-commit', async () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
+        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
       ).rejects.toThrow('DB error');
       const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
       expect(oldSeatCalls.length).toBe(0);
@@ -915,7 +916,7 @@ describe('BookingsService', () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
 
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
+        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
       ).rejects.toThrow('DB error');
 
       const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
@@ -924,7 +925,7 @@ describe('BookingsService', () => {
     });
 
     it('6. SkyMiles positive delta (one-way longer distance) -> addSkyMiles called with correct delta', async () => {
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
+      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 500);
     });
 
@@ -955,7 +956,7 @@ describe('BookingsService', () => {
     it('9. ROUND_TRIP outbound-only delta ignores unchanged return -> delta = outbound change only', async () => {
       mockBooking.booking_type = 'ROUND_TRIP';
       mockBooking.ticket_coupons.push({ leg_type: 'INBOUND', flight_id: 'f3', inventory_id: 'i3', fare_paid: 100 });
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
+      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 500);
     });
 
@@ -965,13 +966,14 @@ describe('BookingsService', () => {
       await service.rescheduleTicket({
         confirmation_number: 'CNF',
         new_flight_id: 'f2', new_inventory_id: 'i2',
-        new_return_flight_id: 'f4', new_return_inventory_id: 'i4'
+        new_return_flight_id: 'f4', new_return_inventory_id: 'i4',
+        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 600); // 500 outbound + 100 return
     });
 
     it('11. dynamic pricing exact deterministic result -> total_amount = 138 for base=150, 45 days, MEMBER', async () => {
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
+      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
       expect(mockBooking.total_amount).toBe(138); // 150 * 0.92
     });
 
@@ -1068,7 +1070,8 @@ describe('BookingsService', () => {
       const res = await service.rescheduleTicket({
         confirmation_number: 'CNF',
         new_flight_id: 'f2', new_inventory_id: 'i2',
-        new_return_flight_id: 'f4', new_return_inventory_id: 'i4'
+        new_return_flight_id: 'f4', new_return_inventory_id: 'i4',
+        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(res).toBeDefined();
     });
@@ -1113,7 +1116,8 @@ describe('BookingsService', () => {
 
       const res = await service.rescheduleTicket({
         confirmation_number: 'CNF',
-        new_flight_id: 'f2', new_inventory_id: 'i2'
+        new_flight_id: 'f2', new_inventory_id: 'i2',
+        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(res).toBeDefined();
     });
@@ -1184,7 +1188,7 @@ describe('BookingsService', () => {
       const origMiles = mockBooking.total_miles_accrued;
 
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
+        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
       ).rejects.toThrow('DB error');
 
       expect(mockBooking.confirmation_number).toBe(origConf);
@@ -1194,7 +1198,7 @@ describe('BookingsService', () => {
     });
 
     it('25. VND response -> message contains \'VND\', not \'USD\'', async () => {
-      const res = await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
+      const res = await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
       expect(res.message).toContain('VND');
       expect(res.message).not.toContain('USD');
     });
@@ -1213,13 +1217,13 @@ describe('BookingsService', () => {
         operator: 'APTECH_AIRLINES',
         is_bookable: true,
         data_source: 'AIRLABS_COMMERCIALIZED',
+        distance_miles: 400,
         origin_iata: 'HAN',
         dest_iata: 'DAD',
         scheduled_departure: futureDate,
-        scheduled_arrival: new Date(futureDate.getTime() + 75 * 60000),
+        scheduled_arrival: futureArrival,
+        inventories: [{ _id: 'inv_new1', id: 'inv_new1', available_seats: 10, base_price: 150, cabin_class: 'ECONOMY', is_smoking: false }],
         status: 'SCHEDULED',
-        distance_miles: 400,
-        inventories: [{ _id: 'inv_new1', id: 'inv_new1', base_price: 150 }],
       };
       const newLeg2 = {
         _id: 'f_new2',
@@ -1227,13 +1231,13 @@ describe('BookingsService', () => {
         operator: 'APTECH_AIRLINES',
         is_bookable: true,
         data_source: 'AIRLABS_COMMERCIALIZED',
+        distance_miles: 600,
         origin_iata: 'DAD',
         dest_iata: 'SGN',
-        scheduled_departure: new Date(futureDate.getTime() + 150 * 60000), // 75 min layover -> valid
-        scheduled_arrival: new Date(futureDate.getTime() + 225 * 60000),
+        scheduled_departure: new Date(futureArrival.getTime() + 2 * 3600000),
+        scheduled_arrival: new Date(futureArrival.getTime() + 4 * 3600000),
+        inventories: [{ _id: 'inv_new2', id: 'inv_new2', available_seats: 10, base_price: 150, cabin_class: 'ECONOMY', is_smoking: false }],
         status: 'SCHEDULED',
-        distance_miles: 600,
-        inventories: [{ _id: 'inv_new2', id: 'inv_new2', base_price: 150 }],
       };
 
       flightsService.findById.mockImplementation((id: string) => {
@@ -1248,6 +1252,7 @@ describe('BookingsService', () => {
         confirmation_number: 'CNF',
         new_flight_id: 'f_new1',
         new_inventory_id: 'inv_new1',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'f_new1', inventory_id: 'inv_new1' },
           { flight_id: 'f_new2', inventory_id: 'inv_new2' },
@@ -1455,6 +1460,7 @@ describe('BookingsService', () => {
 
       await expect(service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1523,6 +1529,7 @@ describe('BookingsService', () => {
 
       const result = await service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1571,6 +1578,7 @@ describe('BookingsService', () => {
 
       const result = await service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_return_legs: [
           { flight_id: 'nr1', inventory_id: 'nri1' },
           { flight_id: 'nr2', inventory_id: 'nri2' },
@@ -1627,6 +1635,7 @@ describe('BookingsService', () => {
 
       const result = await service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [{ flight_id: 'n1', inventory_id: 'ni1' }, { flight_id: 'n2', inventory_id: 'ni2' }],
         new_return_legs: [{ flight_id: 'nr1', inventory_id: 'nri1' }, { flight_id: 'nr2', inventory_id: 'nri2' }],
       } as any);
@@ -1672,6 +1681,7 @@ describe('BookingsService', () => {
 
       await expect(service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [{ flight_id: 'n1', inventory_id: 'ni1' }, { flight_id: 'n2', inventory_id: 'ni2' }],
       } as any)).rejects.toThrow('DB save failed');
 
@@ -1728,6 +1738,7 @@ describe('BookingsService', () => {
         confirmation_number: 'CNF',
         new_flight_id: 'f2',
         new_inventory_id: 'i2',
+        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
 
       expect(result.booking.status).toBe(BookingStatus.CONFIRMED);
@@ -1768,6 +1779,7 @@ describe('BookingsService', () => {
 
       const result = await service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1934,6 +1946,7 @@ describe('BookingsService', () => {
 
       const res = await service.rescheduleTicket({
         confirmation_number: 'CNF',
+        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'c1', inventory_id: 'ci1' },
           { flight_id: 'c2', inventory_id: 'ci2' },
@@ -2077,6 +2090,7 @@ describe('BookingsService', () => {
           confirmation_number: 'CNF',
           new_flight_id: 'f2',
           new_inventory_id: 'i2',
+          payment_method: PaymentMethod.PROFILE_CARD,
         } as any),
       ).rejects.toThrow('Payment card is required for reschedule fare difference.');
     });
