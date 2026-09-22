@@ -23,11 +23,13 @@ import {
   CreateBookingDto,
   RescheduleTicketDto,
 } from './bookings.dto';
+import { AirportsService } from '../airports/airports.service';
 import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/users.schema';
 import { PoliciesService } from '../policies/policies.service';
 import { applyPricing, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
+import { formatLocalTime } from '../common/timezone.util';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
   BookingSeatSagaOperation,
@@ -59,6 +61,7 @@ export class BookingsService {
     private readonly flightsService: FlightsService,
     private readonly usersService: UsersService,
     private readonly policiesService: PoliciesService,
+    @Optional() private readonly airportsService?: AirportsService,
     @Optional() private readonly seatAllocationService?: SeatAllocationService,
     @Optional()
     @InjectModel(BookingSeatSagaOperation.name)
@@ -700,6 +703,7 @@ export class BookingsService {
       total_miles_accrued: booking.total_miles_accrued,
       payment_transactions: booking.payment_transactions.map((transaction: any) => ({ ...transaction })),
     };
+
     const maskedCard =
       dto.credit_card_number.length >= 4
         ? `**** **** **** ${dto.credit_card_number.slice(-4)}`
@@ -721,6 +725,7 @@ export class BookingsService {
     }
 
     const user = await this.usersService.findById(booking.user_id.toString());
+
     const originalSkyMiles = user.sky_miles || 0;
     let skyMilesCredited = false;
     let businessCommitted = false;
@@ -3540,24 +3545,53 @@ export class BookingsService {
       throw new NotFoundException(`No booking found with code ${code}`);
     }
 
-    // Enrich with flight real-time status and emergency delay reasons
+    // Enrich with flight real-time status, airport timezones and local wall times
     const enrichedCoupons: any[] = [];
     let hasEmergencyChanges = false;
+
+    const tzCache: Record<string, string | undefined> = {};
+    const getTz = async (iata: string): Promise<string | undefined> => {
+      if (!iata) return undefined;
+      if (iata in tzCache) return tzCache[iata];
+      let tz: string | undefined = undefined;
+      if (this.airportsService) {
+        try {
+          const apt = await this.airportsService.findByIata(iata);
+          if (apt?.time_zone) {
+            new Intl.DateTimeFormat('en-US', { timeZone: apt.time_zone });
+            tz = apt.time_zone;
+          }
+        } catch {}
+      } else if (typeof (this.flightsService as any).getAirportTimeZone === 'function') {
+        tz = await (this.flightsService as any).getAirportTimeZone(iata);
+      }
+      tzCache[iata] = tz;
+      return tz;
+    };
 
     for (const coupon of booking.ticket_coupons) {
       const flight = await this.flightsService.findById(coupon.flight_id.toString());
       const isAltered = flight.status !== 'SCHEDULED' || !!flight.delay_reason;
       if (isAltered) hasEmergencyChanges = true;
 
+      const originTz = await getTz(flight.origin_iata);
+      const destTz = await getTz(flight.dest_iata);
+
       enrichedCoupons.push({
         ...coupon,
         origin_iata: flight.origin_iata,
         dest_iata: flight.dest_iata,
+        origin_time_zone: originTz,
+        dest_time_zone: destTz,
         departure_date: flight.departure_date,
         scheduled_departure: flight.scheduled_departure,
         scheduled_arrival: flight.scheduled_arrival,
+        scheduled_departure_local: formatLocalTime(flight.scheduled_departure, originTz),
+        scheduled_arrival_local: formatLocalTime(flight.scheduled_arrival, destTz),
         actual_departure: flight.actual_departure,
         actual_arrival: flight.actual_arrival,
+        actual_departure_local: flight.actual_departure ? formatLocalTime(flight.actual_departure, originTz) : undefined,
+        actual_arrival_local: flight.actual_arrival ? formatLocalTime(flight.actual_arrival, destTz) : undefined,
         flight_status: flight.status,
         delay_reason: flight.delay_reason,
         is_highlighted_change: isAltered,

@@ -55,6 +55,8 @@ export interface Flight {
   dest_time_zone?: string;
   scheduled_departure_local?: string;
   scheduled_arrival_local?: string;
+  actual_departure_local?: string;
+  actual_arrival_local?: string;
   time_zone_diff_minutes?: number;
   created_at?: string;
   updated_at?: string;

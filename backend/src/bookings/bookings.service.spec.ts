@@ -105,6 +105,34 @@ describe('BookingsService', () => {
       await expect(service.createBooking(baseDto)).rejects.toThrow(BadRequestException);
     });
 
+    it('exact 14-day hold boundary policy: 13.99d -> DENIED, 14.00d -> DENIED, 14.01d -> ALLOWED, 14.50d -> ALLOWED, 15.00d -> ALLOWED', async () => {
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      baseDto.is_block = true;
+
+      // 13.99 days -> DENIED
+      mockFlight.scheduled_departure = new Date(Date.now() + 13.99 * DAY_MS);
+      await expect(service.createBooking(baseDto)).rejects.toThrow(BadRequestException);
+
+      // 14.00 days -> DENIED
+      mockFlight.scheduled_departure = new Date(Date.now() + 14.00 * DAY_MS);
+      await expect(service.createBooking(baseDto)).rejects.toThrow(BadRequestException);
+
+      // 14.01 days -> ALLOWED
+      mockFlight.scheduled_departure = new Date(Date.now() + 14.01 * DAY_MS);
+      const res1401 = await service.createBooking(baseDto);
+      expect(res1401.status).toBe(BookingStatus.BLOCKED);
+
+      // 14.50 days -> ALLOWED
+      mockFlight.scheduled_departure = new Date(Date.now() + 14.50 * DAY_MS);
+      const res1450 = await service.createBooking(baseDto);
+      expect(res1450.status).toBe(BookingStatus.BLOCKED);
+
+      // 15.00 days -> ALLOWED
+      mockFlight.scheduled_departure = new Date(Date.now() + 15.00 * DAY_MS);
+      const res1500 = await service.createBooking(baseDto);
+      expect(res1500.status).toBe(BookingStatus.BLOCKED);
+    });
+
     it('sets status BLOCKED + blocking_number + time_limit_deadline + zero miles when is_block=true', async () => {
       baseDto.is_block = true;
       const result = await service.createBooking(baseDto);

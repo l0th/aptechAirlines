@@ -22,7 +22,7 @@ import {
 } from './airlabs-commercial.dto';
 import { AirportsService } from '../airports/airports.service';
 import { Booking, BookingDocument, BookingStatus } from '../bookings/bookings.schema';
-import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes } from '../common/timezone.util';
+import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes, formatLocalTime } from '../common/timezone.util';
 import { earlyBirdQuote, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
 
 import { ReferenceService } from '../reference/reference.service';
@@ -108,11 +108,26 @@ export class FlightsService {
     return flight;
   }
 
+  async getAirportTimeZone(iata: string): Promise<string | undefined> {
+    if (!iata) return undefined;
+    try {
+      const apt = await this.airportsService.findByIata(iata);
+      if (apt?.time_zone) {
+        new Intl.DateTimeFormat('en-US', { timeZone: apt.time_zone });
+        return apt.time_zone;
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * Requirement 3.10: Public flight lookup by flight number and date.
    * Any user (registered or not) can query arrival/departure times.
+   * Enriches result with airport timezone context and local wall times.
    */
-  async findByFlightNumberAndDate(flightNumber: string, date: string): Promise<FlightDocument[]> {
+  async findByFlightNumberAndDate(flightNumber: string, date: string): Promise<any[]> {
     if (!flightNumber || !date) {
       throw new BadRequestException('flight_number and date query params are required');
     }
@@ -140,7 +155,25 @@ export class FlightsService {
       );
     }
 
-    return flights;
+    const enhanced = await Promise.all(
+      flights.map(async (fl) => {
+        const raw = fl.toObject ? fl.toObject() : { ...fl };
+        const originTz = await this.getAirportTimeZone(fl.origin_iata);
+        const destTz = await this.getAirportTimeZone(fl.dest_iata);
+
+        return {
+          ...raw,
+          origin_time_zone: originTz,
+          dest_time_zone: destTz,
+          scheduled_departure_local: formatLocalTime(fl.scheduled_departure, originTz),
+          scheduled_arrival_local: formatLocalTime(fl.scheduled_arrival, destTz),
+          actual_departure_local: fl.actual_departure ? formatLocalTime(fl.actual_departure, originTz) : undefined,
+          actual_arrival_local: fl.actual_arrival ? formatLocalTime(fl.actual_arrival, destTz) : undefined,
+        };
+      }),
+    );
+
+    return enhanced;
   }
 
   private parseAdminTime(timeStr: string, timeZone: string): { date: Date; isWallTime: boolean } {

@@ -1454,4 +1454,86 @@ describe('FlightsService', () => {
       expect(mockBookingSaveFail.ticket_coupons[0].coupon_status).toBe('ACTIVE');
     });
   });
+
+  describe('findByFlightNumberAndDate - 3.10 Timezone Enrichment (Gap 4)', () => {
+    it('enriches lookup result with origin/dest timezones and local wall times', async () => {
+      airportsService.findByIata.mockImplementation((iata: string) => {
+        if (iata === 'ASB') return Promise.resolve({ iata_code: 'ASB', time_zone: 'Asia/Ashgabat' });
+        if (iata === 'FRA') return Promise.resolve({ iata_code: 'FRA', time_zone: 'Europe/Berlin' });
+        return Promise.resolve({ iata_code: iata, time_zone: 'UTC' });
+      });
+
+      const mockLookupFlight: any = {
+        _id: 'flight_lookup_1',
+        flight_number: 'APT5461',
+        origin_iata: 'ASB',
+        dest_iata: 'FRA',
+        departure_date: '2026-10-28',
+        // 2026-10-28 13:20 ASB (GMT+5) = 2026-10-28 08:20:00Z
+        scheduled_departure: new Date('2026-10-28T08:20:00.000Z'),
+        // 2026-10-28 15:20 FRA (Europe/Berlin winter GMT+1) = 2026-10-28 14:20:00Z
+        scheduled_arrival: new Date('2026-10-28T14:20:00.000Z'),
+        actual_departure: new Date('2026-10-28T09:00:00.000Z'), // 14:00 ASB
+        actual_arrival: new Date('2026-10-28T15:00:00.000Z'), // 16:00 FRA
+        duration_minutes: 360,
+        status: 'DELAYED',
+        toObject: function() { return { ...this }; },
+      };
+
+      flightModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([mockLookupFlight]),
+        }),
+      });
+
+      const results = await service.findByFlightNumberAndDate('APT5461', '2026-10-28');
+
+      expect(results).toHaveLength(1);
+      const res = results[0];
+      expect(res.origin_time_zone).toBe('Asia/Ashgabat');
+      expect(res.dest_time_zone).toBe('Europe/Berlin');
+      expect(res.scheduled_departure_local).toBe('2026-10-28 13:20');
+      expect(res.scheduled_arrival_local).toBe('2026-10-28 15:20');
+      expect(res.actual_departure_local).toBe('2026-10-28 14:00');
+      expect(res.actual_arrival_local).toBe('2026-10-28 16:00');
+      // Verify authoritative UTC instants are preserved untouched
+      expect(res.scheduled_departure).toEqual(new Date('2026-10-28T08:20:00.000Z'));
+      expect(res.scheduled_arrival).toEqual(new Date('2026-10-28T14:20:00.000Z'));
+    });
+
+    it('fails closed when airport timezone is missing or invalid (never defaults to UTC)', async () => {
+      airportsService.findByIata.mockImplementation((iata: string) => {
+        if (iata === 'UNKNOWN1') return Promise.resolve(null);
+        if (iata === 'INVALID_TZ') return Promise.resolve({ iata_code: 'INVALID_TZ', time_zone: 'Invalid/Not_A_Zone' });
+        return Promise.resolve(null);
+      });
+
+      const mockLookupFlight: any = {
+        _id: 'flight_lookup_fail_closed',
+        flight_number: 'APT9999',
+        origin_iata: 'UNKNOWN1',
+        dest_iata: 'INVALID_TZ',
+        departure_date: '2026-10-28',
+        scheduled_departure: new Date('2026-10-28T08:20:00.000Z'),
+        scheduled_arrival: new Date('2026-10-28T14:20:00.000Z'),
+        status: 'SCHEDULED',
+        toObject: function() { return { ...this }; },
+      };
+
+      flightModel.find.mockReturnValue({
+        sort: jest.fn().mockReturnValue({
+          exec: jest.fn().mockResolvedValue([mockLookupFlight]),
+        }),
+      });
+
+      const results = await service.findByFlightNumberAndDate('APT9999', '2026-10-28');
+
+      expect(results).toHaveLength(1);
+      const res = results[0];
+      expect(res.origin_time_zone).toBeUndefined();
+      expect(res.dest_time_zone).toBeUndefined();
+      expect(res.scheduled_departure_local).toBeUndefined();
+      expect(res.scheduled_arrival_local).toBeUndefined();
+    });
+  });
 });

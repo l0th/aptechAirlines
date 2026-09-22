@@ -1553,7 +1553,7 @@ export class ReservationDeskComponent implements OnInit {
     const depTime = new Date(depStr).getTime();
     const now = Date.now();
     const diffDays = (depTime - now) / (1000 * 60 * 60 * 24);
-    return Math.floor(diffDays) > 14;
+    return diffDays > 14;
   }
 
   resolveConnectingInventory(

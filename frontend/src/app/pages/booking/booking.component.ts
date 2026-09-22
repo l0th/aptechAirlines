@@ -1004,10 +1004,8 @@ export class BookingComponent implements OnInit {
     this.holdDeadline = new Date(earliest.getTime() - 14 * 24 * 60 * 60 * 1000);
 
     // Requirement 3.3.4 & 3.5: free hold only when days-until-departure > 14.
-    // Math.floor keeps the frontend STRICTER than the backend (float compare
-    // `<= 14`), so a hold can never bounce back with a 400.
     const diffDays = (earliest.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    this.canHoldTicket = Math.floor(diffDays) > 14;
+    this.canHoldTicket = diffDays > 14;
     this.isBlock.set(this.canHoldTicket);
   }
 

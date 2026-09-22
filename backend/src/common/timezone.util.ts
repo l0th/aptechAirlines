@@ -189,3 +189,22 @@ export function resolveLocalWallTimeToUtc(
   // select the earlier instant (first occurrence / daylight saving time).
   return uniqueInstants[0];
 }
+
+/**
+ * Format a UTC Date instant into local airport wall time string (YYYY-MM-DD HH:mm) in timeZone.
+ * Handles DST transitions dynamically without server or browser local skew.
+ */
+export function formatLocalTime(
+  d: Date | string | undefined | null,
+  tz: string | undefined | null,
+): string | undefined {
+  if (!d || !tz) return undefined;
+  const dateObj = typeof d === 'string' ? new Date(d) : d;
+  if (isNaN(dateObj.getTime())) return undefined;
+  try {
+    const parts = getLocalWallTimeParts(dateObj, tz);
+    return `${parts.dateStr} ${parts.hhmm}`;
+  } catch {
+    return undefined;
+  }
+}

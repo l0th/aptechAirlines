@@ -5,6 +5,7 @@ import { ApiService } from '../../core/services/api.service';
 import { LanguageService } from '../../core/services/language.service';
 import { Flight, FlightStatus } from '../../core/models/flight.model';
 import { IconComponent } from '../../shared/components/icon/icon.component';
+import { isValidIanaTimeZone, getTimezoneGmtOffset, utcToWallTime } from '../../core/utils/timezone.util';
 
 @Component({
   selector: 'app-flight-lookup',
@@ -113,16 +114,30 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
                   <div class="flex items-center gap-6 text-sm text-right">
                     <div>
                       <div class="text-xs text-slate-500 mb-1">{{ lang.t('lookup.departure') || 'Departure' }}</div>
-                      <div class="font-bold" [class.line-through]="flight.actual_departure">{{ flight.scheduled_departure | date:'shortTime' }}</div>
-                      @if (flight.actual_departure) {
-                        <div class="font-bold text-amber-600">{{ flight.actual_departure | date:'shortTime' }}</div>
+                      <div class="font-bold text-base font-mono text-navy" [class.line-through]="flight.actual_departure_local || flight.actual_departure">
+                        {{ formatLocalTimeOnly(flight.scheduled_departure_local, flight.scheduled_departure, flight.origin_time_zone) }}
+                      </div>
+                      <div class="text-[11px] text-slate-400 font-medium">
+                        {{ getAirportTzContext(flight.origin_iata, flight.origin_time_zone, flight.scheduled_departure) }}
+                      </div>
+                      @if (flight.actual_departure_local || flight.actual_departure) {
+                        <div class="font-bold text-base font-mono text-amber-600 mt-1">
+                          {{ formatLocalTimeOnly(flight.actual_departure_local, flight.actual_departure, flight.origin_time_zone) }}
+                        </div>
                       }
                     </div>
                     <div>
                       <div class="text-xs text-slate-500 mb-1">{{ lang.t('lookup.arrival') || 'Arrival' }}</div>
-                      <div class="font-bold" [class.line-through]="flight.actual_arrival">{{ flight.scheduled_arrival | date:'shortTime' }}</div>
-                      @if (flight.actual_arrival) {
-                        <div class="font-bold text-amber-600">{{ flight.actual_arrival | date:'shortTime' }}</div>
+                      <div class="font-bold text-base font-mono text-navy" [class.line-through]="flight.actual_arrival_local || flight.actual_arrival">
+                        {{ formatLocalTimeOnly(flight.scheduled_arrival_local, flight.scheduled_arrival, flight.dest_time_zone) }}
+                      </div>
+                      <div class="text-[11px] text-slate-400 font-medium">
+                        {{ getAirportTzContext(flight.dest_iata, flight.dest_time_zone, flight.scheduled_arrival) }}
+                      </div>
+                      @if (flight.actual_arrival_local || flight.actual_arrival) {
+                        <div class="font-bold text-base font-mono text-amber-600 mt-1">
+                          {{ formatLocalTimeOnly(flight.actual_arrival_local, flight.actual_arrival, flight.dest_time_zone) }}
+                        </div>
                       }
                     </div>
                   </div>
@@ -187,6 +202,36 @@ export class FlightLookupComponent {
     const mins = minutes && minutes > 0 ? minutes : Number((reason || '').match(/trễ\s+(\d+)\s+phút/i)?.[1] || 0);
     if (mins > 0) return this.lang.t('track.delayMinutes').replace('{n}', String(mins));
     return reason || '';
+  }
+
+  formatLocalTimeOnly(localStr?: string | null, utcInstant?: string | Date | null, tz?: string | null): string {
+    if (!tz || !isValidIanaTimeZone(tz)) {
+      return '--:--';
+    }
+    if (localStr) {
+      const match = localStr.match(/\b(\d{2}:\d{2})\b/);
+      if (match) return match[1];
+    }
+    if (utcInstant) {
+      const wall = utcToWallTime(utcInstant, tz);
+      if (wall && wall.includes('T')) {
+        return wall.split('T')[1].substring(0, 5);
+      }
+    }
+    return '--:--';
+  }
+
+  getAirportTzContext(iata?: string | null, tz?: string | null, refDate?: string | Date | null): string {
+    const code = iata || '---';
+    if (!tz || !isValidIanaTimeZone(tz)) {
+      return `${code} · ${this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable'}`;
+    }
+    const d = refDate ? new Date(refDate) : undefined;
+    const offset = getTimezoneGmtOffset(tz, d && !isNaN(d.getTime()) ? d : undefined);
+    if (!offset || offset === 'INVALID_TZ') {
+      return `${code} · ${this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable'}`;
+    }
+    return `${code} · ${offset}`;
   }
 }
 

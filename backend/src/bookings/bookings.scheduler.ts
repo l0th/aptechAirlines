@@ -79,7 +79,13 @@ export class BookingsScheduler {
         }
 
         const reminderBody = await this.buildReminderBody(booking, user, earliestDeparture);
-        await this.mailService.sendBlockedTicketReminder(toEmail, reminderBody);
+        const mailSent = await this.mailService.sendBlockedTicketReminder(toEmail, reminderBody);
+        if (!mailSent) {
+          this.logger.warn(
+            `Reminder email delivery returned false for booking ${booking.pnr_code} (${toEmail}); leaving unreminded for retry`,
+          );
+          continue;
+        }
 
         booking.is_reminder_sent = true;
         await booking.save();

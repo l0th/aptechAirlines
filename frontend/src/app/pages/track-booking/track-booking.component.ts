@@ -12,6 +12,7 @@ import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
 import { FlightDurationPipe } from '../../shared/pipes/duration.pipe';
 import { BookingStatus, CancellationPolicy } from '../../core/models/booking.model';
 import { ConnectingRouteOption, Flight, FlightStatus } from '../../core/models/flight.model';
+import { isValidIanaTimeZone, getTimezoneGmtOffset, utcToWallTime } from '../../core/utils/timezone.util';
 
 /* ------------------------------------------------------------------ *
  * LOCAL SHAPES — khớp CHÍNH XÁC shape thật của backend.
@@ -80,11 +81,17 @@ interface LocalFlightCouponEnrichment {
   flight_id?: string;
   origin_iata?: string;
   dest_iata?: string;
+  origin_time_zone?: string;
+  dest_time_zone?: string;
   departure_date?: string;
   scheduled_departure?: string;
   scheduled_arrival?: string;
+  scheduled_departure_local?: string;
+  scheduled_arrival_local?: string;
   actual_departure?: string;
   actual_arrival?: string;
+  actual_departure_local?: string;
+  actual_arrival_local?: string;
   flight_status?: string;
   delay_reason?: string;
   is_highlighted_change?: boolean;
@@ -106,11 +113,17 @@ interface TrackedLegView {
   flight_number: string;
   origin_iata: string;
   dest_iata: string;
+  origin_time_zone?: string;
+  dest_time_zone?: string;
   departure_date?: string;
   scheduled_departure?: string;
   scheduled_arrival?: string;
+  scheduled_departure_local?: string;
+  scheduled_arrival_local?: string;
   actual_departure?: string;
   actual_arrival?: string;
+  actual_departure_local?: string;
+  actual_arrival_local?: string;
   flight_status?: string;
   delay_reason?: string;
   delay_minutes?: number;
@@ -377,11 +390,13 @@ interface TrackedPassengerView {
                           </div>
                           <div class="mt-1 text-[11px]">
                             {{ lang.isVietnamese() ? 'Giờ dự kiến: ' : 'Scheduled: ' }}
-                            <strong>{{ leg.scheduled_departure ? (leg.scheduled_departure | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
-                            @if (leg.actual_departure != null) {
+                            <strong>{{ formatAirportTime(leg.scheduled_departure_local, leg.scheduled_departure, leg.origin_time_zone) }}</strong>
+                            <span class="text-slate-500 text-[10px] ml-1">({{ getAirportTzContext(leg.origin_iata, leg.origin_time_zone, leg.scheduled_departure) }})</span>
+                            @if (leg.actual_departure != null || leg.actual_departure_local != null) {
                               <span class="mx-1">•</span>
                               {{ lang.isVietnamese() ? 'Giờ thực tế: ' : 'Actual: ' }}
-                              <strong class="text-rose-700">{{ leg.actual_departure | date: 'dd/MM/yyyy HH:mm' }}</strong>
+                              <strong class="text-rose-700">{{ formatAirportTime(leg.actual_departure_local, leg.actual_departure, leg.origin_time_zone) }}</strong>
+                              <span class="text-slate-500 text-[10px] ml-1">({{ getAirportTzContext(leg.origin_iata, leg.origin_time_zone, leg.actual_departure) }})</span>
                             }
                           </div>
                           @if (leg.delay_reason || leg.delay_minutes) {
@@ -505,13 +520,19 @@ interface TrackedPassengerView {
                               }
                             </div>
                             <div class="text-xs text-slate-500 mt-1">
-                              {{ lang.isVietnamese() ? 'Khởi hành: ' : 'Departure: ' }}<strong>{{ leg.scheduled_departure ? (leg.scheduled_departure | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
+                              {{ lang.isVietnamese() ? 'Khởi hành: ' : 'Departure: ' }}
+                              <strong>{{ formatAirportTime(leg.scheduled_departure_local, leg.scheduled_departure, leg.origin_time_zone) }}</strong>
+                              <span class="text-slate-400 text-[11px] ml-1">({{ getAirportTzContext(leg.origin_iata, leg.origin_time_zone, leg.scheduled_departure) }})</span>
                               <span class="mx-1">•</span>
-                              {{ lang.isVietnamese() ? 'Đến: ' : 'Arrival: ' }}<strong>{{ leg.scheduled_arrival ? (leg.scheduled_arrival | date: 'dd/MM/yyyy HH:mm') : '—' }}</strong>
+                              {{ lang.isVietnamese() ? 'Đến: ' : 'Arrival: ' }}
+                              <strong>{{ formatAirportTime(leg.scheduled_arrival_local, leg.scheduled_arrival, leg.dest_time_zone) }}</strong>
+                              <span class="text-slate-400 text-[11px] ml-1">({{ getAirportTzContext(leg.dest_iata, leg.dest_time_zone, leg.scheduled_arrival) }})</span>
                             </div>
-                            @if (leg.actual_departure != null) {
+                            @if (leg.actual_departure != null || leg.actual_departure_local != null) {
                               <div class="text-[11px] text-rose-600 mt-0.5">
-                                {{ lang.isVietnamese() ? 'Thực tế: ' : 'Actual: ' }}<strong>{{ leg.actual_departure | date: 'dd/MM/yyyy HH:mm' }}</strong>
+                                {{ lang.isVietnamese() ? 'Thực tế: ' : 'Actual: ' }}
+                                <strong>{{ formatAirportTime(leg.actual_departure_local, leg.actual_departure, leg.origin_time_zone) }}</strong>
+                                <span class="text-slate-500 text-[10px] ml-1">({{ getAirportTzContext(leg.origin_iata, leg.origin_time_zone, leg.actual_departure) }})</span>
                                 @if (leg.delay_reason || leg.delay_minutes) {
                                   <span> — {{ delayText(leg.delay_reason, leg.delay_minutes) }}</span>
                                 }
@@ -1325,11 +1346,17 @@ export class TrackBookingComponent implements OnInit {
         flight_number: first.flight_number,
         origin_iata: info.origin_iata || '',
         dest_iata: info.dest_iata || '',
+        origin_time_zone: info.origin_time_zone,
+        dest_time_zone: info.dest_time_zone,
         departure_date: info.departure_date || (info.scheduled_departure ? info.scheduled_departure.slice(0, 10) : ''),
         scheduled_departure: info.scheduled_departure,
         scheduled_arrival: info.scheduled_arrival,
+        scheduled_departure_local: info.scheduled_departure_local,
+        scheduled_arrival_local: info.scheduled_arrival_local,
         actual_departure: info.actual_departure,
         actual_arrival: info.actual_arrival,
+        actual_departure_local: info.actual_departure_local,
+        actual_arrival_local: info.actual_arrival_local,
         flight_status: info.flight_status,
         delay_reason: info.delay_reason || '',
         is_highlighted_change: isAltered,
@@ -2636,5 +2663,40 @@ export class TrackBookingComponent implements OnInit {
 
     used.add(idx);
     return coupons[idx];
+  }
+
+  formatAirportTime(localStr?: string | null, utcInstant?: string | Date | null, tz?: string | null): string {
+    if (!tz || !isValidIanaTimeZone(tz)) {
+      return this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable';
+    }
+    if (localStr) {
+      const match = localStr.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})$/);
+      if (match) {
+        return `${match[3]}/${match[2]}/${match[1]} ${match[4]}`;
+      }
+      return localStr;
+    }
+    if (utcInstant) {
+      const wall = utcToWallTime(utcInstant, tz);
+      if (wall && wall.includes('T')) {
+        const [d, t] = wall.split('T');
+        const [y, m, day] = d.split('-');
+        return `${day}/${m}/${y} ${t.substring(0, 5)}`;
+      }
+    }
+    return this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable';
+  }
+
+  getAirportTzContext(iata?: string | null, tz?: string | null, refDate?: string | Date | null): string {
+    const code = iata || '---';
+    if (!tz || !isValidIanaTimeZone(tz)) {
+      return `${code} (${this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable'})`;
+    }
+    const d = refDate ? new Date(refDate) : undefined;
+    const offset = getTimezoneGmtOffset(tz, d && !isNaN(d.getTime()) ? d : undefined);
+    if (!offset || offset === 'INVALID_TZ') {
+      return `${code} (${this.lang.isVietnamese() ? 'Không có dữ liệu múi giờ' : 'Timezone unavailable'})`;
+    }
+    return `${code} · ${offset}`;
   }
 }
