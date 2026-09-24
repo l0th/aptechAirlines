@@ -169,11 +169,13 @@ import {
             <form (ngSubmit)="searchNetworkDiscovery()" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
               <!-- Origin Input -->
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 h-4 flex items-center">
                   {{ lang.t('admin.commercial.discOrigin') }} *
                 </label>
                 <div class="relative">
-                  <app-icon name="planetakeoff" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <app-icon name="planetakeoff" class="w-4 h-4" />
+                  </div>
                   <input
                     type="text"
                     [ngModel]="discOrigin()"
@@ -188,11 +190,13 @@ import {
 
               <!-- Destination Input -->
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 h-4 flex items-center">
                   {{ lang.t('admin.commercial.discDest') }} *
                 </label>
                 <div class="relative">
-                  <app-icon name="planelanding" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <app-icon name="planelanding" class="w-4 h-4" />
+                  </div>
                   <input
                     type="text"
                     [ngModel]="discDestination()"
@@ -207,11 +211,13 @@ import {
 
               <!-- Departure Date -->
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 h-4 flex items-center">
                   {{ lang.t('admin.commercial.discDate') }} *
                 </label>
                 <div class="relative">
-                  <app-icon name="calendar" class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <app-icon name="calendar" class="w-4 h-4" />
+                  </div>
                   <input
                     type="date"
                     [ngModel]="discDepartureDate()"
@@ -225,7 +231,7 @@ import {
 
               <!-- Max Stops -->
               <div>
-                <label class="block text-xs font-bold text-slate-700 mb-1.5">
+                <label class="block text-xs font-bold text-slate-700 mb-1.5 h-4 flex items-center">
                   {{ lang.t('admin.commercial.discMaxStops') }}
                 </label>
                 <div class="relative">

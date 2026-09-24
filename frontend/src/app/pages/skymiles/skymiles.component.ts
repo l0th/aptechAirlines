@@ -1,4 +1,4 @@
-import { Component, OnInit, effect, inject, signal, untracked } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -241,7 +241,27 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
         <!-- Membership Tiers Grid -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
           <!-- Silver Tier -->
-          <div class="card-luxury p-6 border-slate-200 shadow-sm relative">
+          <div
+            class="card-luxury p-6 relative transition-all duration-300"
+            [class.border-slate-400]="currentTier() === 'SILVER'"
+            [class.ring-2]="currentTier() === 'SILVER'"
+            [class.ring-slate-400]="currentTier() === 'SILVER'"
+            [class.shadow-2xl]="currentTier() === 'SILVER'"
+            [class.scale-[1.02]]="currentTier() === 'SILVER'"
+            [class.bg-gradient-to-b]="currentTier() === 'SILVER'"
+            [class.from-slate-50]="currentTier() === 'SILVER'"
+            [class.to-white]="currentTier() === 'SILVER'"
+            [class.border-slate-200]="currentTier() !== 'SILVER'"
+            [class.shadow-sm]="currentTier() !== 'SILVER'"
+            [class.opacity-40]="currentTier() !== null && currentTier() !== 'SILVER'"
+            [class.hover:opacity-80]="currentTier() !== null && currentTier() !== 'SILVER'"
+          >
+            @if (currentTier() === 'SILVER') {
+              <div class="absolute -top-3 right-6 bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider px-3.5 py-1 rounded-full shadow-md flex items-center gap-1.5 border border-slate-600">
+                <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-emerald-400" />
+                <span>{{ lang.isVietnamese() ? 'Hạng của bạn' : 'Your Tier' }}</span>
+              </div>
+            }
             <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center mb-4 font-bold border border-slate-300">
               <app-icon name="award" class="w-6 h-6" />
             </div>
@@ -269,10 +289,33 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           </div>
 
           <!-- Gold Tier -->
-          <div class="card-luxury p-6 border-amber-300 shadow-md relative bg-gradient-to-b from-amber-50/40 to-white">
-            <div class="absolute -top-3 right-6 bg-gold text-navy font-bold text-[10px] uppercase tracking-wider px-3 py-1 rounded-full shadow">
-              {{ lang.isVietnamese() ? 'Phổ Biến Nhất' : 'Most Popular' }}
-            </div>
+          <div
+            class="card-luxury p-6 relative transition-all duration-300"
+            [class.border-amber-400]="currentTier() === 'GOLD'"
+            [class.ring-2]="currentTier() === 'GOLD'"
+            [class.ring-gold]="currentTier() === 'GOLD'"
+            [class.shadow-2xl]="currentTier() === 'GOLD'"
+            [class.scale-[1.02]]="currentTier() === 'GOLD'"
+            [class.bg-gradient-to-b]="true"
+            [class.from-amber-50/70]="currentTier() === 'GOLD'"
+            [class.from-amber-50/40]="currentTier() !== 'GOLD'"
+            [class.to-white]="true"
+            [class.border-amber-300]="currentTier() !== 'GOLD'"
+            [class.shadow-md]="currentTier() !== 'GOLD' && currentTier() === null"
+            [class.shadow-sm]="currentTier() !== 'GOLD' && currentTier() !== null"
+            [class.opacity-40]="currentTier() !== null && currentTier() !== 'GOLD'"
+            [class.hover:opacity-80]="currentTier() !== null && currentTier() !== 'GOLD'"
+          >
+            @if (currentTier() === 'GOLD') {
+              <div class="absolute -top-3 right-6 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-bold text-[10px] uppercase tracking-wider px-3.5 py-1 rounded-full shadow-md flex items-center gap-1.5">
+                <app-icon name="checkcircle2" class="w-3.5 h-3.5 text-white" />
+                <span>{{ lang.isVietnamese() ? 'Hạng của bạn' : 'Your Tier' }}</span>
+              </div>
+            } @else if (currentTier() === null) {
+              <div class="absolute -top-3 right-6 bg-gold text-navy font-bold text-[10px] uppercase tracking-wider px-3 py-1 rounded-full shadow">
+                {{ lang.isVietnamese() ? 'Phổ Biến Nhất' : 'Most Popular' }}
+              </div>
+            }
             <div class="w-12 h-12 rounded-2xl bg-amber-500/20 text-gold flex items-center justify-center mb-4 font-bold border border-gold/40">
               <app-icon name="crown" class="w-6 h-6" />
             </div>
@@ -300,7 +343,27 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           </div>
 
           <!-- Platinum Tier -->
-          <div class="card-luxury p-6 border-navy-light shadow-sm relative">
+          <div
+            class="card-luxury p-6 relative transition-all duration-300"
+            [class.border-navy]="currentTier() === 'PLATINUM'"
+            [class.ring-2]="currentTier() === 'PLATINUM'"
+            [class.ring-navy]="currentTier() === 'PLATINUM'"
+            [class.shadow-2xl]="currentTier() === 'PLATINUM'"
+            [class.scale-[1.02]]="currentTier() === 'PLATINUM'"
+            [class.bg-gradient-to-b]="currentTier() === 'PLATINUM'"
+            [class.from-slate-100/80]="currentTier() === 'PLATINUM'"
+            [class.to-white]="currentTier() === 'PLATINUM'"
+            [class.border-navy-light]="currentTier() !== 'PLATINUM'"
+            [class.shadow-sm]="currentTier() !== 'PLATINUM'"
+            [class.opacity-40]="currentTier() !== null && currentTier() !== 'PLATINUM'"
+            [class.hover:opacity-80]="currentTier() !== null && currentTier() !== 'PLATINUM'"
+          >
+            @if (currentTier() === 'PLATINUM') {
+              <div class="absolute -top-3 right-6 bg-navy text-gold font-bold text-[10px] uppercase tracking-wider px-3.5 py-1 rounded-full shadow-md flex items-center gap-1.5 border border-gold/40">
+                <app-icon name="crown" class="w-3.5 h-3.5 text-gold" />
+                <span>{{ lang.isVietnamese() ? 'Hạng của bạn' : 'Your Tier' }}</span>
+              </div>
+            }
             <div class="w-12 h-12 rounded-2xl bg-navy text-gold flex items-center justify-center mb-4 font-bold">
               <app-icon name="shieldcheck" class="w-6 h-6" />
             </div>
@@ -385,6 +448,14 @@ export class SkyMilesComponent implements OnInit {
 
   readonly activeTab = signal<'skymiles' | 'profile'>('skymiles');
   readonly saving = signal(false);
+
+  readonly currentTier = computed<'SILVER' | 'GOLD' | 'PLATINUM' | null>(() => {
+    if (!this.auth.isAuthenticated()) return null;
+    const miles = this.auth.currentUser()?.sky_miles ?? 0;
+    if (miles >= 100000) return 'PLATINUM';
+    if (miles >= 50000) return 'GOLD';
+    return 'SILVER';
+  });
 
   calcDistance = 720;
   calcClass = 'ECONOMY';
