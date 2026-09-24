@@ -11,6 +11,7 @@ import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { BookingsScheduler } from './bookings.scheduler';
 import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module';
+import { PaypalModule } from '../paypal/paypal.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module'
     AuthModule,
     MailModule,
     SeatAllocationModule,
+    PaypalModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService, BookingsScheduler],

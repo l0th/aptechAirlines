@@ -183,7 +183,7 @@ import { CabinClass } from '../../core/models/flight.model';
               <label class="text-xs font-bold text-slate-500 hidden sm:block">{{ lang.t('search.cabinClass') }}:</label>
               <select
                 [(ngModel)]="cabinClass"
-                class="bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gold/50"
+                class="bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gold/50"
               >
                 <option [value]="CabinClass.ECONOMY">{{ lang.t('search.economy') }}</option>
                 <option [value]="CabinClass.BUSINESS">{{ lang.t('search.business') }}</option>
@@ -197,7 +197,7 @@ import { CabinClass } from '../../core/models/flight.model';
               <label class="text-xs font-bold text-slate-500 hidden sm:block">{{ lang.t('search.smoking') }}:</label>
               <select
                 [(ngModel)]="isSmoking"
-                class="bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gold/50"
+                class="bg-slate-50 border border-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gold/50"
               >
                 <option [ngValue]="undefined">{{ lang.t('search.smokingAll') }}</option>
                 <option [ngValue]="true">{{ lang.t('search.smokingYes') }}</option>
@@ -210,7 +210,7 @@ import { CabinClass } from '../../core/models/flight.model';
           <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
             
             <!-- Origin -->
-            <div class="md:col-span-3 relative" #originContainer>
+            <div class="md:col-span-5 relative" #originContainer>
               <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span class="flex items-center gap-1.5">
                   <app-icon name="planetakeoff" class="w-4 h-4 text-gold" />
@@ -264,9 +264,9 @@ import { CabinClass } from '../../core/models/flight.model';
                   <button
                     type="button"
                     (click)="originScope.set(null)"
-                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none"
+                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none inline-flex items-center"
                   >
-                    &times;
+                    <app-icon name="x" class="w-3 h-3" />
                   </button>
                 </div>
               }
@@ -414,7 +414,7 @@ import { CabinClass } from '../../core/models/flight.model';
             </div>
 
             <!-- Swap Button -->
-            <div class="md:col-span-1 flex justify-center pb-2">
+            <div class="md:col-span-2 flex justify-center pb-2">
               <button
                 type="button"
                 (click)="swapAirports()"
@@ -426,7 +426,7 @@ import { CabinClass } from '../../core/models/flight.model';
             </div>
 
             <!-- Destination -->
-            <div class="md:col-span-3 relative" #destContainer>
+            <div class="md:col-span-5 relative" #destContainer>
               <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center justify-between">
                 <span class="flex items-center gap-1.5">
                   <app-icon name="planelanding" class="w-4 h-4 text-gold" />
@@ -480,9 +480,9 @@ import { CabinClass } from '../../core/models/flight.model';
                   <button
                     type="button"
                     (click)="destScope.set(null)"
-                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none"
+                    class="text-amber-500 hover:text-amber-800 font-bold ml-0.5 leading-none inline-flex items-center"
                   >
-                    &times;
+                    <app-icon name="x" class="w-3 h-3" />
                   </button>
                 </div>
               }
@@ -630,7 +630,7 @@ import { CabinClass } from '../../core/models/flight.model';
             </div>
 
             <!-- Departure Date -->
-            <div [class.md:col-span-2]="isRoundTrip()" [class.md:col-span-3]="!isRoundTrip()">
+            <div [class.md:col-span-4]="isRoundTrip()" [class.md:col-span-6]="!isRoundTrip()">
               <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <app-icon name="calendar" class="w-4 h-4 text-gold" />
                 <span>{{ lang.t('search.depDate') }}</span>
@@ -650,7 +650,7 @@ import { CabinClass } from '../../core/models/flight.model';
 
             <!-- Return Date (Only if Round Trip) -->
             @if (isRoundTrip()) {
-              <div class="md:col-span-3">
+              <div class="md:col-span-4">
                 <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <app-icon name="calendar" class="w-4 h-4 text-gold" />
                   <span>{{ lang.t('search.retDate') }}</span>
@@ -666,7 +666,7 @@ import { CabinClass } from '../../core/models/flight.model';
             }
 
             <!-- Passengers Dropdown Pill -->
-            <div class="md:col-span-2">
+            <div [class.md:col-span-4]="isRoundTrip()" [class.md:col-span-6]="!isRoundTrip()">
               <label class="block text-xs font-bold text-navy uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <app-icon name="users" class="w-4 h-4 text-gold" />
                 <span>{{ lang.t('home.passengersLabel') }}</span>

@@ -17,7 +17,10 @@
     "migrate:phase-b": "ts-node src/scripts/migrate-phase-b-seats.ts --execute",
     "migrate:phase-b:dry-run": "ts-node src/scripts/migrate-phase-b-seats.ts --dry-run",
     "repair:reference-data:dry-run": "ts-node src/scripts/repair-reference-data.ts --dry-run",
-    "repair:reference-data": "ts-node src/scripts/repair-reference-data.ts --execute"
+    "repair:reference-data": "ts-node src/scripts/repair-reference-data.ts --execute",
+    "seed:e2e": "ts-node src/scripts/seed-e2e-demo.ts",
+    "seed:e2e:cleanup": "ts-node src/scripts/seed-e2e-demo.ts --cleanup",
+    "verify:e2e:matrix": "ts-node src/scripts/execute-e2e-matrix.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -27,6 +30,7 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.3.0",
     "@nestjs/schedule": "^4.1.2",
+    "@paypal/paypal-server-sdk": "^2.5.0",
     "@types/tz-lookup": "^6.1.2",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",

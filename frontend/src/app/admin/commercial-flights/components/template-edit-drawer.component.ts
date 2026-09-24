@@ -23,7 +23,7 @@ import {
               <app-icon name="edit" class="w-5 h-5 text-gold" />
               <span>{{ lang.t('admin.commercial.drawerEditTitle') }}</span>
             </h3>
-            <button (click)="closeDrawer.emit()" class="text-slate-400 hover:text-slate-600">
+            <button (click)="closeDrawer.emit()" class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100">
               <app-icon name="x" class="w-5 h-5" />
             </button>
           </div>
@@ -35,7 +35,7 @@ import {
               <span class="text-slate-400 mx-1.5 font-mono">({{ template.template_id }})</span>
             </div>
             <div class="font-mono font-bold text-navy">
-              {{ template.origin_iata }} ➔ {{ template.dest_iata }}
+              {{ template.origin_iata }} → {{ template.dest_iata }}
             </div>
           </div>
 

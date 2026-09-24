@@ -31,7 +31,7 @@ import { isValidIanaTimeZone, getTimezoneGmtOffset, utcToWallTime } from '../../
                 type="text"
                 [(ngModel)]="flightNumber"
                 placeholder="VN101"
-                class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-full px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
+                class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
             <div class="sm:col-span-4">
@@ -41,7 +41,7 @@ import { isValidIanaTimeZone, getTimezoneGmtOffset, utcToWallTime } from '../../
               <input
                 type="date"
                 [(ngModel)]="lookupDate"
-                class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-full px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
+                class="w-full bg-slate-50 border border-slate-200 text-slate-900 rounded-xl px-4 py-3.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
             <div class="sm:col-span-3">

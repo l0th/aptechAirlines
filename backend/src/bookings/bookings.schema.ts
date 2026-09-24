@@ -28,6 +28,18 @@ export enum PaymentMethod {
   PAYPAL = 'PAYPAL',
 }
 
+export interface ExternalPaymentProof {
+  payment_method: PaymentMethod;
+  payment_reference: string;
+  expected_amount_vnd: number;
+  provider_order_id: string;
+  provider_capture_id: string;
+  provider_amount: string;
+  provider_currency: string;
+  exchange_rate_vnd_per_unit: number;
+  status: 'SUCCESS';
+}
+
 @Schema({ _id: false })
 export class Passenger {
   @Prop({ required: true })
@@ -104,23 +116,62 @@ export class TicketCoupon {
 
 @Schema({ _id: false })
 export class PaymentTransaction {
+  @Prop({ required: false })
+  payment_reference?: string;
+
+  @Prop({ required: false })
+  source_payment_reference?: string;
+
   @Prop({ required: true })
   transaction_type: string; // PAYMENT, REFUND, RESCHEDULE_CHARGE, RESCHEDULE_REFUND
 
   @Prop({ required: true })
   amount: number;
 
-  @Prop({ required: true })
-  card_masked: string;
+  @Prop({ required: false })
+  card_masked?: string;
 
   @Prop({ default: 'VND' })
   currency?: string;
 
   @Prop({ default: 'SUCCESS' })
-  status: string;
+  status: string; // SUCCESS, PENDING, FAILED
 
   @Prop({ type: String, enum: PaymentMethod, required: false })
   payment_method?: PaymentMethod;
+
+  @Prop({ required: false })
+  payment_provider?: string;
+
+  @Prop({ required: false })
+  provider_order_id?: string;
+
+  @Prop({ required: false })
+  provider_capture_id?: string;
+
+  @Prop({ required: false })
+  provider_refund_id?: string;
+
+  @Prop({ required: false })
+  provider_amount?: string;
+
+  @Prop({ required: false })
+  provider_currency?: string;
+
+  @Prop({ required: false })
+  exchange_rate_vnd_per_unit?: number;
+
+  @Prop({ required: false })
+  provider_status?: string;
+
+  @Prop({ required: false, default: 0 })
+  retry_count?: number;
+
+  @Prop({ required: false })
+  next_retry_at?: Date;
+
+  @Prop({ required: false })
+  failure_reason?: string;
 
   @Prop({ default: () => new Date() })
   created_at: Date;

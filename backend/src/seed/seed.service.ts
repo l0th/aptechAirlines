@@ -29,11 +29,15 @@ export class SeedService implements OnApplicationBootstrap {
   private async seedSuperAdmin() {
     const existingSuperAdmin = await this.userModel.findOne({ role: UserRole.SUPER_ADMIN }).exec();
     if (!existingSuperAdmin) {
+      const rawPassword = process.env.SUPER_ADMIN_PASSWORD;
+      if (!rawPassword) {
+        throw new Error(
+          'FATAL: SUPER_ADMIN_PASSWORD environment variable is required to initialize the initial SUPER_ADMIN account.',
+        );
+      }
+      const adminPassword = rawPassword;
       const salt = await bcrypt.genSalt(10);
-      const password_hash = await bcrypt.hash(
-        process.env.SUPER_ADMIN_PASSWORD || 'SuperAdmin@2026',
-        salt,
-      );
+      const password_hash = await bcrypt.hash(adminPassword, salt);
 
       const superAdmin = new this.userModel({
         username: process.env.SUPER_ADMIN_USERNAME || 'superadmin',

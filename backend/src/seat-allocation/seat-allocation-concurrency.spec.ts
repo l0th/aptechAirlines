@@ -14,7 +14,7 @@ describe('SeatAllocationService Concurrency Integration (Real MongoDB)', () => {
   let allocationModel: Model<SeatAllocationDocument>;
   let connection: Connection;
 
-  const mongoUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27018/airline_db_test';
+  const mongoUri = process.env.TEST_MONGO_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/airline_db_test';
   const testFlightId = new Types.ObjectId();
 
   beforeAll(async () => {

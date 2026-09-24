@@ -205,7 +205,7 @@ export interface SeatPricingRule {
                         <button
                           type="button"
                           (click)="openEditModal(r)"
-                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-full transition-colors"
                           [title]="lang.isVietnamese() ? 'Chỉnh sửa (Tạo phiên bản mới)' : 'Edit (Creates immutable successor)'"
                         >
                           <app-icon name="edit" class="w-4 h-4" />
@@ -214,7 +214,7 @@ export interface SeatPricingRule {
                           <button
                             type="button"
                             (click)="deactivateRule(r)"
-                            class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors"
+                            class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-full transition-colors"
                             [title]="lang.isVietnamese() ? 'Hủy kích hoạt' : 'Deactivate'"
                           >
                             <app-icon name="trash2" class="w-4 h-4" />
@@ -258,7 +258,7 @@ export interface SeatPricingRule {
               <button
                 type="button"
                 (click)="closeModal()"
-                class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-navy-light transition-colors"
+                class="p-1.5 text-slate-400 hover:text-white rounded-full hover:bg-navy-light transition-colors"
               >
                 <app-icon name="x" class="w-4 h-4" />
               </button>
@@ -292,14 +292,14 @@ export interface SeatPricingRule {
                   class="w-full rounded-xl border border-slate-300 py-2 px-3 bg-white font-mono"
                   [class.bg-slate-100]="isEditing()"
                 >
-                  <option value="CABIN_BASE">CABIN_BASE (Giá nền theo hạng ghế)</option>
-                  <option value="WINDOW">WINDOW (Ghế cạnh cửa sổ)</option>
-                  <option value="AISLE">AISLE (Ghế cạnh lối đi)</option>
-                  <option value="MIDDLE">MIDDLE (Ghế ở giữa)</option>
-                  <option value="FRONT_ZONE">FRONT_ZONE (Khu vực phía trước máy bay)</option>
-                  <option value="EXIT_ROW">EXIT_ROW (Hàng ghế thoát hiểm khẩn cấp)</option>
-                  <option value="EXTRA_LEGROOM">EXTRA_LEGROOM (Khoảng để chân rộng)</option>
-                  <option value="BULKHEAD">BULKHEAD (Hàng ghế sát vách ngăn)</option>
+                  <option value="CABIN_BASE">CABIN_BASE ({{ lang.isVietnamese() ? 'Giá nền theo hạng ghế' : 'Cabin base baseline' }})</option>
+                  <option value="WINDOW">WINDOW ({{ lang.isVietnamese() ? 'Ghế cạnh cửa sổ' : 'Window seat' }})</option>
+                  <option value="AISLE">AISLE ({{ lang.isVietnamese() ? 'Ghế cạnh lối đi' : 'Aisle seat' }})</option>
+                  <option value="MIDDLE">MIDDLE ({{ lang.isVietnamese() ? 'Ghế ở giữa' : 'Middle seat' }})</option>
+                  <option value="FRONT_ZONE">FRONT_ZONE ({{ lang.isVietnamese() ? 'Khu vực phía trước máy bay' : 'Front cabin zone' }})</option>
+                  <option value="EXIT_ROW">EXIT_ROW ({{ lang.isVietnamese() ? 'Hàng ghế thoát hiểm khẩn cấp' : 'Emergency exit row' }})</option>
+                  <option value="EXTRA_LEGROOM">EXTRA_LEGROOM ({{ lang.isVietnamese() ? 'Khoảng để chân rộng' : 'Extra legroom' }})</option>
+                  <option value="BULKHEAD">BULKHEAD ({{ lang.isVietnamese() ? 'Hàng ghế sát vách ngăn' : 'Bulkhead wall row' }})</option>
                 </select>
               </div>
 

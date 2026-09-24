@@ -175,7 +175,7 @@ describe('Payment Phase 1A Specification Tests', () => {
           passengers: [{ first_name: 'A', last_name: 'B' } as any],
           legs: [{ flight_id: 'f1', inventory_id: 'i1' }],
         }),
-      ).rejects.toThrow('PayPal payment is not yet active.');
+      ).rejects.toThrow('[createBooking:preflight] Missing PayPal external payment proof');
 
       expect(flightsService.reserveSeats).not.toHaveBeenCalled();
     });

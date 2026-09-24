@@ -21,7 +21,7 @@ import {
   CommercialNetworkDiscoveryResponse,
 } from './airlabs-commercial.dto';
 import { AirportsService } from '../airports/airports.service';
-import { Booking, BookingDocument, BookingStatus } from '../bookings/bookings.schema';
+import { Booking, BookingDocument, BookingStatus, PaymentMethod } from '../bookings/bookings.schema';
 import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes, formatLocalTime } from '../common/timezone.util';
 import { earlyBirdQuote, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
 
@@ -32,6 +32,8 @@ import { UsersService } from '../users/users.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import { FLEET_LAYOUT_CATALOG } from '../seat-allocation/fleet-layout.catalog';
 import { MailService, ItineraryLegData, isValidMaskedCard } from '../mail/mail.service';
+import { PaypalService, assertPayPalRefundExecutionSnapshot, classifyPayPalRefundStatus } from '../paypal/paypal.service';
+import { allocateRefundSources, AllocatedRefundItem } from '../bookings/refund-allocation.util';
 
 /**
  * Enumerates all calendar dates (YYYY-MM-DD) inclusively from startDate through endDate.
@@ -77,6 +79,7 @@ export class FlightsService {
     @Optional() private readonly routeScheduleValidatorService?: RouteScheduleValidatorService,
     @Optional() private readonly seatAllocationService?: SeatAllocationService,
     @Optional() private readonly mailService?: MailService,
+    @Optional() private readonly paypalService?: PaypalService,
   ) {}
 
   async findAll(status?: FlightStatus, origin?: string, dest?: string, commercialOnly = false): Promise<Flight[]> {
@@ -339,8 +342,10 @@ export class FlightsService {
     flight.status = dto.status;
     if (dto.status === FlightStatus.SCHEDULED) {
       flight.delay_reason = '';
-    } else if (dto.delay_reason !== undefined) {
-      flight.delay_reason = dto.delay_reason;
+      flight.delay_minutes = 0;
+    } else {
+      if (dto.delay_reason !== undefined) flight.delay_reason = dto.delay_reason;
+      if (dto.delay_minutes !== undefined) flight.delay_minutes = dto.delay_minutes;
     }
     if (dto.actual_departure) flight.actual_departure = new Date(dto.actual_departure);
     if (dto.actual_arrival) flight.actual_arrival = new Date(dto.actual_arrival);
@@ -637,24 +642,56 @@ export class FlightsService {
           releasedLegs.push(leg);
         }
 
-        // Step 3: For CONFIRMED bookings, add full REFUND transaction & reset miles
+        // Step 3: For CONFIRMED bookings, add multi-source REFUND transactions & reset miles
         let cardMasked: string | undefined = undefined;
+        const refundAllocations: AllocatedRefundItem[] = [];
         if (wasConfirmed) {
           if (booking.total_amount > 0) {
-            const originalPayment = booking.payment_transactions?.find(
-              (t: any) => t.transaction_type === 'PAYMENT' && t.status === 'SUCCESS',
+            const allocations = allocateRefundSources(
+              booking.payment_transactions || [],
+              booking.total_amount,
+              'REFUND',
+              (p) => this.generateCode(p),
             );
-            cardMasked = originalPayment?.card_masked || 'AUTO-REFUND-FLIGHT-CANCELLED';
-
-            booking.payment_transactions.push({
-              transaction_type: 'REFUND',
-              ...(originalPayment?.payment_method ? { payment_method: originalPayment.payment_method } : {}),
-              amount: booking.total_amount,
-              card_masked: cardMasked,
-              currency: 'VND',
-              status: 'SUCCESS',
-              created_at: new Date(),
-            });
+            if (allocations.length > 0) {
+              const totalAllocated = allocations.reduce((sum, a) => sum + a.amount, 0);
+              if (totalAllocated !== booking.total_amount) {
+                throw new BadRequestException(
+                  `Emergency flight cancellation refund allocation mismatch: expected ${booking.total_amount} VND, got ${totalAllocated} VND`,
+                );
+              }
+              for (const alloc of allocations) {
+                refundAllocations.push(alloc);
+                booking.payment_transactions.push({
+                  transaction_type: alloc.transaction_type,
+                  payment_reference: alloc.payment_reference,
+                  source_payment_reference: alloc.source_payment_reference,
+                  payment_method: alloc.payment_method,
+                  amount: alloc.amount,
+                  currency: alloc.currency,
+                  card_masked: alloc.card_masked,
+                  provider_capture_id: alloc.provider_capture_id,
+                  provider_order_id: alloc.provider_order_id,
+                  provider_amount: alloc.provider_amount,
+                  provider_currency: alloc.provider_currency,
+                  exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
+                  status: alloc.status,
+                  created_at: new Date(),
+                });
+              }
+              const cardItem = allocations.find((a) => a.card_masked);
+              cardMasked = cardItem?.card_masked;
+            } else {
+              const ref = this.generateCode('REF');
+              booking.payment_transactions.push({
+                transaction_type: 'REFUND',
+                payment_reference: ref,
+                amount: booking.total_amount,
+                currency: 'VND',
+                status: 'SUCCESS',
+                created_at: new Date(),
+              });
+            }
           }
           booking.total_miles_accrued = 0;
         }
@@ -672,6 +709,122 @@ export class FlightsService {
         await booking.save();
 
         cancelledCount++;
+
+        // Step 5b: Post-commit PayPal refund execution
+        if (this.paypalService && refundAllocations.length > 0) {
+          for (const item of refundAllocations) {
+            if (item.payment_method === PaymentMethod.PAYPAL) {
+              try {
+                assertPayPalRefundExecutionSnapshot({
+                  payment_reference: item.payment_reference,
+                  provider_capture_id: item.provider_capture_id || '',
+                  provider_amount: item.provider_amount || '',
+                  provider_currency: item.provider_currency || '',
+                  exchange_rate_vnd_per_unit: item.exchange_rate_vnd_per_unit,
+                  require_fx: true,
+                  context: 'cancelBookingsForFlight',
+                });
+              } catch (valErr: any) {
+                this.logger.error(
+                  `Incomplete PayPal refund provenance for flight cancellation booking ${booking.pnr_code}, ref ${item.payment_reference}: ${valErr?.message}`,
+                );
+                item.status = 'FAILED';
+                const tx = booking.payment_transactions?.find(
+                  (t: any) => t.payment_reference === item.payment_reference,
+                );
+                if (tx) {
+                  tx.status = 'FAILED';
+                  tx.failure_reason = 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE';
+                  tx.next_retry_at = null;
+                }
+                await this.bookingModel.updateOne(
+                  { _id: booking._id, 'payment_transactions.payment_reference': item.payment_reference },
+                  {
+                    $set: {
+                      'payment_transactions.$.status': 'FAILED',
+                      'payment_transactions.$.failure_reason': 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE',
+                      'payment_transactions.$.next_retry_at': null,
+                    },
+                  },
+                );
+                continue;
+              }
+
+              try {
+                const refundRes = await this.paypalService.refundCapture({
+                  captureId: item.provider_capture_id!,
+                  providerAmount: item.provider_amount!,
+                  providerCurrency: item.provider_currency!,
+                  paypalRequestId: item.payment_reference,
+                  note: `Emergency flight cancellation refund for PNR ${booking.pnr_code}`,
+                });
+                const classified = classifyPayPalRefundStatus(refundRes.status);
+                const localStatus = classified.local_status;
+                const isFailed = classified.is_failed;
+                await this.bookingModel.updateOne(
+                  { _id: booking._id, 'payment_transactions.payment_reference': item.payment_reference },
+                  {
+                    $set: {
+                      'payment_transactions.$.status': localStatus,
+                      'payment_transactions.$.provider_refund_id': refundRes.refund_id,
+                      'payment_transactions.$.provider_status': classified.provider_status,
+                      ...(isFailed
+                        ? {
+                            'payment_transactions.$.failure_reason': `PayPal refund returned status: ${classified.provider_status}`,
+                            'payment_transactions.$.next_retry_at': null,
+                          }
+                        : {}),
+                    },
+                  },
+                );
+                item.status = localStatus;
+                item.provider_refund_id = refundRes.refund_id;
+                item.provider_status = classified.provider_status;
+                if (isFailed) {
+                  item.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
+                  (item as any).next_retry_at = null;
+                }
+                const tx = booking.payment_transactions?.find(
+                  (t: any) => t.payment_reference === item.payment_reference,
+                );
+                if (tx) {
+                  tx.status = localStatus;
+                  tx.provider_refund_id = refundRes.refund_id;
+                  tx.provider_status = classified.provider_status;
+                  if (isFailed) {
+                    tx.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
+                    tx.next_retry_at = null;
+                  }
+                }
+              } catch (ppErr: any) {
+                this.logger.error(
+                  `Post-commit PayPal refund failed for booking ${booking.pnr_code}, ref ${item.payment_reference}: ${ppErr?.message || ppErr}`,
+                );
+                item.status = 'PENDING';
+                item.provider_status = 'FAILED';
+                const tx = booking.payment_transactions?.find(
+                  (t: any) => t.payment_reference === item.payment_reference,
+                );
+                if (tx) {
+                  tx.status = 'PENDING';
+                  tx.provider_status = 'FAILED';
+                  tx.failure_reason = ppErr?.message || 'PayPal refund call failed';
+                }
+                await this.bookingModel.updateOne(
+                  { _id: booking._id, 'payment_transactions.payment_reference': item.payment_reference },
+                  {
+                    $set: {
+                      'payment_transactions.$.status': 'PENDING',
+                      'payment_transactions.$.provider_status': 'FAILED',
+                      'payment_transactions.$.failure_reason': ppErr?.message || 'PayPal refund call failed',
+                      'payment_transactions.$.next_retry_at': new Date(Date.now() + 60 * 60 * 1000),
+                    },
+                  },
+                );
+              }
+            }
+          }
+        }
 
         // Step 6: Dispatch emergency cancellation email safely
         if (this.mailService) {
@@ -706,6 +859,14 @@ export class FlightsService {
                 refundPercentage: wasConfirmed ? 100 : undefined,
                 currency: 'VND',
                 maskedCard: wasConfirmed && isValidMaskedCard(cardMasked) ? cardMasked : undefined,
+                refundDetails: refundAllocations.length > 0 ? refundAllocations.map((a) => ({
+                  paymentMethod: a.payment_method,
+                  amountVnd: a.amount,
+                  cardMasked: a.card_masked,
+                  providerAmount: a.provider_amount,
+                  providerCurrency: a.provider_currency,
+                  status: a.status,
+                })) : undefined,
                 reason: flight.delay_reason || 'Flight cancelled by airline operation',
               });
               if (!sent) {

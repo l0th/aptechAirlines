@@ -385,7 +385,7 @@ interface EnrichedSeatMap {
                         type="button"
                         (click)="executeUnblock()"
                         [disabled]="actionLoading()"
-                        class="w-full btn-luxury text-xs !py-2.5 !px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                        class="w-full btn-luxury text-xs !py-2.5 !px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full"
                       >
                         <app-icon name="checkcircle2" class="w-4 h-4" />
                         <span>{{ lang.isVietnamese() ? 'Mở Khóa Ghế Này' : 'Unblock Seat' }}</span>
@@ -432,7 +432,7 @@ interface EnrichedSeatMap {
                           type="button"
                           (click)="executeBlock()"
                           [disabled]="actionLoading()"
-                          class="w-full btn-luxury text-xs !py-2.5 !px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                          class="w-full btn-luxury text-xs !py-2.5 !px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-full"
                         >
                           <app-icon name="lock" class="w-4 h-4" />
                           <span>{{ lang.isVietnamese() ? 'Khóa Ghế Ngay' : 'Confirm Block' }}</span>

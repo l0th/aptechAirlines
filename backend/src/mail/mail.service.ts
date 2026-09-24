@@ -53,6 +53,22 @@ export interface ItineraryLegData {
   isAffected?: boolean;
 }
 
+export interface RefundDetailItem {
+  paymentMethod?: string;
+  payment_method?: string;
+  amountVnd: number;
+  amount?: number;
+  cardMasked?: string;
+  card_masked?: string;
+  providerAmount?: string | number;
+  provider_amount?: string | number;
+  providerCurrency?: string;
+  provider_currency?: string;
+  providerRefundId?: string;
+  provider_refund_id?: string;
+  status: string; // 'SUCCESS' | 'PENDING'
+}
+
 export interface CancellationEmailData {
   toEmail: string;
   passengerName: string;
@@ -71,6 +87,7 @@ export interface CancellationEmailData {
   refundPercentage?: number;
   currency?: string;
   maskedCard?: string;
+  refundDetails?: RefundDetailItem[];
   policyDeduction?: number;
   reason?: string;
 }
@@ -215,6 +232,31 @@ export class MailService {
 
     const validCard = isValidMaskedCard(data.maskedCard);
 
+    const formatRefundTargets = (): string => {
+      if (data.refundDetails && data.refundDetails.length > 0) {
+        return data.refundDetails
+          .map((item) => {
+            if (item.paymentMethod === 'PAYPAL') {
+              const usdStr = item.providerAmount ? ` (${item.providerAmount} ${item.providerCurrency || 'USD'})` : '';
+              if (item.status === 'SUCCESS') {
+                return `Refund Target: <strong>PayPal Account${usdStr}</strong><br/>
+                        <span style="color: #15803d; font-size: 13px;">Status: Completed (PayPal Refund ID: ${escapeHtml(item.providerRefundId || 'Processed')})</span>`;
+              } else {
+                return `Refund Target: <strong>PayPal Account${usdStr}</strong><br/>
+                        <span style="color: #b45309; font-size: 13px; font-weight: bold;">Status: Processing</span> — Your refund has been initiated with PayPal and is currently awaiting gateway settlement.`;
+              }
+            } else {
+              const cardStr = item.cardMasked || (validCard ? data.maskedCard : 'Credit Card on Profile');
+              return `Refund Target: <strong>${escapeHtml(cardStr!)}</strong><br/>
+                      <span style="color: #64748b; font-size: 13px;">This refund has been recorded by the reservation system.</span>`;
+            }
+          })
+          .join('<br/><br/>');
+      }
+      return `${validCard ? `Refund Target: <strong>${escapeHtml(data.maskedCard)}</strong><br/>` : ''}
+              <span style="color: #64748b; font-size: 13px;">This refund has been recorded by the reservation system.</span>`;
+    };
+
     if (data.cancellationType === 'EMERGENCY_FLIGHT_CANCELLED') {
       subject = `Important: Flight ${data.flightNumber || ''} Cancelled - Booking ${data.bookingReference}`;
       const isConfirmed = data.originalBookingStatus === 'CONFIRMED';
@@ -233,8 +275,7 @@ export class MailService {
               <p style="margin: 0; color: #15803d; font-weight: bold;">100% Refund Recorded</p>
               <p style="margin: 4px 0 0 0;">
                 Refund Amount: <strong>${refundAmt.toLocaleString('vi-VN')} ${currency}</strong><br/>
-                ${validCard ? `Refund Target: <strong>${escapeHtml(data.maskedCard)}</strong><br/>` : ''}
-                <span style="color: #64748b; font-size: 13px;">This refund has been recorded by the reservation system.</span>
+                ${formatRefundTargets()}
               </p>
             </div>
           `;
@@ -276,8 +317,7 @@ export class MailService {
               ${data.refundPercentage !== undefined ? `Refund Percentage: <strong>${data.refundPercentage}%</strong><br/>` : ''}
               Refund Amount: <strong>${refundAmt.toLocaleString('vi-VN')} ${currency}</strong><br/>
               ${data.policyDeduction !== undefined ? `Cancellation Fee: <strong>${data.policyDeduction}%</strong><br/>` : ''}
-              ${validCard ? `Refund Target: <strong>${escapeHtml(data.maskedCard)}</strong><br/>` : ''}
-              <span style="color: #64748b; font-size: 13px;">This refund has been recorded by the reservation system.</span>
+              ${formatRefundTargets()}
             </p>
           </div>
         `;

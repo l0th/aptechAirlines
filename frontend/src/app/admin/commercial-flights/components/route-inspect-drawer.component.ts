@@ -17,21 +17,21 @@ import { AirLabsRouteRef } from '../../../core/models/flight.model';
               <app-icon name="compass" class="w-5 h-5 text-gold" />
               <span>{{ lang.t('admin.commercial.drawerInspectTitle') }}</span>
             </h3>
-            <button (click)="closeDrawer.emit()" class="text-slate-400 hover:text-slate-600">
+            <button (click)="closeDrawer.emit()" class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100">
               <app-icon name="x" class="w-5 h-5" />
             </button>
           </div>
 
           <div class="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 font-mono text-xs text-slate-700">
             <div class="flex items-center justify-between font-bold text-navy text-sm">
-              <span>{{ route.dep_iata }} ➔ {{ route.arr_iata }}</span>
+              <span>{{ route.dep_iata }} → {{ route.arr_iata }}</span>
               <span class="text-xs text-slate-500 font-normal">({{ route.airline_iata || route.airline_icao || 'AirLabs' }})</span>
             </div>
             <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200">
               <div>{{ lang.t('admin.commercial.lblFlight') }} <strong class="text-navy">{{ route.flight_iata || route.flight_number || '-' }}</strong></div>
               <div>{{ lang.t('admin.commercial.lblAircraft') }} <strong>{{ route.aircraft_icao || '-' }}</strong></div>
-              <div>{{ lang.t('admin.commercial.localTimes') }}: <span>{{ route.dep_time || '-' }} ➔ {{ route.arr_time || '-' }}</span></div>
-              <div>{{ lang.t('admin.commercial.utcTimes') }}: <span>{{ route.dep_time_utc ? route.dep_time_utc + 'Z' : '-' }} ➔ {{ route.arr_time_utc ? route.arr_time_utc + 'Z' : '-' }}</span></div>
+              <div>{{ lang.t('admin.commercial.localTimes') }}: <span>{{ route.dep_time || '-' }} → {{ route.arr_time || '-' }}</span></div>
+              <div>{{ lang.t('admin.commercial.utcTimes') }}: <span>{{ route.dep_time_utc ? route.dep_time_utc + 'Z' : '-' }} → {{ route.arr_time_utc ? route.arr_time_utc + 'Z' : '-' }}</span></div>
               <div>{{ lang.t('admin.commercial.durationLabel') }}: <strong>{{ route.duration ? route.duration + 'm' : '-' }}</strong></div>
               <div>{{ lang.t('admin.commercial.operatingDaysHeader') }}: <span>{{ route.days?.join(', ') || '-' }}</span></div>
             </div>

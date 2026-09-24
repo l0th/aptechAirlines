@@ -206,7 +206,7 @@ import {
             </div>
             <div>
               <span class="text-slate-400 block text-[11px] uppercase">{{ lang.t('admin.commercial.scopeResolvedIatas') }}</span>
-              <strong class="text-navy">{{ resp.origin_scope.iata_codes.join(', ') }} ➔ {{ resp.destination_scope.iata_codes.join(', ') }}</strong>
+              <strong class="text-navy">{{ resp.origin_scope.iata_codes.join(', ') }} → {{ resp.destination_scope.iata_codes.join(', ') }}</strong>
             </div>
           </div>
         </details>

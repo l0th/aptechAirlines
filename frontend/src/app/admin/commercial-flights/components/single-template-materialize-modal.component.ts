@@ -21,7 +21,7 @@ import {
             <app-icon name="calendar" class="w-5 h-5 text-gold" />
             <span>{{ lang.t('admin.commercial.materializeModalTitle') }}</span>
           </h3>
-          <button (click)="closeModal.emit()" class="text-slate-400 hover:text-slate-600">
+          <button (click)="closeModal.emit()" class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100">
             <app-icon name="x" class="w-5 h-5" />
           </button>
         </div>
@@ -32,7 +32,7 @@ import {
             <strong class="text-navy text-sm font-bold">{{ template.flight_number }}</strong>
             <span class="text-slate-400 mx-1">({{ template.template_id }})</span>
           </div>
-          <span class="font-bold text-slate-700">{{ template.origin_iata }} ➔ {{ template.dest_iata }} ({{ template.aircraft_type }})</span>
+          <span class="font-bold text-slate-700">{{ template.origin_iata }} → {{ template.dest_iata }} ({{ template.aircraft_type }})</span>
         </div>
 
         <!-- Controls -->

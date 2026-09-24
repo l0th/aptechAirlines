@@ -200,7 +200,7 @@ const FLIGHT_FORM_DEFAULTS = {
                         <button
                           type="button"
                           (click)="openEditModal(fl)"
-                          class="p-1.5 bg-slate-50 hover:bg-slate-100 text-navy rounded-lg border border-slate-200 transition-colors"
+                          class="p-1.5 bg-slate-50 hover:bg-slate-100 text-navy rounded-full border border-slate-200 transition-colors"
                           [title]="lang.isVietnamese() ? 'Sửa chuyến bay' : 'Edit flight'"
                         >
                           <app-icon name="edit" class="w-4 h-4" />
@@ -210,7 +210,7 @@ const FLIGHT_FORM_DEFAULTS = {
                         <button
                           type="button"
                           (click)="openEmergencyStatusModal(fl)"
-                          class="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg border border-amber-300 transition-colors"
+                          class="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-full border border-amber-300 transition-colors"
                           [title]="lang.isVietnamese() ? 'Cập nhật Thời tiết / Trạng thái khẩn cấp' : 'Update Weather / Emergency Status'"
                         >
                           <app-icon name="alerttriangle" class="w-4 h-4" />
@@ -220,7 +220,7 @@ const FLIGHT_FORM_DEFAULTS = {
                         <button
                           type="button"
                           (click)="deleteFlight(fl)"
-                          class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors"
+                          class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-full border border-rose-200 transition-colors"
                           [title]="lang.isVietnamese() ? 'Xóa chuyến bay' : 'Delete flight'"
                         >
                           <app-icon name="trash2" class="w-4 h-4" />

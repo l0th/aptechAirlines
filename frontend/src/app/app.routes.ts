@@ -71,6 +71,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'analytics',
+        canActivate: [adminOnlyGuard],
+        loadComponent: () =>
+          import('./admin/analytics/analytics.component').then(
+            (m) => m.AnalyticsComponent,
+          ),
+      },
+      {
         path: 'flights',
         canActivate: [adminOnlyGuard],
         loadComponent: () =>

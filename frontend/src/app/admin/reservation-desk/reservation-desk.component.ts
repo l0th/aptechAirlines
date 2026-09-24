@@ -67,17 +67,21 @@ interface StaffPassengerForm {
             <span class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300 uppercase">
               {{ lang.t('admin.reservationDesk.staffOnly') }}
             </span>
+            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 flex items-center gap-1">
+              <app-icon name="phone" class="w-3 h-3 text-sky-600" />
+              <span>{{ lang.isVietnamese() ? 'Hỗ Trợ Điện Thoại & Quầy Vé' : 'Telephonic & Walk-in Desk' }}</span>
+            </span>
           </div>
           <p class="text-xs text-slate-500 mt-0.5">{{ lang.t('admin.reservationDesk.subtitle') }}</p>
         </div>
 
         <!-- Mode Toggle Tabs -->
-        <div class="flex items-center p-1 bg-slate-200/80 rounded-2xl border border-slate-300/60">
+        <div class="flex items-center p-1 bg-slate-200/80 rounded-full border border-slate-300/60">
           <button
             type="button"
             (click)="setMode('NEW_BOOKING')"
             [ngClass]="deskMode() === 'NEW_BOOKING' ? 'bg-navy text-white shadow-md' : 'text-slate-600 hover:text-navy'"
-            class="px-4 py-2 rounded-xl text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap"
+            class="px-4 py-2 rounded-full text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap"
           >
             <app-icon name="usercheck" class="w-3.5 h-3.5" />
             <span>{{ lang.t('admin.reservationDesk.modeNewBooking') }}</span>
@@ -86,7 +90,7 @@ interface StaffPassengerForm {
             type="button"
             (click)="setMode('RESCHEDULE')"
             [ngClass]="deskMode() === 'RESCHEDULE' ? 'bg-navy text-white shadow-md' : 'text-slate-600 hover:text-navy'"
-            class="px-4 py-2 rounded-xl text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap"
+            class="px-4 py-2 rounded-full text-xs font-bold transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap"
           >
             <app-icon name="calendar" class="w-3.5 h-3.5" />
             <span>{{ lang.t('admin.reservationDesk.modeReschedule') }}</span>

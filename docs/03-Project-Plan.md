@@ -71,7 +71,7 @@
 ### Giai đoạn 5: Tích hợp AirLabs API & Phân hệ Quản trị Nâng cao (Ngày 24 – Ngày 25)
 - **Mục tiêu:** Kết nối dữ liệu chuyến bay thực tế và hoàn thiện cổng quản trị Admin/Clerk.
 - **Công việc cụ thể:**
-  - Phát triển tính năng đồng bộ lịch bay thực tế từ AirLabs API (`/admin/airlabs-sync`).
+  - Phát triển tính năng quản lý mạng bay thương mại và đồng bộ lịch bay AirLabs (`/admin/commercial-flights`).
   - Chuẩn hóa dữ liệu dòng máy bay thật (Airbus A321, Boeing 787) và định dạng giá tiền chuẩn VND.
   - Xây dựng Admin Layout với Sidebar Navy chuyên nghiệp và phân quyền nghiêm ngặt theo vai trò.
   - Hoàn thiện các trang quản trị: Dashboard tổng quan, Quản lý chuyến bay & cập nhật thời tiết hoãn/hủy, Quản lý sân bay, Quản lý người dùng, Quản lý đơn đặt chỗ và Quản lý chính sách hoàn tiền.

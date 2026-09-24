@@ -100,13 +100,49 @@ export interface TicketCoupon {
   coupon_status: CouponStatus | string;
 }
 
+export interface PresentmentAmount {
+  provider_amount: string;
+  provider_currency: string;
+  exchange_rate_vnd_per_unit: number;
+}
+
+export interface BookingQuoteResponse {
+  total_fare: number;
+  total_seat_fees: number;
+  total_amount: number;
+  currency: string;
+  early_bird_percent?: number;
+  ff_tier?: string;
+  ff_discount_percent?: number;
+  presentment?: PresentmentAmount;
+}
+
+export interface RescheduleQuoteResponse {
+  price_difference: number;
+  old_total: number;
+  new_total: number;
+  new_fare: number;
+  new_seat_fees: number;
+  currency: string;
+  presentment?: PresentmentAmount;
+}
+
 export interface PaymentTransaction {
   /** PAYMENT | REFUND | RESCHEDULE_CHARGE | RESCHEDULE_REFUND */
   transaction_type: string;
   payment_method?: 'PROFILE_CARD' | 'PAYPAL';
+  payment_reference?: string;
+  source_payment_reference?: string;
   amount: number;
   currency?: string;
-  card_masked: string;
+  card_masked?: string;
+  provider_order_id?: string;
+  provider_capture_id?: string;
+  provider_refund_id?: string;
+  provider_amount?: string;
+  provider_currency?: string;
+  exchange_rate_vnd_per_unit?: number;
+  provider_status?: string;
   status: string;
   created_at: string;
 }

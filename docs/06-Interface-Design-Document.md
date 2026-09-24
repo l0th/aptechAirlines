@@ -8,7 +8,7 @@
 
 ## 1. QUY CHUẨN THIẾT KẾ HỆ THỐNG (DESIGN SYSTEM & STANDARDS)
 
-Toàn bộ giao diện của **Aptech Airlines** được xây dựng tuân thủ nghiêm ngặt theo tài liệu [GUI_Standards_Document.md](file:///C:/Users/Ha/Desktop/aptechairline/GUI_Standards_Document.md), định hình phong cách **Sang trọng Hàng không Hiện đại (Modern Aviation Luxury)** tương đương các hãng hàng không 5 sao quốc tế (Qatar Airways, Singapore Airlines, Vietnam Airlines).
+Toàn bộ giao diện của **Aptech Airlines** được xây dựng tuân thủ nghiêm ngặt theo tài liệu [GUI_Standards_Document.md](../GUI_Standards_Document.md), định hình phong cách **Sang trọng Hàng không Hiện đại (Modern Aviation Luxury)** tương đương các hãng hàng không 5 sao quốc tế (Qatar Airways, Singapore Airlines, Vietnam Airlines).
 
 ### 1.1. Bảng màu Nhận diện & Ngữ thái (Color Tokens)
 - **Aviation Navy (`#0A2540`):** Màu chủ đạo (Primary), thể hiện sự uy quyền, an toàn và chuyên nghiệp. Ứng dụng cho Header, Sidebar Admin, thanh điều hướng và tiêu đề cấp cao (`bg-[#0A2540]`, `text-[#0A2540]`).
@@ -68,8 +68,12 @@ graph TD
     subgraph AdminPortal["CỔNG QUẢN TRỊ (ADMIN & CLERK PORTAL - Guarded)"]
         AdminRoot["Admin Layout Shell<br/>Route: /admin"]
         Dashboard["Bảng điều khiển<br/>Route: /admin/dashboard"]
+        Analytics["Báo cáo Phân tích Chuyên sâu<br/>Route: /admin/analytics"]
+        CommercialFlights["Mạng bay Thương mại<br/>Route: /admin/commercial-flights"]
         FlightsManage["Quản lý Chuyến bay<br/>Route: /admin/flights"]
-        AirlabsSync["Đồng bộ AirLabs<br/>Route: /admin/airlabs-sync"]
+        ReservationDesk["Quầy Đặt Chỗ Trực Tiếp<br/>Route: /admin/reservation-desk"]
+        SeatOperations["Vận hành Ghế & Khóa Ghế<br/>Route: /admin/seat-operations"]
+        SeatPricing["Quy tắc Giá Ghế Động<br/>Route: /admin/seat-pricing"]
         AirportsManage["Quản lý Sân bay<br/>Route: /admin/airports"]
         BookingsManage["Quản lý Đơn vé<br/>Route: /admin/bookings"]
         UsersManage["Quản lý Người dùng<br/>Route: /admin/users"]
@@ -85,8 +89,12 @@ graph TD
     Track -->|"Đổi vé (Reschedule)"| Booking
     
     AdminRoot --> Dashboard
+    AdminRoot --> Analytics
+    AdminRoot --> CommercialFlights
     AdminRoot --> FlightsManage
-    AdminRoot --> AirlabsSync
+    AdminRoot --> ReservationDesk
+    AdminRoot --> SeatOperations
+    AdminRoot --> SeatPricing
     AdminRoot --> AirportsManage
     AdminRoot --> BookingsManage
     AdminRoot --> UsersManage
@@ -99,7 +107,7 @@ graph TD
 
 ### 3.1. Màn hình: Trang chủ & Hộp tìm kiếm (`HomeComponent` - Route: `/`)
 - **Mục đích:** Giới thiệu thương hiệu Aptech Airlines, cung cấp công cụ tìm kiếm chuyến bay đa năng (Một chiều / Khứ hồi, điểm đi/đến, ngày bay đơn hoặc khoảng ngày, chọn số lượng Người lớn / Trẻ em / Người cao tuổi, chọn hạng vé và khoang hút thuốc).
-- **Tập tin nguồn:** [home.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/home/home.component.ts)
+- **Tập tin nguồn:** [home.component.ts](../frontend/src/app/pages/home/home.component.ts)
 - **API chính được gọi:** 
   - `GET /api/airports` (Tải danh mục sân bay phục vụ gợi ý tự động).
   - `GET /api/airports/resolve?city=...` (Kiểm tra tính hợp lệ của thành phố và gợi ý sân bay gần nhất).
@@ -116,7 +124,7 @@ graph TD
 
 ### 3.2. Màn hình: Kết quả Tìm kiếm Chuyến bay (`FlightResultsComponent` - Route: `/results`)
 - **Mục đích:** Hiển thị danh sách các chuyến bay khả dụng thỏa mãn điều kiện tìm kiếm. Trong trường hợp không có chuyến bay thẳng, tự động hiển thị các lựa chọn bay nối chuyến (Connecting flights qua trạm trung chuyển). Nếu tìm khứ hồi, hiển thị 2 bảng riêng biệt (Chiều đi và Chiều về) kèm lựa chọn hạng vé và xem giá chi tiết.
-- **Tập tin nguồn:** [flight-results.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/flight-results/flight-results.component.ts)
+- **Tập tin nguồn:** [flight-results.component.ts](../frontend/src/app/pages/flight-results/flight-results.component.ts)
 - **API chính được gọi:** `GET /api/flights/search`
 - **Thành phần dùng chung:** `NavbarComponent`, `FooterComponent`, `SeatMapModalComponent` (xem trước sơ đồ ghế), `ToastComponent`, `IconComponent`, `CurrencyFormatPipe`, `DurationPipe`.
 - **Bảng trạng thái giao diện:**
@@ -132,7 +140,7 @@ graph TD
 
 ### 3.3. Màn hình: Tiến trình Đặt vé & Thanh toán (`BookingComponent` - Route: `/booking`)
 - **Mục đích:** Thu thập thông tin định danh của từng hành khách trong đoàn, chọn vị trí ghế ngồi trực quan qua sơ đồ máy bay tương tác, đối soát chi phí, chọn hình thức: **Giữ chỗ miễn phí** (chỉ cho phép khi ngày bay cách hiện tại > 14 ngày) hoặc **Mua vé ngay** (qua thẻ tín dụng).
-- **Tập tin nguồn:** [booking.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/booking/booking.component.ts)
+- **Tập tin nguồn:** [booking.component.ts](../frontend/src/app/pages/booking/booking.component.ts)
 - **API chính được gọi:** 
   - `POST /api/bookings` (Tạo đơn giữ chỗ hoặc thanh toán mua vé).
   - `GET /api/flights/:id/seat-map` (Lấy sơ đồ ghế khả dụng thời gian thực).
@@ -141,7 +149,7 @@ graph TD
   | Trạng thái | Điều kiện kích hoạt | Biểu hiện giao diện người dùng |
   | :--- | :--- | :--- |
   | **Initial Load** | Vừa vào từ trang kết quả | Tải thông tin chuyến bay đã chọn, tự động sinh các form nhập liệu hành khách tương ứng theo số lượng Người lớn, Trẻ em, Người cao tuổi. |
-  | **Seat Map Active** | Bấm nút "Chọn ghế ngồi" | Mở modal sơ đồ ghế Airbus A321 để khách click gán mã ghế (VD: `12A`, `14B`) cho từng người. |
+  | **Seat Map Active** | Bấm nút "Chọn ghế ngồi" | Mở modal sơ đồ ghế tương ứng với aircraft type của chuyến bay. |
   | **Rule Blocking Gate** | Chuyến bay khởi hành trong vòng 14 ngày | Nút tùy chọn "Giữ chỗ" tự động bị khóa (disabled) kèm ghi chú: "Chuyến bay khởi hành trong vòng 14 ngày, chỉ được phép mua vé trực tiếp". |
   | **Submitting** | Đang gửi yêu cầu đặt chỗ/mua | Nút thanh toán chuyển sang trạng thái xoay vòng spinner (`loader2`), vô hiệu hóa click đúp. |
   | **Success** | Đặt/Mua thành công | Chuyển hướng sang trang `/booking-success` kèm mã PNR. |
@@ -150,7 +158,7 @@ graph TD
 
 ### 3.4. Màn hình: Đặt vé Thành công (`BookingSuccessComponent` - Route: `/booking-success`)
 - **Mục đích:** Thông báo kết quả giao dịch đặt vé thành công; hiển thị nổi bật Mã đặt chỗ (PNR), Mã giữ chỗ (`BLK-XXXXXX`) hoặc Mã xác nhận (`CNF-XXXXXX`), hạn chót thanh toán (nếu là vé giữ chỗ), tóm tắt hành trình và dặm bay SkyMiles đã tích lũy.
-- **Tập tin nguồn:** [booking-success.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/booking-success/booking-success.component.ts)
+- **Tập tin nguồn:** [booking-success.component.ts](../frontend/src/app/pages/booking-success/booking-success.component.ts)
 - **API chính được gọi:** `GET /api/bookings/track/:code`
 - **Thành phần dùng chung:** `NavbarComponent`, `FooterComponent`, `IconComponent`, `CurrencyFormatPipe`.
 - **Bảng trạng thái giao diện:**
@@ -163,7 +171,7 @@ graph TD
 
 ### 3.5. Màn hình: Quản lý Chuyến đi & Đổi/Hủy vé (`TrackBookingComponent` - Route: `/track`)
 - **Mục đích:** Cho phép hành khách tra cứu hồ sơ chuyến bay bằng Mã giữ chỗ, Mã xác nhận hoặc Mã PNR. Cung cấp các chức năng tự phục vụ: **Xác nhận thanh toán vé giữ chỗ**, **Đổi ngày bay/chuyến bay (Reschedule)** kèm tính chênh lệch giá, và **Hủy vé (Cancel)** kèm tính % hoàn tiền tự động theo chính sách. Hiển thị cảnh báo nổi bật nếu chuyến bay bị trễ giờ hoặc hủy do thời tiết.
-- **Tập tin nguồn:** [track-booking.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/track-booking/track-booking.component.ts)
+- **Tập tin nguồn:** [track-booking.component.ts](../frontend/src/app/pages/track-booking/track-booking.component.ts)
 - **API chính được gọi:** 
   - `GET /api/bookings/track/:code` (Tra cứu chi tiết).
   - `POST /api/bookings/confirm` (Xác nhận vé giữ chỗ).
@@ -182,7 +190,7 @@ graph TD
 
 ### 3.6. Màn hình: Cổng Hội viên SkyMiles (`SkyMilesComponent` - Route: `/skymiles`)
 - **Mục đích:** Hiển thị tổng số điểm dặm bay tích lũy (`sky_miles`), thứ hạng thẻ hội viên (Bạc, Vàng, Bạch Kim), bảng đặc quyền và lịch sử các chuyến bay đã cộng/trừ dặm.
-- **Tập tin nguồn:** [skymiles.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/skymiles/skymiles.component.ts)
+- **Tập tin nguồn:** [skymiles.component.ts](../frontend/src/app/pages/skymiles/skymiles.component.ts)
 - **API chính được gọi:** `GET /api/auth/me`, `GET /api/bookings?user_id=...`
 - **Thành phần dùng chung:** `NavbarComponent`, `FooterComponent`, `AuthModalComponent`, `IconComponent`.
 - **Bảng trạng thái giao diện:**
@@ -195,7 +203,7 @@ graph TD
 
 ### 3.7. Màn hình: Tra cứu Lịch bay Công khai (`FlightLookupComponent` - Route: `/flight-lookup`)
 - **Mục đích:** Phục vụ Yêu cầu 3.10: Cho phép bất kỳ người dùng nào (kể cả khách vãng lai chưa đăng nhập) tra cứu giờ cất cánh và hạ cánh của chuyến bay bất kỳ bằng cách nhập Số hiệu chuyến bay (VD: `VN101`) và Ngày bay.
-- **Tập tin nguồn:** [flight-lookup.component.ts](file:///C:/Users/Ha/Desktop/aptechairline/frontend/src/app/pages/flight-lookup/flight-lookup.component.ts)
+- **Tập tin nguồn:** [flight-lookup.component.ts](../frontend/src/app/pages/flight-lookup/flight-lookup.component.ts)
 - **API chính được gọi:** `GET /api/flights/lookup?flight_number=...&date=...`
 - **Thành phần dùng chung:** `NavbarComponent`, `FooterComponent`, `IconComponent`.
 - **Bảng trạng thái giao diện:**
@@ -212,15 +220,19 @@ graph TD
 
 Cổng quản trị sử dụng khung giao diện chung `AdminLayoutComponent` với **Sidebar màu Xanh Navy Tối (`#0A2540`)** cố định bên trái và thanh tiêu đề Top Header phía trên.
 
-### 4.1. Bảng tổng hợp 7 Màn hình Quản trị
+### 4.1. Bảng tổng hợp các Màn hình Quản trị
 
 | Đường dẫn (Route) | Tên Component | Mục đích nghiệp vụ | API chính gọi | Các trạng thái giao diện |
 | :--- | :--- | :--- | :--- | :--- |
-| `/admin/dashboard` | `DashboardComponent` | Báo cáo trực quan tổng số chuyến bay, đơn đặt vé, doanh thu, hành khách và trạng thái chuyến bay hôm nay. | `GET /api/flights`, `GET /api/bookings`, `GET /api/users` | Loading spinner ➔ Dashboard thẻ số liệu KPI ➔ Biểu đồ phân bổ trạng thái chuyến bay. |
-| `/admin/flights` | `FlightsManageComponent` | Quản trị toàn diện chuyến bay (Thêm mới, Sửa lịch, Xóa, Cấu hình khoang vé & giá) và cập nhật khẩn cấp trạng thái DELAYED/CANCELLED do thời tiết xấu (Yêu cầu 1.2.3). | `GET /api/flights`, `POST /api/flights`, `PUT /api/flights/:id`, `PATCH /api/flights/:id/status`, `DELETE /api/flights/:id` | Bảng dữ liệu có tìm kiếm/lọc ➔ Modal tạo/sửa chuyến ➔ Modal cập nhật khẩn cấp thời tiết ➔ Tự động lan truyền hủy vé. |
-| `/admin/airlabs-sync` | `AirlabsSyncComponent` | Đồng bộ lịch bay thực tế từ API Hàng không quốc tế AirLabs theo chặng bay (HAN - SGN); làm giàu số đăng bạ tàu bay đang bay thực tế; tra cứu đội bay hãng. | `POST /api/flights/sync-airlabs`, `POST /api/flights/enrich-airborne`, `GET /api/flights/airline-fleet` | Input chọn sân bay đi/đến ➔ Nút đồng bộ có đếm số chuyến thành công ➔ Radar theo dõi tàu bay trên không ➔ Fallback trung thực. |
+| `/admin/dashboard` | `DashboardComponent` | Báo cáo trực quan tổng số chuyến bay, đơn đặt vé phân biệt, doanh thu thuần đối soát, phân tích hệ số tải và cảnh báo tải cao/thấp. | `GET /api/analytics/overview`, `GET /api/analytics/capacity` | Loading spinner ➔ Dashboard thẻ số liệu KPI ➔ Biểu đồ phân bổ trạng thái chuyến bay. |
+| `/admin/analytics` | `AnalyticsComponent` | Trung tâm phân tích kinh doanh chuyên sâu: Doanh thu thực thu (`net_revenue_vnd`), Giá trị đặt vé (`active_booking_value_vnd`), tải ghế thực tế và đối soát công suất đội bay. | `GET /api/analytics/overview`, `GET /api/analytics/capacity` | KPI Doanh thu thuần ➔ Top tuyến bay theo Giá trị đặt vé ➔ Cảnh báo chuyến bay tải cao/thấp. |
+| `/admin/commercial-flights` | `CommercialFlightsComponent` | Quản lý mạng lưới đường bay thương mại AirLabs, xem cấu hình máy bay, quản lý lịch bay mẫu và mở rộng chân trời 330 ngày. | `GET /api/flights/airlabs-routes`, `GET /api/flights/commercial-templates`, `POST /api/flights/commercialize-airlabs-route`, `POST /api/flights/commercial-templates/:id/materialize`, `POST /api/flights/generate-schedule` | Bộ lọc mạng bay ➔ Drawer cấu hình đường bay ➔ Quản lý mẫu lịch trình ➔ Modal mở rộng chân trời lịch bay. |
+| `/admin/flights` | `FlightsManageComponent` | Quản trị toàn diện chuyến bay (Thêm mới, Sửa lịch, Xóa, Cấu hình khoang vé & giá) và cập nhật khẩn cấp trạng thái DELAYED/CANCELLED do thời tiết xấu (Yêu cầu 1.2.3). | `GET /api/flights`, `POST /api/flights`, `PUT /api/flights/:id`, `PATCH /api/flights/:id/status`, `DELETE /api/flights/:id`, `POST /api/flights/enrich-airborne` | Bảng dữ liệu có tìm kiếm/lọc ➔ Modal tạo/sửa chuyến ➔ Modal cập nhật khẩn cấp thời tiết ➔ Tự động lan truyền hủy vé. |
+| `/admin/reservation-desk` | `ReservationDeskComponent` | Quầy đặt chỗ và đổi vé trực tiếp tại quầy hoặc qua điện thoại dành cho nhân viên bán vé/quản trị viên (Telephonic & Walk-in Desk). Gọi các API đặt chỗ chuẩn xác thực bằng quyền nhân viên. | `POST /api/bookings`, `POST /api/bookings/reschedule`, `GET /api/bookings/track/:code`, `GET /api/flights/search`, `GET /api/users` | Toggle chế độ New Booking / Reschedule ➔ Wizard 5 bước chọn khách, tìm chuyến, chọn ghế, xuất vé. |
+| `/admin/seat-operations` | `SeatOperationsComponent` | Vận hành ghế trực tiếp trên chuyến bay: Xem sơ đồ ghế đa chủng loại tàu bay, nhân viên khóa/mở khóa ghế vật lý (`BLOCKED_MAINTENANCE`, `CREW_REST`, `VIP_HOLD`), và thiết lập ghi đè phụ phí ghế chuyến bay. | `GET /api/seat-allocation/flight/:flightId/map`, `POST /api/seat-allocation/flight/:flightId/block`, `POST /api/seat-allocation/flight/:flightId/unblock`, `POST /api/seat-allocation/flight/:flightId/override-price`, `DELETE /api/seat-allocation/flight/:flightId/override-price/:seatCode` | Chọn chuyến bay ➔ Hiển thị sơ đồ ghế đa layout ➔ Thao tác khóa/mở khóa ghế ➔ Ghi đè phụ thu ghế. |
+| `/admin/seat-pricing` | `SeatPricingComponent` | Cấu hình động 8 chiều phụ thu ghế ngồi độc lập (Cửa sổ, Lối đi, Giữa, Khu vực đầu, Thoát hiểm, Chân rộng, Vách ngăn, Hạng vé). | `GET /api/seat-allocation/pricing-rules`, `POST /api/seat-allocation/pricing-rules`, `PUT /api/seat-allocation/pricing-rules/:ruleId`, `DELETE /api/seat-allocation/pricing-rules/:ruleId` | 8 thẻ KPI chiều định giá ➔ Bảng danh sách quy tắc ➔ Modal tạo/chỉnh sửa quy tắc bất biến. |
 | `/admin/airports` | `AirportsManageComponent` | Quản lý danh mục sân bay, thành phố, múi giờ, cờ đường bay trực tiếp (`is_serviced_directly`) và cấu hình sân bay lân cận cùng khoảng cách km. | `GET /api/airports`, `POST /api/airports`, `PUT /api/airports/:iata`, `DELETE /api/airports/:iata` | Bảng danh sách sân bay ➔ Form thêm/sửa có kiểm tra trùng mã IATA ➔ Thông báo xóa thành công. |
-| `/admin/bookings` | `BookingsManageComponent` | Quản lý toàn bộ hồ sơ đặt chỗ (PNR); lọc theo trạng thái BLOCKED, CONFIRMED, CANCELLED; kích hoạt quét gửi thư nhắc nhở 3 tuần hoặc kích hoạt hủy vé quá hạn thủ công. | `GET /api/bookings`, `POST /api/bookings/trigger-reminders`, `POST /api/bookings/trigger-autocancel` | Danh sách đơn vé kèm chip trạng thái màu ➔ Nút kích hoạt Cron thủ công ➔ Modal xem chi tiết hành khách và cuống vé. |
+| `/admin/bookings` | `BookingsManageComponent` | Quản lý toàn bộ hồ sơ đặt chỗ (PNR); lọc theo trạng thái BLOCKED, CONFIRMED, CANCELLED; kích hoạt quét gửi thư nhắc nhở 3 tuần hoặc kích hoạt hủy vé quá hạn thủ công. | `GET /api/bookings`, `POST /api/bookings/scheduler/run-reminders`, `POST /api/bookings/scheduler/run-expiry` | Danh sách đơn vé kèm chip trạng thái màu ➔ Nút kích hoạt Scheduler thủ công ➔ Modal xem chi tiết hành khách và cuống vé. |
 | `/admin/users` | `UsersManageComponent` | Quản lý danh sách người dùng, tạo tài khoản Clerk/Admin; thực thi quy tắc nghiêm ngặt: **Bảo vệ tài khoản SUPER_ADMIN duy nhất** (chặn xóa, chặn đổi quyền, chặn tạo thêm). | `GET /api/users`, `POST /api/users`, `PUT /api/users/:id`, `DELETE /api/users/:id` | Bảng người dùng có phân loại role ➔ Khóa thao tác xóa trên dòng `SUPER_ADMIN` ➔ Báo lỗi 403 Forbidden nếu cố tình vi phạm. |
 | `/admin/policies` | `PoliciesManageComponent` | Cấu hình linh hoạt bảng quy tắc % hoàn tiền khi hủy vé theo số ngày trước giờ bay (min_days_before, max_days_before, refund_percentage). | `GET /api/policies`, `POST /api/policies`, `PUT /api/policies/:id`, `DELETE /api/policies/:id` | Bảng quy tắc hoàn tiền theo thứ tự ngày giảm dần ➔ Form thêm/sửa mốc ngày và % hoàn trả. |
 
@@ -246,10 +258,17 @@ Cổng quản trị sử dụng khung giao diện chung `AdminLayoutComponent` v
 ### 5.3. `SeatMapModalComponent`
 - **Vị trí:** Cửa sổ Modal bật lên từ trang Đặt vé (`/booking`) hoặc trang Kết quả (`/results`).
 - **Chức năng:**
-  - Hiển thị mô phỏng thân tàu bay **Airbus A321** chuẩn quốc tế gồm 31 hàng ghế theo cấu hình 3 - 3.
+  - Hiển thị mô phỏng sơ đồ thân tàu bay theo danh mục đội bay đa chủng loại chuẩn quốc tế ([fleet-layout.catalog.ts](../backend/src/seat-allocation/fleet-layout.catalog.ts)), tự động nhận diện cấu hình hình học hàng ghế, lối đi và khoang dịch vụ theo từng chủng loại tàu bay cụ thể:
+    - **A20N (Airbus A320neo - 180 ghế):** Business (Hàng 1-3, cấu hình 2 - 2, 12 ghế), Economy (Hàng 4-31 trừ hàng 13, cấu hình 3 - 3, 168 ghế).
+    - **A21N (Airbus A321neo - 204 ghế):** Business (Hàng 1-4, cấu hình 2 - 2, 16 ghế), Economy (Hàng 5-35 trừ hàng 13, cấu hình 3 - 3, 188 ghế).
+    - **B789 (Boeing 787-9 Dreamliner - 294 ghế):** Thân rộng 2 lối đi: Business (Hàng 1-7, cấu hình 1 - 2 - 1, 28 ghế), Club/Premium (Hàng 10-14, cấu hình 2 - 3 - 2, 35 ghế), Economy (Hàng 16-41, cấu hình 3 - 3 - 3, 231 ghế).
+    - **A359 (Airbus A350-900 - 305 ghế):** Thân rộng 2 lối đi: Business (Hàng 1-8, cấu hình 1 - 2 - 1, 29 ghế), Club/Premium (Hàng 10-14, cấu hình 2 - 4 - 2, 36 ghế), Economy (Hàng 16-42, cấu hình 3 - 3 - 3, 240 ghế).
+    - **B738 (Boeing 737-800 - 166 ghế):** Business (Hàng 1-4, cấu hình 2 - 2, 16 ghế), Economy (Hàng 5-30 trừ hàng 13, cấu hình 3 - 3, 150 ghế).
+    - **AT76 (ATR 72-600 - 68 ghế):** Thân hẹp chặng ngắn (Hàng 1-17, cấu hình 2 - 2, 68 ghế Economy).
   - Cơ chế chọn ghế thông minh: Hỗ trợ chọn và đổi ghế cho từng hành khách trong đoàn bay với bộ chọn hành khách ở cột bên trái.
-  - Phân loại trực quan: Hàng ghế Đặc biệt (Hàng 1 - 5), Hàng ghế gần Lối thoát hiểm (Hàng 12, 14), và **loại trừ hàng 13**.
-  - Hiển thị cảnh báo tiêu chuẩn quốc tế về điều kiện sức khỏe đối với hành khách ngồi hàng ghế thoát hiểm.
+  - Phân loại trực quan: Ghế Cửa sổ (Window), Lối đi (Aisle), Ghế giữa (Middle), Hàng ghế thoát hiểm (Exit row), Thêm chỗ để chân (Extra legroom), Ghế vách (Bulkhead), Khu vực đầu khoang (Front zone).
+  - Tải trạng thái chiếm chỗ thời gian thực từ API `GET /api/seat-allocation/flight/:flightId/map`, thể hiện rõ ràng các trạng thái `AVAILABLE`, `OCCUPIED` (CONFIRMED), `HELD`, và các loại khóa nghiệp vụ nội bộ (`BLOCKED_MAINTENANCE`, `CREW_REST`, `VIP_HOLD`).
+  - Hiển thị cảnh báo tiêu chuẩn quốc tế về điều kiện sức khỏe và an toàn bay đối với hành khách chọn ngồi hàng ghế thoát hiểm khẩn cấp.
 
 ### 5.4. `AuthModalComponent`
 - **Vị trí:** Hộp thoại toàn cục bật lên khi khách bấm Đăng nhập hoặc khi chuẩn bị hoàn tất đặt vé.

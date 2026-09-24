@@ -81,6 +81,79 @@ export class SeatAllocationService {
   }
 
   /**
+   * Pure, side-effect-free seat fee calculation for booking and reschedule quotes.
+   */
+  async calculateSeatFee(
+    flightId: Types.ObjectId | string,
+    seatCode: string,
+    aircraftType: string,
+    selectionType: 'AUTO' | 'CHOOSE',
+  ): Promise<number> {
+    if (selectionType === 'AUTO' || !seatCode) {
+      return 0;
+    }
+    const seat = this.fleetLayoutService.findSeat(aircraftType, seatCode);
+    if (!seat) {
+      throw new BadRequestException(`Seat ${seatCode} does not exist on aircraft ${aircraftType}.`);
+    }
+    const pricing = await this.seatPricingService.calculateSeatFee(flightId, seat, 'CHOOSE');
+    return pricing.final_fee;
+  }
+
+  /**
+   * Pure, side-effect-free seat validation for booking quotes and pre-capture gates.
+   */
+  async validateSeatAvailability(
+    flightId: Types.ObjectId | string,
+    seatCode: string,
+    aircraftType: string,
+    cabinClass?: string,
+  ): Promise<void> {
+    const seat = this.fleetLayoutService.findSeat(aircraftType, seatCode);
+    if (!seat) {
+      throw new BadRequestException(`Seat ${seatCode} does not exist on aircraft ${aircraftType}.`);
+    }
+    if (cabinClass && seat.cabin_class !== cabinClass) {
+      throw new BadRequestException(
+        `Requested seat ${seatCode} cabin (${seat.cabin_class}) does not match ticket cabin (${cabinClass}).`,
+      );
+    }
+    const fId = typeof flightId === 'string' ? new Types.ObjectId(flightId) : flightId;
+    const now = new Date();
+    const existing = await this.allocationModel
+      .findOne({
+        flight_id: fId,
+        seat_code: seatCode,
+        status: {
+          $in: [
+            SeatAllocationStatus.HELD,
+            SeatAllocationStatus.CONFIRMED,
+            SeatAllocationStatus.BLOCKED_MAINTENANCE,
+            SeatAllocationStatus.CREW_REST,
+            SeatAllocationStatus.VIP_HOLD,
+          ],
+        },
+        $or: [
+          {
+            status: {
+              $in: [
+                SeatAllocationStatus.CONFIRMED,
+                SeatAllocationStatus.BLOCKED_MAINTENANCE,
+                SeatAllocationStatus.CREW_REST,
+                SeatAllocationStatus.VIP_HOLD,
+              ],
+            },
+          },
+          { held_until: { $gt: now } },
+        ],
+      })
+      .exec();
+    if (existing) {
+      throw new ConflictException(`Seat ${seatCode} is already occupied or held.`);
+    }
+  }
+
+  /**
    * Authoritative seat allocation engine for booking create or reschedule.
    * Enforces atomic concurrency via MongoDB unique index on (flight_id, seat_code).
    * Compensates partially inserted seats on conflict.

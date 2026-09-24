@@ -177,12 +177,20 @@ export class ConfirmTicketDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   payment_method?: PaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  paypal_order_id?: string;
 }
 
 export class RescheduleTicketDto {
   @IsString()
   @IsNotEmpty()
   confirmation_number: string;
+
+  @IsOptional()
+  @IsString()
+  pnr_code?: string;
 
   @IsOptional()
   @IsString()
@@ -225,6 +233,10 @@ export class RescheduleTicketDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   payment_method?: PaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  paypal_order_id?: string;
 }
 
 export class CancelTicketDto {
@@ -235,4 +247,34 @@ export class CancelTicketDto {
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+export class QuoteBookingDto extends CreateBookingDto {}
+
+export class CreatePayPalBookingOrderDto extends CreateBookingDto {
+  @IsString()
+  @IsNotEmpty()
+  client_request_id: string;
+}
+
+export class CapturePayPalOrderDto {
+  @IsString()
+  @IsNotEmpty()
+  order_id: string;
+}
+
+export class CreatePayPalConfirmHoldOrderDto {
+  @IsString()
+  @IsNotEmpty()
+  blocking_number: string;
+
+  @IsString()
+  @IsNotEmpty()
+  client_request_id: string;
+}
+
+export class CreatePayPalRescheduleOrderDto extends RescheduleTicketDto {
+  @IsString()
+  @IsNotEmpty()
+  client_request_id: string;
 }

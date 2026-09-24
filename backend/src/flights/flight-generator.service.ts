@@ -5,6 +5,7 @@ import { Flight, FlightDocument, FlightStatus, CabinClass } from './flights.sche
 import { ScheduleTemplate, ScheduleTemplateDocument } from './schemas/schedule-template.schema';
 import { Airport, AirportDocument } from '../airports/airports.schema';
 import { localWallTimeToUtc, resolveLocalWallTimeToUtc, localDateKey } from '../common/timezone.util';
+import { calculateGreatCircleMiles } from '../common/distance.util';
 import { APTECH_FLIGHT_TEMPLATES, CANONICAL_AIRCRAFT_TYPES } from './flight-templates.catalog';
 
 export interface GenerationStats {
@@ -41,18 +42,7 @@ export class FlightGeneratorService {
    * Great Circle Distance using Haversine formula (Statute miles)
    */
   private calculateGreatCircleMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
-    const R = 3958.8; // Radius of the Earth in statute miles
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return Math.round(R * c);
+    return calculateGreatCircleMiles(lat1, lon1, lat2, lon2);
   }
 
   private getAircraftMetadata(aircraftType: string): {

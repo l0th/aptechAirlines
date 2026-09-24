@@ -65,9 +65,9 @@ Giai đoạn cuối (29-30): Kiểm chuẩn Build 0 lỗi, Hoàn thiện Bộ T�
 
 ### 2.5. Giai đoạn Hoàn thiện: Kiểm chuẩn Kỹ thuật & Bàn giao Đồ án (Ngày 29 – Ngày 30)
 - **Công việc đã hoàn thành:**
-  - Biên dịch kiểm tra toàn bộ mã nguồn Backend (`tsc --noEmit`) và Frontend (`ng build`): Đạt kết quả **0 lỗi, 0 cảnh báo**.
+  - Biên dịch kiểm tra toàn bộ mã nguồn Backend (`tsc --noEmit` / `nest build`) và Frontend (`ng build`): Đạt kết quả **0 lỗi, 0 cảnh báo**.
   - Hoàn thiện trọn bộ hồ sơ tài liệu eProject (00 đến 09) trong thư mục `docs/`.
-  - Khởi chạy thử nghiệm toàn bộ hệ thống trên môi trường Docker container cô lập.
+  - Kiểm tra cú pháp cấu hình triển khai Docker Compose (`docker compose config`: PASS, đóng gói container trực tiếp chưa thực thi trên máy chấm: NOT EXECUTED).
   - Chuẩn bị slide báo cáo và kịch bản demo bảo vệ trước Hội đồng chấm đồ án Aptech.
 
 ---
@@ -151,13 +151,15 @@ Trong quá trình ghép nối giữa Frontend Angular 21 và Backend NestJS, đ�
 ## 4. SỐ LIỆU KIỂM CHỨNG CHẤT LƯỢNG (QUALITY VERIFICATION METRICS)
 
 | Tiêu chí kiểm chuẩn | Công cụ kiểm tra | Tiêu chuẩn chất lượng eProject | Kết quả thực tế đạt được | Đánh giá |
-| :--- | :--- | :--- | :--- | :---: |
-| **Biên dịch Backend** | `tsc --noEmit` | Không có bất kỳ lỗi cú pháp hoặc lỗi kiểu dữ liệu nào. | **0 Errors, 0 Warnings** | **ĐẠT XUẤT SẮC** |
-| **Biên dịch Frontend** | `ng build --configuration production` | Bản build AOT (Ahead-of-Time) hoàn tất, không lỗi template, không lỗi type. | **Build Succeeded (0 Errors)** | **ĐẠT XUẤT SẮC** |
-| **Kiểm thử REST API** | Postman / cURL Scripts | 100% kịch bản kiểm thử các endpoint chức năng 3.1 - 3.10 thành công. | **38 / 38 Tests Passed (100%)** | **ĐẠT XUẤT SẮC** |
-| **Đóng gói Container** | `docker compose up --build` | 3 containers (MongoDB, Backend, Frontend Nginx) khởi động và liên thông hoàn hảo. | **Khởi chạy thành công 3/3 services** | **ĐẠT XUẤT SẮC** |
-| **Quy chuẩn Giao diện** | Visual & Inspector Audit | Đúng bảng màu Navy/Gold, nút bo tròn viên thuốc, 100% Vector SVG không emoji. | **100% Tuân thủ GUI Standards** | **ĐẠT XUẤT SẮC** |
-| **Tính toàn vẹn Dữ liệu** | MongoDB Shell Verify | Kho ghế được trừ chính xác, dặm bay SkyMiles được cộng/trừ đúng nghiệp vụ. | **100% Khớp dữ liệu giao dịch** | **ĐẠT XUẤT SẮC** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Biên dịch Backend** | `tsc --noEmit` / `nest build` | Không có bất kỳ lỗi cú pháp hoặc lỗi kiểu dữ liệu nào. | **0 Errors, 0 Warnings** | **ĐẠT** |
+| **Biên dịch Frontend** | `ng build --configuration production` | Bản build AOT (Ahead-of-Time) hoàn tất, không lỗi template, không lỗi type. | **Build Succeeded (0 Errors)** | **ĐẠT** |
+| **Kiểm thử Đơn vị & Tích hợp** | Jest Automated Test Runner (`npm test`) | Kịch bản kiểm thử các module (AirLabs, Bookings, Concurrency, Flights, Seat Allocation, Analytics, Auth, Policies, Distance, Seed Verifier) thành công. | **33 / 33 Suites Passed (790 Tests Passed)** | **ĐẠT** |
+| **Hệ thống Dữ liệu Thử nghiệm** | `npm run seed:e2e` (Idempotent Upsert) | Khởi tạo đầy đủ 4 User E2E, 12 Sân bay tham chiếu, 16 Chuyến bay động (+5d đến +35d), sơ đồ ghế vật lý và 3 Booking mẫu. | **Hoàn thành (Idempotent)** | **ĐẠT** |
+| **Cấu hình Container** | `docker compose config` | Kiểm tra cú pháp và liên kết cấu hình 3 services (MongoDB, Backend, Frontend). | **PASS (Cú pháp hợp lệ)** | **ĐẠT** |
+| **Đóng gói Container Thực tế** | `docker compose up --build` | Khởi chạy container trực tiếp trên môi trường máy chủ. | **NOT EXECUTED (Chưa thực thi trực tiếp trên máy chấm)** | **CHƯA THỰC THI** |
+| **Quy chuẩn Giao diện** | Visual & Code Audit | Bảng màu Navy/Gold, nút bo tròn viên thuốc, 100% Vector SVG không emoji, hỗ trợ song ngữ VI/EN. | **Tuân thủ theo tài liệu GUI Standards** | **ĐẠT** |
+| **Tính toàn vẹn Dữ liệu** | Unit & Integration Invariant Tests | Kho ghế được trừ chính xác, khóa chống trùng lặp, dặm bay SkyMiles được cộng/trừ đúng nghiệp vụ. | **Khớp dữ liệu theo kiểm thử tự động** | **ĐẠT** |
 
 ---
 
@@ -165,9 +167,9 @@ Trong quá trình ghép nối giữa Frontend Angular 21 và Backend NestJS, đ�
 
 ### 5.1. Các rủi ro còn lại (Residual Risks)
 1. **Phụ thuộc Hạn ngạch API AirLabs:** Tài khoản miễn phí (Free Tier) của dịch vụ AirLabs có giới hạn số lượng request mỗi tháng. Nếu ứng dụng có lượng truy cập đột biến trong buổi bảo vệ đồ án, có thể chạm ngưỡng giới hạn.  
-   *Khuyến nghị giải pháp dự phòng:* Hệ thống đã trang bị sẵn cơ chế nạp dữ liệu cục bộ và tính năng nhập Custom API Key trực tiếp trên giao diện Admin.
-2. **Cổng thanh toán thực tế:** Hiện tại hệ thống đang sử dụng mô phỏng cổng thanh toán (Mock Gateway).  
-   *Khuyến nghị giải pháp:* Trong giai đoạn phát triển thương mại tiếp theo, tích hợp thêm các cổng thanh toán nội địa uy tín như VNPAY Sandbox hoặc cổng quốc tế Stripe.
+   *Khuyến nghị giải pháp dự phòng:* Hệ thống đã trang bị sẵn cơ chế nạp dữ liệu cục bộ và tính năng quản lý mạng lưới bay thương mại độc lập trên `/admin/commercial-flights`.
+2. **Cổng thanh toán Trực tuyến Quốc tế (PayPal Sandbox):** Hệ thống đã hoàn tất toàn bộ kiến trúc tài chính Phase 1B (Reconciliation, Idempotency, Compensation Refund, Snapshotting). Chế độ mặc định nộp bài đặt `PAYPAL_ENABLED=false`.
+   *Xác nhận nghiệm thu:* **Real PayPal Sandbox provider acceptance: DEFERRED / NOT EXECUTED. Pending Sandbox credentials and manual provider flow.** Mã nguồn đã được covered by automated PayPal integration/hardening tests và bộ 132 bài test tự động (`payment-phase-1b.spec.ts`). Trong môi trường sản xuất thương mại, cấu hình `PAYPAL_CLIENT_ID` và `PAYPAL_CLIENT_SECRET` của tài khoản doanh nghiệp (Business Account) để bật `PAYPAL_ENABLED=true`.
 
 ### 5.2. Khuyến nghị Nâng cấp cho các Phiên bản Tiếp theo
 - **Mở rộng thuật toán nối chuyến:** Nâng cấp thuật toán `findConnectingRoutes` để hỗ trợ tìm kiếm hành trình có 2 điểm dừng (Double Layovers) cho các tuyến bay quốc tế dài.

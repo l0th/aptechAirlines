@@ -31,6 +31,8 @@ import {
   BookingStatus,
   CancelBookingResponse,
   CancellationPolicy,
+  BookingQuoteResponse,
+  RescheduleQuoteResponse,
 } from '../models/booking.model';
 import { AuthResponse, RegisterPayload, User, UserRole } from '../models/user.model';
 
@@ -332,15 +334,82 @@ export class ApiService {
     return this.http.post<Booking>(`${this.baseUrl}/bookings`, bookingData);
   }
 
+  quoteBooking(bookingData: any): Observable<BookingQuoteResponse> {
+    return this.http.post<BookingQuoteResponse>(`${this.baseUrl}/bookings/quote`, bookingData);
+  }
+
+  quoteRescheduleBooking(data: any): Observable<RescheduleQuoteResponse> {
+    return this.http.post<RescheduleQuoteResponse>(`${this.baseUrl}/bookings/reschedule/quote`, data);
+  }
+
+  getPayPalConfig(): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/paypal/config`);
+  }
+
+  createPayPalBookingOrder(payload: any): Observable<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/create-order`, payload);
+  }
+
+  capturePayPalBooking(checkoutId: string, orderId: string): Observable<{ booking: Booking; checkout_id: string }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/checkouts/${checkoutId}/capture`, { order_id: orderId });
+  }
+
+  createPayPalConfirmHoldOrder(payload: { blocking_number: string; client_request_id: string }): Observable<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/confirm-hold/create-order`, payload);
+  }
+
+  capturePayPalConfirmHold(checkoutId: string, orderId: string): Observable<{ booking: Booking; checkout_id: string }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/confirm-hold/${checkoutId}/capture`, { order_id: orderId });
+  }
+
+  createPayPalRescheduleOrder(payload: any): Observable<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/reschedule/create-order`, payload);
+  }
+
+  capturePayPalReschedule(checkoutId: string, orderId: string): Observable<{ result: any; checkout_id: string }> {
+    return this.http.post<any>(`${this.baseUrl}/bookings/paypal/reschedule/${checkoutId}/capture`, { order_id: orderId });
+  }
+
   confirmBooking(data: {
     blocking_number: string;
     payment_method: 'PROFILE_CARD' | 'PAYPAL';
+    paypal_order_id?: string;
   }): Observable<Booking> {
     return this.http.post<Booking>(`${this.baseUrl}/bookings/confirm`, data);
   }
 
+  confirmHoldTicket(data: {
+    blocking_number: string;
+    payment_method: 'PROFILE_CARD' | 'PAYPAL';
+    paypal_order_id?: string;
+  }): Observable<Booking> {
+    return this.confirmBooking(data);
+  }
+
   rescheduleBooking(data: {
     confirmation_number: string;
+    pnr_code?: string;
     new_flight_id?: string;
     new_inventory_id?: string;
     new_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
@@ -348,6 +417,7 @@ export class ApiService {
     new_return_inventory_id?: string;
     new_return_legs?: Array<{ flight_id: string; inventory_id: string; leg_type?: string }>;
     payment_method?: 'PROFILE_CARD' | 'PAYPAL';
+    paypal_order_id?: string;
     seat_requests?: Array<{
       passenger_index: number;
       flight_id: string;
@@ -606,5 +676,15 @@ export class ApiService {
       `${this.baseUrl}/flights/commercial-templates/${encodeURIComponent(id)}/materialize`,
       payload,
     );
+  }
+
+  // --- Requirement 1.2.3 & 1.2.4.2: Admin Analytics & Capacity Utilization ---
+
+  getAnalyticsOverview(): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/analytics/overview`);
+  }
+
+  getCapacityUtilization(): Observable<any> {
+    return this.http.get<any>(`${this.baseUrl}/analytics/capacity`);
   }
 }

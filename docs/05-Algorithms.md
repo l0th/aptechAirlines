@@ -8,7 +8,7 @@
 
 ## 1. TỔNG QUAN CÁC THUẬT TOÁN CỐT LÕI
 
-Hệ thống Aptech Airlines triển khai 10 thuật toán nghiệp vụ then chốt nhằm đáp ứng trọn vẹn yêu cầu chức năng trong bản đặc tả dự án (`ProjectSpecification.txt` & `AirlinesReservationSystem.txt`), đảm bảo tính toàn vẹn giao dịch, hiệu năng tra cứu và trải nghiệm người dùng tối ưu:
+Hệ thống Aptech Airlines triển khai 20 thuật toán nghiệp vụ then chốt nhằm đáp ứng trọn vẹn yêu cầu chức năng trong bản đặc tả dự án (`ProjectSpecification.txt` & `AirlinesReservationSystem.txt`), đảm bảo tính toàn vẹn giao dịch, hiệu năng tra cứu và trải nghiệm người dùng tối ưu:
 
 | STT | Tên thuật toán | Vị trí cài đặt mã nguồn | Mục tiêu nghiệp vụ |
 | :---: | :--- | :--- | :--- |
@@ -20,19 +20,29 @@ Hệ thống Aptech Airlines triển khai 10 thuật toán nghiệp vụ then ch
 | **6** | Tra cứu Tỷ lệ Hoàn tiền theo Bảng Chính sách Hủy vé | `PoliciesService.calculateRefundPercentage` | Yêu cầu 3.7.2 |
 | **7** | Tích lũy và Khấu trừ Dặm bay SkyMiles | `UsersService.addSkyMiles` / `deductSkyMiles` | Yêu cầu 3.2, 3.4.3.3, 3.7.3 |
 | **8** | Đổi vé Đã xác nhận, Tính chênh lệch giá & Tái cấu trúc Cuống vé | `BookingsService.rescheduleTicket` | Yêu cầu 3.6 |
-| **9** | Kiểm tra Chiếm dụng Sơ đồ Ghế & Phân loại Hàng ghế Airbus A321 | `FlightsService.getSeatMap` | Sơ đồ ghế Hàng không chuẩn |
-| **10** | Tích hợp AirLabs: Đồng bộ Lịch bay, Làm giàu Tàu bay & Đội bay | `FlightsService.syncFromAirLabs` / `enrichAircraft` | Dữ liệu Hàng không thực tế |
+| **9** | Kiểm tra Chiếm dụng Sơ đồ Ghế & Catalog Đội bay Đa chủng loại | `FlightsService.getSeatMap` & `SeatAllocationService` | Sơ đồ ghế Hàng không & Catalog 6 dòng tàu bay |
+| **10** | Tích hợp AirLabs: Đồng bộ Lịch bay & Radar ADS-B | `AirLabsCommercialService` & `FlightsService` | Dữ liệu Hàng không thực tế & Fallback trung thực |
+| **11** | Tính Khoảng cách Cung lớn Great-Circle (Haversine Formula) | `calculateGreatCircleMiles` (`distance.util.ts`) | Khoảng cách đường bay & dặm bay chuẩn xác (statute miles) |
+| **12** | Định giá Ghế ngồi Động 8 Chiều theo Mô hình Cộng dồn (Fee Stacking) | `SeatPricingService.calculateSeatFee` | Phụ thu vị trí ghế minh bạch (`SeatPricingRule.amount`) |
+| **13** | Phân tích Nghiệp vụ Doanh thu & Quản trị Tải Chuyến bay | `AnalyticsService.getAnalyticsSummary` / `getCapacitySummary` | Doanh thu thuần, giá trị đặt vé & đối soát tải ghế |
+| **14** | SAGA Đặt Chỗ Ghế & Tồn Kho Hai Pha (Seat & Inventory SAGA) | `BookingSeatSagaOperation` & `SeatAllocationService` | Giao dịch hai pha phân tán chống rò rỉ ghế |
+| **15** | Bồi Hoàn & Phục Hồi Tiến Khi Đổi Vé (Reschedule Forward Recovery) | `BookingsService.rescheduleTicket` / `mixed / connecting` | Hoán đổi chặng bay nguyên tử, chống mất chỗ cũ nếu lỗi |
+| **16** | Máy Trạng Thái PayPal, Idempotency & Giới Hạn Cổng Thanh Toán | `PaypalService` & `PaypalController` | Trạng thái CAPTURED/REFUNDED (*CODE IMPLEMENTED / PRE-SANDBOX; REAL PROVIDER ACCEPTANCE: DEFERRED / NOT EXECUTED*) |
+| **17** | Phục Hồi Giao Dịch Chụp Nhập Nhằng & Đối Chiếu Bằng Chứng Tỷ Giá | `assertPayPalPaymentProof` & `PaypalController` | Ràng buộc tỷ giá 1:1, kiểm tra số tiền VND - USD khớp |
+| **18** | Hoàn Tiền Bồi Thường & Phân Bổ Nguồn Hoàn LIFO | `allocateRefundSources` (`refund-allocation.util.ts`) | Phân bổ nguồn hoàn tiền chống lạm chi, bảo toàn provenance |
+| **19** | Tự Động Thử Lại & Đối Soát Hoàn Tiền Treo/Thất Bại | `PaypalRefundScheduler` & `PaypalController` | Tự động quét và đối soát giao dịch hoàn tiền chưa hoàn tất |
+| **20** | Khám Phá Mạng Lưới & Vật Hóa Lịch Bay Thương Mại 330 Ngày | `AirLabsCommercialService` & `FlightGeneratorService` | Sinh và quản lý lịch trình thương mại 330 ngày liên tục |
 
 ---
 
-## 2. CHI TIẾT 10 THUẬT TOÁN HỆ THỐNG
+## 2. CHI TIẾT 20 THUẬT TOÁN HỆ THỐNG
 
 ---
 
 ### THUẬT TOÁN 1: Phân giải Thành phố, Xử lý Nhập nhằng & Gợi ý Sân bay Lân cận (City Resolution & Ambiguity Handling)
 
 - **Mục tiêu:** Khi người dùng nhập tên thành phố hoặc mã sân bay dưới dạng chuỗi tự do, hệ thống kiểm tra sự tồn tại trong CSDL, liệt kê tất cả các sân bay trùng khớp nếu có sự nhập nhằng (ambiguity). Trường hợp thành phố không có đường bay trực tiếp (`is_serviced_directly = false`), hệ thống tự động tìm và gợi ý sân bay gần nhất kèm khoảng cách km (Yêu cầu 3.3.1 - 3.3.2).
-- **Tập tin cài đặt:** [airports.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/airports/airports.service.ts) (`resolveCity`)
+- **Tập tin cài đặt:** [airports.service.ts](../backend/src/airports/airports.service.ts) (`resolveCity`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -87,7 +97,7 @@ End Algorithm
 ### THUẬT TOÁN 2: Tìm kiếm Chuyến bay & Tính giá vé theo Độ tuổi (Flight Search & Multi-tier Pricing)
 
 - **Mục tiêu:** Tra cứu danh sách chuyến bay trực tiếp giữa hai thành phố, lọc theo ngày bay (hoặc khoảng ngày), hạng khoang, quy định hút thuốc, và số lượng khách. Đồng thời, tự động áp dụng chính sách giảm giá vé theo độ tuổi hành khách: Người lớn 100%, Trẻ em 75%, Người cao tuổi 85% (Yêu cầu 3.3.4 - 3.3.7).
-- **Tập tin cài đặt:** [flights.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/flights/flights.service.ts) (`searchFlights`, `findDirectFlights`)
+- **Tập tin cài đặt:** [flights.service.ts](../backend/src/flights/flights.service.ts) (`searchFlights`, `findDirectFlights`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -157,7 +167,7 @@ End Algorithm
 ### THUẬT TOÁN 3: Lựa chọn Tuyến bay Nối chuyến (Connecting Route Selection Algorithm)
 
 - **Mục tiêu:** Trong trường hợp không có chuyến bay thẳng nào thỏa mãn yêu cầu của khách hàng, hệ thống tự động kích hoạt thuật toán tìm kiếm đường bay gián tiếp qua một trạm trung chuyển (Transit Hub $T$), thỏa mãn điều kiện thời gian chờ nối chuyến (Layover) từ 45 phút đến 720 phút (12 tiếng) (Yêu cầu 3.3.3).
-- **Tập tin cài đặt:** [flights.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/flights/flights.service.ts) (`findConnectingRoutes`)
+- **Tập tin cài đặt:** [flights.service.ts](../backend/src/flights/flights.service.ts) (`findConnectingRoutes`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -229,7 +239,7 @@ End Algorithm
 ### THUẬT TOÁN 4: Giữ chỗ Ghế ngồi Nguyên tử & Cơ chế Rollback Chặng (Atomic Seat Reservation with Multi-leg Rollback)
 
 - **Mục tiêu:** Đảm bảo tính toán vẹn dữ liệu khi đặt chỗ: trừ số lượng ghế khả dụng (`available_seats`) một cách nguyên tử để ngăn chặn hiện tượng tranh chấp bán vượt số ghế (race condition / overbooking). Nếu đặt vé cho hành trình nhiều chặng (nối chuyến hoặc khứ hồi) mà một chặng bất kỳ thất bại do hết ghế, hệ thống phải tự động khôi phục (Rollback) lại số ghế đã trừ ở các chặng trước đó (Yêu cầu 3.4.3).
-- **Tập tin cài đặt:** [flights.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/flights/flights.service.ts) (`reserveSeats`) & [bookings.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/bookings/bookings.service.ts) (`createBooking`)
+- **Tập tin cài đặt:** [flights.service.ts](../backend/src/flights/flights.service.ts) (`reserveSeats`) & [bookings.service.ts](../backend/src/bookings/bookings.service.ts) (`createBooking`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -292,7 +302,7 @@ End Algorithm
   - Khách chỉ được phép chọn giữ chỗ miễn phí (`BLOCKED`) nếu ngày khởi hành cách thời điểm hiện tại **trên 14 ngày (2 tuần)**. Hạn chót xác nhận (`time_limit_deadline`) được chốt cứng bằng Ngày bay sớm nhất trừ đi 14 ngày.
   - Tự động chạy tiến trình ngầm (Cron Job hàng giờ) quét và gửi email nhắc nhở trước 3 tuần (21 ngày) cho các vé giữ chỗ chưa thanh toán.
   - Tự động quét và hủy vé quá hạn 14 ngày, hoàn trả ghế trống vào kho vé (Yêu cầu 3.4.2, 3.4.2.1, 3.5.1).
-- **Tập tin cài đặt:** [bookings.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/bookings/bookings.service.ts) & [bookings.scheduler.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/bookings/bookings.scheduler.ts)
+- **Tập tin cài đặt:** [bookings.service.ts](../backend/src/bookings/bookings.service.ts) & [bookings.scheduler.ts](../backend/src/bookings/bookings.scheduler.ts)
 
 #### Mã giả (Pseudocode):
 
@@ -370,7 +380,7 @@ End Algorithm
 ### THUẬT TOÁN 6: Tra cứu Tỷ lệ Hoàn tiền theo Bảng Chính sách Hủy vé (Refund Policy Percentage Lookup)
 
 - **Mục tiêu:** Khi hành khách hủy vé đã xác nhận (`CONFIRMED`), hệ thống tính toán số ngày còn lại trước giờ khởi hành (`daysBeforeDeparture`) và đối chiếu với danh mục chính sách trong CSDL (`cancellationpolicies`) để xác định chính xác tỷ lệ hoàn tiền (%) (Yêu cầu 3.7.2).
-- **Tập tin cài đặt:** [policies.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/policies/policies.service.ts) (`calculateRefundPercentage`)
+- **Tập tin cài đặt:** [policies.service.ts](../backend/src/policies/policies.service.ts) (`calculateRefundPercentage`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -411,7 +421,7 @@ End Algorithm
 ### THUẬT TOÁN 7: Tích lũy và Khấu trừ Dặm bay SkyMiles (SkyMiles Accrual & Deduction Engine)
 
 - **Mục tiêu:** Tự động cộng điểm dặm bay khi hành khách mua vé trực tiếp hoặc xác nhận vé giữ chỗ, dựa trên khoảng cách chuyến bay tính bằng dặm (`distance_miles`) nhân với số lượng hành khách trong đoàn bay. Khi vé bị hủy, hệ thống khấu trừ chính xác số điểm đã cộng khỏi hồ sơ người dùng (Yêu cầu 3.2, 3.4.3.3, 3.7.3).
-- **Tập tin cài đặt:** [bookings.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/bookings/bookings.service.ts) & [users.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/users/users.service.ts)
+- **Tập tin cài đặt:** [bookings.service.ts](../backend/src/bookings/bookings.service.ts) & [users.service.ts](../backend/src/users/users.service.ts)
 
 #### Công thức & Mã giả (Pseudocode):
 
@@ -461,7 +471,7 @@ End Algorithm
 ### THUẬT TOÁN 8: Đổi vé Đã xác nhận, Tính chênh lệch giá & Tái cấu trúc Cuống vé (Ticket Rescheduling Engine)
 
 - **Mục tiêu:** Cho phép hành khách đổi vé đã xác nhận (`CONFIRMED`) sang chuyến bay mới. Thuật toán kiểm tra chỗ trống chuyến mới, hoàn trả ghế chuyến cũ, trừ ghế chuyến mới, tính chênh lệch giá vé (`price_difference`), thực hiện phụ thu/hoàn tiền qua thẻ tín dụng, tái cấu trúc mảng cuống vé (`ticket_coupons`) theo chiều bay (`leg_type`) và cấp mã xác nhận mới (Yêu cầu 3.6).
-- **Tập tin cài đặt:** [bookings.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/bookings/bookings.service.ts) (`rescheduleTicket`)
+- **Tập tin cài đặt:** [bookings.service.ts](../backend/src/bookings/bookings.service.ts) (`rescheduleTicket`)
 
 #### Mã giả (Pseudocode):
 ```text
@@ -534,93 +544,90 @@ End Algorithm
 
 ---
 
-### THUẬT TOÁN 9: Kiểm tra Chiếm dụng Sơ đồ Ghế & Phân loại Hàng ghế Airbus A321 (Seat Map Occupancy & Layout Generator)
+### THUẬT TOÁN 9: Kiểm tra Chiếm dụng Sơ đồ Ghế & Catalog Đội bay Đa chủng loại (Seat Map Occupancy & Multi-Aircraft Fleet Catalog)
 
-- **Mục tiêu:** Mô phỏng sơ đồ ghế ngồi chuẩn hàng không cho dòng máy bay thân hẹp Airbus A321 (31 hàng ghế, cấu hình 3 - 3: A, B, C | D, E, F). Thuật toán kiểm tra trạng thái chiếm chỗ thực tế từ các đơn đặt vé chưa hủy trong CSDL (`ticket_coupons.seat_code`), đồng thời phân loại quy tắc hàng ghế quốc tế: Hàng 1 - 5 là hàng ghế Đặc biệt/Skyboss, Hàng 12 và 14 là hàng ghế gần Lối thoát hiểm (chỗ để chân rộng), và **bỏ qua hoàn toàn hàng 13** theo phong tục hàng không quốc tế.
-- **Tập tin cài đặt:** [flights.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/flights/flights.service.ts) (`getSeatMap`)
+- **Mục tiêu:** Mô phỏng sơ đồ ghế ngồi chuẩn hàng không cho 6 dòng tàu bay thương mại trong catalog (`fleet-layout.catalog.ts`):
+  1. `A20N` (Airbus A320neo): 180 ghế (12 Business, 168 Economy).
+  2. `A21N` (Airbus A321neo): 204 ghế (16 Business, 188 Economy).
+  3. `B789` (Boeing 787-9 Dreamliner): 294 ghế (28 Business, 35 Club, 231 Economy).
+  4. `A359` (Airbus A350-900): 305 ghế (29 Business, 36 Club, 240 Economy).
+  5. `B738` (Boeing 737-800): 166 ghế (16 Business, 150 Economy).
+  6. `AT76` (ATR 72-600): 68 ghế (68 Economy).
+  Thuật toán kết hợp sơ đồ vật lý theo layout của từng model máy bay với dữ liệu chiếm chỗ thời gian thực từ hai nguồn: bảng phân bổ ghế vật lý `SeatAllocation` (`HELD`, `CONFIRMED`, `BLOCKED_MAINTENANCE`, `CREW_REST`, `VIP_HOLD`) và cuống vé `ticket_coupons` của các đơn đặt vé chưa hủy. Đồng thời áp dụng phụ phí ghi đè từ `FlightSeatOverride` nếu có.
+- **Tập tin cài đặt:** [seat-allocation.service.ts](../backend/src/seat-allocation/seat-allocation.service.ts) & [fleet-layout.catalog.ts](../backend/src/seat-allocation/fleet-layout.catalog.ts)
 
 #### Mã giả (Pseudocode):
 ```text
-Algorithm GenerateSeatMap(flightId):
+Algorithm GenerateFleetSeatMap(flightId):
     Input: flightId
-    Output: SeatMapStructure
+    Output: SeatMapStructure { flight_id, aircraft_model, total_capacity, cabins, rows }
 
     1. flight = DB.flights.findById(flightId)
-    
-    // Bước 1: Quét CSDL lấy tập hợp các ghế đã được đặt cho chuyến bay này
-    2. activeBookings = DB.bookings.find({
-           'ticket_coupons.flight_id': flight._id,
-           status: { $ne: "CANCELLED" }
-       })
+    2. modelCode = flight.aircraft?.model_code || 'A21N'
+    3. layout = FleetCatalog.getLayout(modelCode) // Tra cứu catalog 6 dòng tàu bay
 
-    3. occupiedSet = Set()
-    4. FOR EACH b IN activeBookings DO:
+    // Bước 1: Quét bản ghi phân bổ vật lý SeatAllocation
+    4. physicalAllocs = DB.seatallocations.find({ flight_id: flight._id })
+    5. physicalStatusMap = Map()
+    6. FOR EACH alloc IN physicalAllocs DO:
+           physicalStatusMap.set(alloc.seat_code, alloc.status)
+       END FOR
+
+    // Bước 2: Quét đơn đặt vé đang hoạt động
+    7. activeBookings = DB.bookings.find({
+           'ticket_coupons.flight_id': flight._id,
+           status: { $in: ['CONFIRMED', 'BLOCKED', 'RESCHEDULED'] }
+       })
+    8. bookingOccupiedSet = Set()
+    9. FOR EACH b IN activeBookings DO:
            FOR EACH coupon IN b.ticket_coupons DO:
                IF coupon.flight_id == flight._id AND coupon.seat_code != "" THEN:
-                   occupiedSet.add(toUpperCase(coupon.seat_code))
+                   bookingOccupiedSet.add(toUpperCase(coupon.seat_code))
                END IF
            END FOR
        END FOR
 
-    // Bước 2: Thiết lập cấu hình vật lý tàu bay Airbus A321
-    5. columns = ['A', 'B', 'C', 'D', 'E', 'F']
-    6. totalRows = 31
-    7. exitRows = [12, 14]
-    8. specialRows = [1, 2, 3, 4, 5]
-    9. skippedRows = [13] // Chuẩn quốc tế kiêng số 13
-
-    10. rows = []
-    11. FOR r = 1 TO totalRows DO:
-            IF r IN skippedRows THEN CONTINUE // Bỏ qua hàng 13
-
-            isExit = (r IN exitRows)
-            isSpecial = (r IN specialRows)
-            rowSeats = []
-
-            FOR EACH col IN columns DO:
-                seatCode = string(r) + col
-                type = "STANDARD"
-                typeLabel = "Còn trống"
-                cabinClass = "ECONOMY"
-                referenceFee = 0
-
-                IF isSpecial THEN:
-                    type = "SPECIAL"
-                    typeLabel = "Đặc biệt"
-                    cabinClass = "BUSINESS"
-                    referenceFee = 150000 // 150.000đ (chỉ hiển thị tham khảo, hệ thống không thu thêm)
-                ELSE IF isExit THEN:
-                    type = "EXIT_ROW"
-                    typeLabel = "Gần lối thoát hiểm"
-                    cabinClass = "ECONOMY"
-                    referenceFee = 100000 // 100.000đ tham khảo
-                END IF
-
-                isOccupied = occupiedSet.has(seatCode)
-
-                rowSeats.append({
-                    seat_code: seatCode,
-                    type: type,
-                    type_label: typeLabel,
-                    cabin_class: cabinClass,
-                    fee: referenceFee,
-                    is_occupied: isOccupied,
-                    is_exit_row: isExit,
-                    is_special: isSpecial
-                })
-            END FOR
-
-            rows.append({ row_number: r, is_exit_row: isExit, is_special: isSpecial, seats: rowSeats })
+    // Bước 3: Tra cứu phụ phí ghi đè theo chuyến bay
+    10. overrides = DB.flightseatoverrides.find({ flight_id: flight._id, is_active: true })
+    11. overrideMap = Map()
+    12. FOR EACH ovr IN overrides DO:
+            overrideMap.set(ovr.seat_code, ovr.override_fee)
         END FOR
 
-    12. RETURN { flight_id: flight._id, layout_notice: "Airbus A321 Layout", rows: rows }
+    // Bước 4: Ghép nối sơ đồ vật lý theo layout catalog
+    13. mappedRows = []
+    14. FOR EACH rowDef IN layout.rows DO:
+            rowSeats = []
+            FOR EACH seatDef IN rowDef.seats DO:
+                code = seatDef.seat_code
+                status = physicalStatusMap.get(code) || (bookingOccupiedSet.has(code) ? 'CONFIRMED' : 'AVAILABLE')
+                fee = overrideMap.has(code) ? overrideMap.get(code) : seatDef.base_seat_fee
+
+                rowSeats.append({
+                    seat_code: code,
+                    cabin_class: seatDef.cabin_class,
+                    position_subtype: seatDef.position_subtype, // WINDOW, AISLE, MIDDLE
+                    is_exit_row: seatDef.is_exit_row,
+                    extra_legroom: seatDef.extra_legroom,
+                    status: status,
+                    is_occupied: (status == 'CONFIRMED' || status == 'HELD'),
+                    is_blocked: (status IN ['BLOCKED_MAINTENANCE', 'CREW_REST', 'VIP_HOLD']),
+                    seat_fee: fee
+                })
+            END FOR
+            mappedRows.append({ row_number: rowDef.row_number, seats: rowSeats })
+        END FOR
+
+    15. RETURN { flight_id: flight._id, aircraft: layout.aircraft_name, total_seats: layout.total_seats, rows: mappedRows }
 End Algorithm
 ```
 
-- **Giải thích hoạt động:** Ghế chỉ được đánh dấu là `is_occupied = true` nếu có bản ghi thực tế trong CSDL với trạng thái khác `CANCELLED`. Bỏ qua hàng 13 giúp sơ đồ máy bay tuân thủ 100% tiêu chuẩn quốc tế của IATA/ICAO.
+- **Giải thích hoạt động:**
+  - Đảm bảo tính nhất quán tuyệt đối giữa sơ đồ đồ họa ghế và dữ liệu lưu trữ CSDL. Ghế được đánh dấu chiếm dụng nếu có phân bổ vật lý hoặc cuống vé xác nhận.
+  - Phân định rõ ràng giữa ghế đã bán cho khách (`CONFIRMED`, `HELD`) và ghế bị nhân viên kỹ thuật khóa (`BLOCKED_MAINTENANCE`, `CREW_REST`, `VIP_HOLD`).
 - **Độ phức tạp tính toán:**
-  - **Thời gian:** $O(B_f + R \times C)$ với $B_f$ là số lượng vé của chuyến bay, $R = 30$ hàng ghế thực tế, $C = 6$ ghế/hàng. Tổng cộng kiểm tra $30 \times 6 = 180$ ghế trong $<15\text{ms}$.
-  - **Không gian:** $O(180)$ phần tử biểu diễn sơ đồ ghế.
+  - **Thời gian:** $O(S + B_f)$ với $S$ là tổng số ghế của tàu bay ($68 \le S \le 305$), $B_f$ là số lượng vé. Tổng thời gian xử lý $<10\text{ms}$.
+  - **Không gian:** $O(S)$ cho cấu trúc dữ liệu sơ đồ hoàn chỉnh.
 
 ---
 
@@ -631,7 +638,7 @@ End Algorithm
   2. Truy vấn radar trực tiếp để làm giàu thông tin máy bay đang bay (số đăng bạ, model máy bay).
   3. Tra cứu toàn bộ đội bay của hãng (`getAirlineFleet`).
   4. **Quy tắc ứng xử trung thực (Honest Fallback Rule):** Tuyệt đối không tự bịa đặt số đăng bạ cho các chuyến bay tương lai chưa cất cánh (Yêu cầu tích hợp Live Flight Data).
-- **Tập tin cài đặt:** [flights.service.ts](file:///C:/Users/Ha/Desktop/aptechairline/backend/src/flights/flights.service.ts) (`syncFromAirLabs`, `enrichAircraftFromAirLabs`, `getAirlineFleet`)
+- **Tập tin cài đặt:** [flights.service.ts](../backend/src/flights/flights.service.ts) (`syncFromAirLabs`, `enrichAircraftFromAirLabs`, `getAirlineFleet`)
 
 #### Mã giả (Pseudocode):
 
@@ -711,3 +718,410 @@ End Algorithm
 - **Độ phức tạp tính toán:**
   - **Thời gian:** Phụ thuộc vào độ trễ mạng ngoại vi HTTP Request tới AirLabs API (thường từ $200\text{ms} - 500\text{ms}$).
   - **Không gian:** $O(M)$ biểu diễn dữ liệu phản hồi từ nhà cung cấp API.
+
+---
+
+### THUẬT TOÁN 11: Tính Khoảng cách Cung lớn Great-Circle (Haversine Formula)
+
+- **Mục tiêu:** Tính toán cự ly bay thực tế giữa 2 sân bay theo tọa độ trắc địa vĩ độ/kinh độ (Latitude/Longitude), đơn vị dặm chuẩn (statute miles), làm căn cứ chính xác cho việc tính dặm tích lũy SkyMiles và thời gian bay thực tế thay vì sử dụng khoảng cách giả định cố định.
+- **Tập tin cài đặt:** [distance.util.ts](../backend/src/common/distance.util.ts) (`calculateGreatCircleMiles`)
+
+#### Mã giả (Pseudocode):
+```text
+Algorithm CalculateGreatCircleMiles(lat1, lon1, lat2, lon2):
+    Input: Tọa độ sân bay đi (lat1, lon1) và sân bay đến (lat2, lon2)
+    Output: Cự ly khoảng cách dặm bay (statute miles, làm tròn nguyên)
+
+    // Kiểm tra tính hợp lệ của tọa độ
+    IF lat1 == NULL OR lon1 == NULL OR lat2 == NULL OR lon2 == NULL THEN:
+        RETURN 0
+    END IF
+    IF lat1 == lat2 AND lon1 == lon2 THEN:
+        RETURN 0
+    END IF
+
+    R = 3958.8  // Bán kính trung bình Trái Đất (statute miles)
+    toRad = PI / 180.0
+
+    phi1 = lat1 * toRad
+    phi2 = lat2 * toRad
+    deltaPhi = (lat2 - lat1) * toRad
+    deltaLambda = (lon2 - lon1) * toRad
+
+    a = sin(deltaPhi / 2)^2 + cos(phi1) * cos(phi2) * sin(deltaLambda / 2)^2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    distance = R * c
+    RETURN Math.round(distance)
+End Algorithm
+```
+
+- **Kết quả tính toán chuẩn trên các đường bay điển hình:**
+  - `SGN` (Tân Sơn Nhất) ➔ `HAN` (Nội Bài): **721 statute miles**.
+  - `SGN` (Tân Sơn Nhất) ➔ `DAD` (Đà Nẵng): **376 statute miles**.
+  - `SGN` (Tân Sơn Nhất) ➔ `NRT` (Tokyo Narita): **2,724 statute miles**.
+- **Độ phức tạp tính toán:**
+  - **Thời gian:** $O(1)$ — Thực hiện các phép tính lượng giác với thời gian thực thi hằng số.
+  - **Không gian:** $O(1)$.
+
+---
+
+### THUẬT TOÁN 12: Định giá Ghế ngồi Động 8 Chiều theo Mô hình Cộng dồn (Dynamic Seat Fee Stacking)
+
+- **Mục tiêu:** Cung cấp cơ chế tính phụ phí chọn chỗ ngồi linh hoạt dựa trên 8 thuộc tính không gian vật lý của ghế, bảo đảm cộng dồn phụ phí minh bạch (Additive Fee Stacking) và chụp snapshot bất biến (`SeatPricingSnapshot`).
+- **Tập tin cài đặt:** [seat-pricing.service.ts](../backend/src/seat-allocation/seat-pricing.service.ts)
+
+#### 8 Chiều định giá ghế độc lập:
+1. `CABIN_BASE`: Phụ thu cơ sở theo hạng vé (Economy, Club, Business).
+2. `WINDOW`: Ghế sát cửa sổ (vị trí A, F hoặc theo sơ đồ thân rộng).
+3. `AISLE`: Ghế cạnh lối đi bộ hành lang.
+4. `MIDDLE`: Ghế kẹp giữa (thường miễn phí hoặc giảm trừ).
+5. `FRONT_ZONE`: Ghế ở các hàng đầu tiên của khoang (lên/xuống máy bay nhanh).
+6. `EXIT_ROW`: Ghế cạnh cửa thoát hiểm khẩn cấp (không gian chân thoáng).
+7. `EXTRA_LEGROOM`: Ghế có khoảng cách hàng ghế (seat pitch) mở rộng.
+8. `BULKHEAD`: Ghế sát vách ngăn khoang máy bay.
+
+#### Mã giả (Pseudocode):
+```text
+Algorithm CalculateSeatPrice(seatCode, cabinClass, flightId):
+    activeRules = DB.seatpricingrules.find({ is_active: true }).sort({ priority: 1 })
+    applicableDimensions = DetectSeatDimensions(seatCode, cabinClass)
+
+    totalSeatFee = 0
+    appliedRuleIds = []
+    appliedDims = []
+
+    FOR dim IN applicableDimensions:
+        matchingRule = FindBestRule(activeRules, dim, cabinClass)
+        IF matchingRule != NULL THEN:
+            totalSeatFee += matchingRule.amount
+            appliedRuleIds.append(matchingRule.rule_id)
+            appliedDims.append(dim)
+        END IF
+    END FOR
+
+    // Kiểm tra cấu hình ghi đè theo từng chuyến bay cụ thể nếu có (tra cứu bằng flight_id)
+    override = DB.flightseatoverrides.findOne({ flight_id: flightId, seat_code: seatCode, is_active: true })
+    flightOverride = false
+    IF override != NULL THEN:
+        totalSeatFee = override.override_fee
+        flightOverride = true
+    END IF
+
+    RETURN {
+        rule_ids: appliedRuleIds,
+        dimensions: appliedDims,
+        flight_override: flightOverride,
+        final_fee: totalSeatFee
+    }
+End Algorithm
+```
+
+---
+
+### THUẬT TOÁN 13: Phân tích Nghiệp vụ Doanh thu & Quản trị Tải Chuyến bay (Analytics & Capacity Intelligence)
+
+- **Mục tiêu:** Cung cấp thông số phân tích doanh thu và kiểm soát tải ghế chuẩn xác, khắc phục toàn bộ các lỗi đếm trùng và thiên lệch thống kê trong quản trị hàng không.
+- **Tập tin cài đặt:** [analytics.service.ts](../backend/src/analytics/analytics.service.ts)
+
+#### Các quy tắc tính toán then chốt:
+1. **Đếm đơn đặt vé phân biệt (Distinct Booking Count):**
+   - Mỗi đơn đặt vé `Booking` được tính là $1$ đơn hàng duy nhất (`bookings_count += 1`), độc lập với số lượng hành khách (`passenger_volume += coupons.length`).
+2. **Thời gian đặt trước không bị nhân trọng số (Unweighted Lead Time):**
+   - Khoảng cách từ lúc đặt vé đến ngày khởi hành (`lead_time_days = (earliestDeparture - createdAt) / 86400000`) được tính một lần duy nhất cho mỗi đơn đặt vé thay vì nhân lặp theo từng cuống vé.
+3. **Doanh thu thuần thực tế từ giao dịch thành công (Truthful Net Revenue):**
+   - Được tổng hợp trực tiếp từ mảng `payment_transactions` với trạng thái `SUCCESS` (không giới hạn dưới bằng 0):
+   $$\text{net\_revenue\_vnd} = \sum \text{PAYMENT} + \sum \text{RESCHEDULE\_CHARGE} - \sum \text{REFUND} - \sum \text{RESCHEDULE\_REFUND}$$
+   - Tách biệt rõ ràng với chỉ số giá trị đặt vé đang hoạt động (`active_booking_value_vnd = \sum (\text{fare\_paid} + \text{seat\_fee})` cho các đơn `CONFIRMED` / `RESCHEDULED`).
+4. **Đối soát năng lực ghế vật lý và tồn kho thương mại (Capacity Reconciliation Invariant):**
+   ```text
+   inventoryReserved = Math.max(0, total_capacity - flight_available_seats)
+   confirmedFallback = Math.max(0, inventoryReserved - allocInfo.held)
+   occupied = Math.max(allocInfo.confirmed, confirmedFallback)
+   held = allocInfo.held
+   staffBlocked = allocInfo.staffBlocked // BLOCKED_MAINTENANCE, CREW_REST, VIP_HOLD
+   available = Math.max(0, total_capacity - occupied - held - staffBlocked)
+   ```
+   *Lưu ý:* Ghế khóa nghiệp vụ (`staffBlocked`) chỉ tồn tại ở lớp vật lý `SeatAllocation`, không làm giảm tồn kho thương mại `flight_available_seats`, do đó không bị trừ hai lần.
+5. **Hệ số tải chuyến bay chuẩn xác (Physical Load Factor):**
+   $$\text{active\_committed} = \text{occupied} + \text{held}$$
+   $$\text{load\_factor\_percent} = \text{round}\left(\frac{\text{active\_committed}}{\text{total\_capacity}} \times 1000\right) / 10$$
+6. **Ngưỡng tải loại trừ lẫn nhau (Mutually Exclusive Thresholding):**
+   - $\text{Load Factor} \ge 80\% \implies \mathbf{HIGH\_LOAD}$
+   - $\text{Load Factor} \le 40\% \implies \mathbf{LOW\_LOAD}$
+   - $40\% < \text{Load Factor} < 80\% \implies \mathbf{NORMAL}$
+   (Chặn hoàn toàn trường hợp một chuyến bay bị phân loại đồng thời vào cả hai nhóm High và Low).
+
+---
+
+### THUẬT TOÁN 14: SAGA Đặt Chỗ Ghế & Tồn Kho Hai Pha (Seat & Inventory Two-Phase SAGA)
+
+- **Mục tiêu:** Quản trị giao dịch hai pha giữa phân bổ ghế vật lý (`SeatAllocation`) và tồn kho chuyến bay (`Flight.inventories`), đảm bảo tính nguyên tử tuyệt đối (ACID) khi tạo đơn đặt vé mới. Nếu bất kỳ bước nào trong chuỗi thao tác thất bại, hệ thống thực thi chuỗi bù trừ (Compensation Rollback) để giải phóng toàn bộ tài nguyên đã giữ.
+- **Tập tin cài đặt:** [seat-allocation.service.ts](../backend/src/seat-allocation/seat-allocation.service.ts) & [booking-seat-saga-operation.schema.ts](../backend/src/seat-allocation/booking-seat-saga-operation.schema.ts)
+
+#### Các trạng thái SAGA (`SagaState`):
+- `PRECOMMIT`: Khởi tạo thao tác SAGA, ghi nhận danh sách ghế và tồn kho chuẩn bị đột biến.
+- `COMMITTED`: Đã trừ tồn kho và tạo bản ghi phân bổ vật lý thành công.
+- `COMPLETED`: Đơn đặt vé được lưu hoàn tất trong CSDL.
+- `ABORTED`: Thao tác gặp lỗi, toàn bộ tài nguyên được hoàn trả nguyên trạng.
+
+#### Mã giả (Pseudocode):
+```text
+Algorithm ExecuteBookingSeatSaga(bookingDraft):
+    sagaId = GenerateUuid()
+    saga = DB.bookingseatsagaoperations.create({
+        operation_id: sagaId,
+        operation_type: 'CREATE',
+        booking_id: bookingDraft._id,
+        state: 'PRECOMMIT'
+    })
+
+    TRY:
+        // Pha 1: Giữ tồn kho thương mại (Inventories)
+        FOR EACH leg IN bookingDraft.legs DO:
+            res = DB.flights.findOneAndUpdate(
+                { _id: leg.flight_id, "inventories._id": leg.inventory_id, "inventories.available_seats": { $gte: leg.count } },
+                { $inc: { "inventories.$.available_seats": -leg.count } }
+            )
+            IF res == NULL THEN THROW ConflictException("Không đủ tồn kho thương mại")
+            saga.new_inventory_reservations.append({
+                flight_id: leg.flight_id,
+                inventory_id: leg.inventory_id,
+                seat_count: leg.count,
+                mutation_key: leg.mutation_key
+            })
+        END FOR
+
+        // Pha 2: Giữ ghế vật lý cụ thể (SeatAllocations)
+        FOR EACH seat IN bookingDraft.selected_seats DO:
+            alloc = DB.seatallocations.create({
+                flight_id: seat.flight_id,
+                seat_code: seat.seat_code,
+                status: 'HELD',
+                held_until: bookingDraft.payment_deadline,
+                booking_id: bookingDraft._id
+            })
+            saga.new_seat_allocations.append({ flight_id: seat.flight_id, seat_code: seat.seat_code })
+        END FOR
+
+        saga.state = 'COMMITTED'
+        DB.bookingseatsagaoperations.save(saga)
+
+        // Hoàn tất lưu Booking
+        DB.bookings.save(bookingDraft)
+        saga.state = 'COMPLETED'
+        saga.completed_at = Now()
+        DB.bookingseatsagaoperations.save(saga)
+
+    CATCH error:
+        // Chuỗi bù trừ (Compensation Rollback):
+        saga.state = 'ABORTED'
+        saga.aborted_at = Now()
+        saga.error = error.message
+
+        // Khôi phục tồn kho
+        FOR EACH inv IN saga.new_inventory_reservations DO:
+            DB.flights.updateOne(
+                { _id: inv.flight_id, "inventories._id": inv.inventory_id },
+                { $inc: { "inventories.$.available_seats": inv.seat_count } }
+            )
+        END FOR
+
+        // Xóa/giải phóng ghế vật lý
+        FOR EACH st IN saga.new_seat_allocations DO:
+            DB.seatallocations.deleteOne({ flight_id: st.flight_id, seat_code: st.seat_code, booking_id: bookingDraft._id })
+        END FOR
+
+        DB.bookingseatsagaoperations.save(saga)
+        THROW error
+End Algorithm
+```
+
+---
+
+### THUẬT TOÁN 15: Bồi Hoàn & Phục Hồi Tiến Khi Đổi Vé (Reschedule Forward Recovery & Compensation)
+
+- **Mục tiêu:** Xử lý nghiệp vụ đổi chuyến bay (`rescheduleTicket`, bao gồm vé một chiều, khứ hồi và nối chuyến). Đảm bảo hành khách chỉ bị hủy ghế cũ sau khi chuyến bay mới đã được đặt chỗ và thanh toán phụ thu (hoặc ghi nhận hoàn chênh lệch) thành công. Nếu thao tác trên chuyến bay mới thất bại, hệ thống phục hồi tiến (Forward Recovery) bảo lưu 100% cuống vé ban đầu mà không làm mất chỗ của khách.
+- **Tập tin cài đặt:** [bookings.service.ts](../backend/src/bookings/bookings.service.ts)
+
+#### Quy trình xử lý nguyên tử:
+1. **Kiểm tra hợp lệ:** Chuyến bay cũ chưa khởi hành, vé ở trạng thái `CONFIRMED` hoặc `RESCHEDULED`.
+2. **Khóa chặng bay mới:** Thực thi SAGA đặt tồn kho và phân bổ ghế trên chuyến bay mới.
+3. **Tính toán chênh lệch giá:**
+   $$\Delta_{\text{price}} = \text{Fare}_{\text{new}} - \text{Fare}_{\text{old}}$$
+   - $\Delta_{\text{price}} > 0$: Tạo giao dịch `RESCHEDULE_CHARGE` thành công trước khi hoàn tất.
+   - $\Delta_{\text{price}} < 0$: Tạo giao dịch `RESCHEDULE_REFUND` (phân bổ theo LIFO).
+   - $\Delta_{\text{price}} = 0$: Miễn phụ thu chênh lệch.
+4. **Cập nhật cuống vé:** Hủy cuống vé cũ (`CANCELLED`), phát hành cuống vé mới với trạng thái `ACTIVE` và mã số liên kết.
+5. **Giải phóng tài nguyên cũ:** Trả lại tồn kho chuyến bay cũ và giải phóng bản ghi `SeatAllocation` cũ.
+
+---
+
+### THUẬT TOÁN 16: Máy Trạng Thái PayPal, Idempotency & Giới Hạn Cổng Thanh Toán (PayPal Order/Capture State Machine)
+
+> [!NOTE]
+> **Trạng thái thực thi hiện tại:** `CODE IMPLEMENTED / PRE-SANDBOX; REAL PROVIDER ACCEPTANCE: DEFERRED / NOT EXECUTED`. Tích hợp mã nguồn nội bộ covered by automated PayPal integration/hardening tests, sẵn sàng chạy với Sandbox credentials khi được kích hoạt (`PAYPAL_ENABLED=true`). Hiện tại ở môi trường mặc định, `PAYPAL_ENABLED=false`.
+
+- **Mục tiêu:** Cung cấp máy trạng thái hữu hạn (FSM) quản lý vòng đời phiên thanh toán PayPal (`PayPalCheckoutSession`), bảo đảm tính Idempotency khi gọi API và ngăn chặn thanh toán kép (Double Spending).
+- **Tập tin cài đặt:** [paypal.service.ts](../backend/src/paypal/paypal.service.ts) & [paypal-checkout.schema.ts](../backend/src/paypal/paypal-checkout.schema.ts)
+
+#### 11 Trạng thái của Máy trạng thái phiên Checkout (`PayPalCheckoutStatus`):
+Hệ thống cài đặt chính xác 11 giá trị enum trong `PayPalCheckoutStatus`:
+1. `CREATED`: Đơn hàng đã được khởi tạo trên PayPal API, chờ người dùng phê duyệt trên giao diện PayPal.
+2. `CAPTURING`: Người dùng đã phê duyệt, hệ thống đang gửi yêu cầu chụp thanh toán (`captureOrder`).
+3. `CAPTURED`: Đã chụp tiền thành công từ tài khoản PayPal của khách hàng.
+4. `FINALIZING`: Đang hoàn tất nghiệp vụ nội bộ (tạo booking, xác nhận giữ chỗ, hoặc đổi chuyến bay).
+5. `COMPLETED`: Toàn bộ quy trình thanh toán và phát hành/cập nhật vé hoàn tất thành công.
+6. `CANCELLED`: Người dùng hủy bỏ quy trình thanh toán trên PayPal UI trước khi capture.
+7. `STALE`: Phiên thanh toán hết hạn hoặc bị bỏ dở quá thời hạn cho phép.
+8. `PENDING`: Giao dịch thanh toán hoặc hoàn tiền đang chờ provider xử lý bất đồng bộ.
+9. `REFUNDED`: Giao dịch đã được hoàn trả lại tiền cho người dùng.
+10. `FAILED`: Giao dịch thất bại do thẻ/tài khoản bị từ chối hoặc lỗi từ PayPal.
+11. `RECONCILE_REQUIRED`: Sự cố bất thường / timeout nhập nhằng khi capture, yêu cầu quản trị viên đối soát bồi hoàn.
+
+#### Sơ đồ Chuyển dịch Trạng thái (FSM Diagram):
+```text
+               ┌───────────────── [CREATED] ────────────────┐
+               │                     │                      │
+       (Hủy thanh toán)       (Khách duyệt &                │ (Hết hạn)
+               │                 bắt đầu)                   │
+               ▼                     │                      ▼
+          [CANCELLED]                ▼                   [STALE]
+                                [CAPTURING]
+                                     │
+                  ┌──────────────────┼──────────────────┐
+           (Capture thành công) (Lỗi mạng/Timeout) (Lỗi từ chối)
+                  │                  │                  │
+                  ▼                  ▼                  ▼
+              [CAPTURED]    [RECONCILE_REQUIRED]     [FAILED]
+                  │                  │
+           (Tạo booking)             │ (Admin đối soát bồi hoàn)
+                  │                  ▼
+                  ▼              [REFUNDED]
+             [FINALIZING]
+                  │
+        (Lưu DB thành công)
+                  │
+                  ▼
+             [COMPLETED]
+```
+
+- **Ràng buộc Idempotency:** Chỉ mục duy nhất hỗn hợp `{ user_id: 1, client_request_id: 1, operation_type: 1 }` chặn mọi yêu cầu thanh toán trùng lặp từ trình duyệt hoặc thiết bị di động.
+- **Định dạng Chuỗi Khóa `PayPal-Request-Id` Chuẩn Xác (Deterministic Idempotency Headers):**
+  - **Tạo đơn hàng (`createOrder`):** `${clientRequestId}-create`
+  - **Chụp thanh toán (`captureOrder`):** `${session.checkout_id}-capture`
+  - **Hoàn tiền bồi thường đối soát (`refundCapture`):** `${session.checkout_id}-compensation-refund`
+  - **Hoàn tiền phân bổ nguồn LIFO (`refundCapture`):** `${alloc.payment_reference}`
+
+---
+
+### THUẬT TOÁN 17: Phục Hồi Giao Dịch Chụp Nhập Nhằng & Đối Chiếu Bằng Chứng Tỷ Giá (Ambiguous Capture Recovery & Payment Proof FX Parity)
+
+- **Mục tiêu:** Đảm bảo tính toán vẹn tài chính khi tích hợp với cổng thanh toán ngoại tệ (USD):
+  1. Xử lý sự cố mạng khi lệnh `capture` trả về lỗi timeout nhưng thực tế đã trừ tiền trên tài khoản PayPal của khách (Ambiguous Capture).
+  2. Ràng buộc đối soát tỷ giá 1:1 (`assertPayPalPaymentProof`): Số tiền quy đổi USD từ số tiền chuẩn VND phải khớp chính xác với kết quả ghi nhận tại cổng thanh toán.
+- **Tập tin cài đặt:** [bookings.service.ts](../backend/src/bookings/bookings.service.ts) (`assertPayPalPaymentProof`) & [paypal.controller.ts](../backend/src/paypal/paypal.controller.ts)
+
+#### Công thức đối chiếu bằng chứng thanh toán (`assertPayPalPaymentProof`):
+$$\text{Expected USD} = \left(\text{Math.round}\left(\frac{\text{Authoritative Amount VND}}{\text{Exchange Rate}}\right) \times 100 / 100\right)\text{.toFixed(2)}$$
+1. `proof.payment_method === 'PAYPAL'`.
+2. `proof.status === 'SUCCESS'`.
+3. `proof.expected_amount_vnd === authoritativeAmountVnd`.
+4. `proof.provider_currency === 'USD'`.
+5. `proof.provider_amount === expectedUsd`.
+6. Tồn tại đầy đủ `provider_order_id` và `provider_capture_id`.
+
+#### Cơ chế phục hồi giao dịch nhập nhằng (Ambiguous Capture Recovery):
+Khi một phiên thanh toán rơi vào trạng thái `RECONCILE_REQUIRED`:
+1. Quản trị viên kích hoạt đối soát tại endpoint `/paypal/admin/checkouts/:checkoutId/reconcile-compensation`.
+2. Hệ thống kiểm tra trước trên PayPal API: Nếu `provider_refund_id` đã tồn tại, kiểm tra chi tiết trạng thái qua `getRefundDetails` thay vì gửi lại yêu cầu hoàn tiền mới.
+3. Nếu chưa hoàn tiền, thực hiện `refundCapture` với khóa Idempotency duy nhất `{checkout_id}-compensation-refund`.
+
+---
+
+### THUẬT TOÁN 18: Hoàn Tiền Bồi Thường & Phân Bổ Nguồn Hoàn LIFO (Compensation Refund & LIFO Source Allocation)
+
+- **Mục tiêu:** Khi khách hàng hủy vé hoặc đổi sang chuyến bay có giá thấp hơn, hệ thống phân bổ số tiền hoàn theo thứ tự LIFO (Last-In, First-Out) ngược lại các giao dịch thu tiền trước đó (`PAYMENT`, `RESCHEDULE_CHARGE`). Đảm bảo bảo toàn thông tin nguồn gốc cổng thanh toán (Payment Provenance), không hoàn vượt số dư thực thu và giữ nguyên thẻ/mã giao dịch gốc.
+- **Tập tin cài đặt:** [refund-allocation.util.ts](../backend/src/bookings/refund-allocation.util.ts) (`allocateRefundSources`)
+
+#### Thuật toán phân bổ LIFO:
+```text
+Algorithm AllocateRefundSources(transactions, targetRefundVnd, transactionType):
+    charges = FilterAndSortChronological(transactions, ['PAYMENT', 'RESCHEDULE_CHARGE'])
+    allocatedRefunds = []
+    remainingRefundNeeded = targetRefundVnd
+
+    // Duyệt ngược thời gian (LIFO) từ khoản thu gần nhất
+    FOR EACH charge IN charges.reverse() DO:
+        IF remainingRefundNeeded <= 0 THEN BREAK
+
+        // Tính số dư còn có thể hoàn của khoản thu này (trừ các khoản REFUND đã thực hiện hoặc đang PENDING)
+        alreadyRefunded = SumRefundsLinkedTo(charge.payment_reference)
+        refundableOnThisCharge = charge.amount - alreadyRefunded
+
+        IF refundableOnThisCharge <= 0 THEN CONTINUE
+
+        refundVnd = Min(remainingRefundNeeded, refundableOnThisCharge)
+
+        // Tạo bản ghi hoàn tiền kế thừa đầy đủ provenance của charge gốc
+        refundItem = {
+            payment_reference: GenerateReference('REF'),
+            source_payment_reference: charge.payment_reference,
+            transaction_type: transactionType,
+            payment_method: charge.payment_method,
+            amount: refundVnd,
+            currency: 'VND',
+            card_masked: charge.card_masked,
+            provider_capture_id: charge.provider_capture_id,
+            provider_order_id: charge.provider_order_id,
+            status: 'SUCCESS'
+        }
+
+        // Nếu là giao dịch PayPal, tính toán chính xác phần ngoại tệ USD tương ứng
+        IF charge.payment_method == 'PAYPAL' THEN:
+            refundItem.provider_currency = charge.provider_currency
+            refundItem.exchange_rate_vnd_per_unit = charge.exchange_rate_vnd_per_unit
+            refundItem.provider_amount = (round((refundVnd / charge.exchange_rate_vnd_per_unit) * 100) / 100).toFixed(2)
+        END IF
+
+        allocatedRefunds.append(refundItem)
+        remainingRefundNeeded -= refundVnd
+    END FOR
+
+    RETURN allocatedRefunds
+End Algorithm
+```
+
+---
+
+### THUẬT TOÁN 19: Tự Động Thử Lại & Đối Soát Hoàn Tiền Treo/Thất Bại (Pending & Failed Refund Reconciliation Engine)
+
+- **Mục tiêu:** Xử lý các giao dịch hoàn tiền gặp sự cố mạng hoặc phía cổng thanh toán phản hồi trạng thái `PENDING`. Scheduler định kỳ kiểm tra trạng thái trên nhà cung cấp và tự động chuyển đổi thành `SUCCESS` khi nhà cung cấp hoàn tất, hoặc kích hoạt thử lại có kiểm soát (với giới hạn số lần thử lại tối đa).
+- **Tập tin cài đặt:** [paypal-refund.scheduler.ts](../backend/src/paypal/paypal-refund.scheduler.ts) & [paypal-refund.validator.ts](../backend/src/paypal/paypal-refund.validator.ts)
+
+#### Quy tắc vận hành:
+1. **Kiểm tra trước khi gửi lại (Pre-check Rule):** Nếu giao dịch đã có `provider_refund_id`, hệ thống TUYỆT ĐỐI KHÔNG gọi API hoàn tiền lần hai mà chỉ truy vấn đối soát trạng thái (`getRefundDetails`).
+2. **Phân loại trạng thái chuẩn (`classifyPayPalRefundStatus`):**
+   - `COMPLETED` $\implies$ Chuyển thành `SUCCESS`.
+   - `PENDING` $\implies$ Giữ nguyên trạng thái `PENDING`, lên lịch kiểm tra tiếp theo (`next_retry_at`).
+   - `FAILED`, `CANCELLED` $\implies$ Ghi nhận lỗi và báo cáo màn hình quản trị viên.
+3. **Báo cáo sự cố minh bạch:** Cung cấp API `/paypal/admin/reconciliation` tổng hợp toàn bộ các phiên checkout và giao dịch hoàn tiền có vấn đề để quản trị viên can thiệp xử lý.
+
+---
+
+### THUẬT TOÁN 20: Khám Phá Mạng Lưới & Vật Hóa Lịch Bay Thương Mại 330 Ngày (Commercial Route Discovery & 330-Day Schedule Materialization)
+
+- **Mục tiêu:** Cung cấp kiến trúc tạo và duy trì mạng lưới đường bay thương mại hoàn chỉnh của hãng:
+  1. Khám phá và đồng bộ tuyến bay từ AirLabs API (`AirLabsCommercialService`).
+  2. Tạo mẫu lịch bay định kỳ (`ScheduleTemplate`) cho từng đường bay với tần suất và khung giờ linh hoạt.
+  3. Vật hóa (Materialization Engine) lịch bay liên tục 330 ngày trong tương lai (`FlightGeneratorService`), tự động phân bổ máy bay từ Catalog 6 dòng tàu bay, khởi tạo cấu hình khoang ghế và biểu giá cơ sở VND.
+- **Tập tin cài đặt:** [airlabs-commercial.service.ts](../backend/src/flights/airlabs-commercial.service.ts) & [flight-generator.service.ts](../backend/src/flights/flight-generator.service.ts)
+
+#### Quy trình vật hóa lịch bay:
+1. Duyệt qua toàn bộ danh sách `ScheduleTemplate` đang kích hoạt (`is_active = true`).
+2. Với mỗi ngày trong khoảng từ $T_{\text{today}}$ đến $T_{\text{today}} + 330\text{ ngày}$, kiểm tra xem ngày đó có khớp với các ngày trong tuần được thiết lập trong mẫu lịch (`days_of_week`) hay không.
+3. Nếu chưa tồn tại chuyến bay cho mẫu lịch và ngày đó, tiến hành sinh bản ghi `Flight` mới với:
+   - Số hiệu chuyến bay chuẩn: Ghép mã IATA hãng và số hiệu mẫu (VD: `AP-101`).
+   - Cấu hình tàu bay tự động gán từ Catalog đội bay.
+   - Các khoang vé (`Economy`, `Business`) với số ghế khả dụng và biểu giá cơ sở tương ứng.
+   - Khoảng cách bay tính bằng thuật toán Great-Circle Haversine (`calculateGreatCircleMiles`).

@@ -46,7 +46,7 @@ import {
             @for (airport of itinerary.airports; track airport; let i = $index) {
               <span>{{ airport }}</span>
               @if (i < itinerary.airports.length - 1) {
-                <span class="text-gold">➔</span>
+                <span class="text-gold">→</span>
               }
             }
           </div>
@@ -118,7 +118,7 @@ import {
                   {{ legIdx + 1 }}
                 </span>
                 <span class="font-mono text-base sm:text-lg font-black text-navy">
-                  {{ leg.dep_iata }} ➔ {{ leg.arr_iata }}
+                  {{ leg.dep_iata }} → {{ leg.arr_iata }}
                 </span>
                 <span class="text-xs text-slate-400 font-mono">
                   ({{ leg.airline_iata || leg.airline_icao || 'AirLabs' }} {{ leg.flight_iata || leg.flight_number || '-' }})
@@ -182,7 +182,7 @@ import {
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200/60 text-xs font-mono text-slate-600">
               <div>
                 <span class="text-slate-400 block text-[10px] uppercase">{{ lang.t('admin.commercial.scheduleUtc') }}</span>
-                <span class="font-bold text-navy">{{ leg.dep_time_utc || '-' }}Z ➔ {{ leg.arr_time_utc || '-' }}Z</span>
+                <span class="font-bold text-navy">{{ leg.dep_time_utc || '-' }}Z → {{ leg.arr_time_utc || '-' }}Z</span>
               </div>
               <div>
                 <span class="text-slate-400 block text-[10px] uppercase">{{ lang.t('admin.commercial.durationLabel') }}</span>

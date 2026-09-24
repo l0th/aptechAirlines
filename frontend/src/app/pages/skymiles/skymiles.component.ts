@@ -26,7 +26,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             Aptech SkyMiles Rewards
           </h1>
           <p class="text-sm sm:text-base text-slate-500 mt-3 leading-relaxed">
-            {{ lang.isVietnamese() ? 'Biến mỗi chuyến bay thành trải nghiệm đẳng cấp với đặc quyền miễn phí chọn ghế ngồi, ưu tiên quầy thủ tục và nâng hạng dịch vụ thương gia.' : 'Turn every flight into a world-class experience with complimentary seat selection, priority check-in, and business class upgrades.' }}
+            {{ lang.isVietnamese() ? 'Tích lũy dặm thưởng minh bạch theo khoảng cách chuyến bay thực tế. Nhận chiết khấu trực tiếp trên giá vé từ 3% đến 12% theo thứ hạng thẻ hội viên.' : 'Transparently earn miles based on real flight distance. Enjoy direct fare discounts from 3% up to 12% based on your membership tier.' }}
           </p>
         </div>
 
@@ -266,15 +266,15 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Tích lũy 100% dặm bay cơ bản' : 'Earn 100% base flight miles' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Tích lũy dặm bay theo cự ly khoảng cách hành trình thực tế' : 'Earn flight miles based on actual flight distance' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Nhận ưu đãi giảm giá vé sinh nhật' : 'Receive birthday flight discounts' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Áp dụng giảm giá tự động khi đăng nhập tài khoản' : 'Automatic fare discount applied when logged in' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Đổi dặm lấy quà lưu niệm hàng không' : 'Redeem miles for aviation souvenirs' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Huy hiệu Thẻ Bạc định danh tài khoản' : 'Silver Tier digital identification badge' }}</span>
               </div>
             </div>
           </div>
@@ -289,7 +289,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             </div>
             <span class="text-xs font-bold text-amber-600 uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 50.000 dặm (-7% vé)' : 'From 50,000 miles (-7% fare)' }}</span>
             <h3 class="text-xl font-bold text-navy mt-1">{{ lang.isVietnamese() ? 'Gold Card (Thẻ Vàng)' : 'Gold Card' }}</h3>
-            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đặc quyền ưu tiên dành cho khách hàng bay thường xuyên.' : 'Priority privileges for frequent flyers.' }}</p>
+            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đặc quyền chiết khấu dành cho khách hàng bay thường xuyên.' : 'Discount privileges for frequent flyers.' }}</p>
             <div class="mt-6 pt-6 border-t border-slate-100 space-y-3 text-xs">
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
@@ -297,15 +297,15 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Cộng thêm 25% dặm thưởng mỗi chuyến bay' : 'Earn 25% bonus miles on every flight' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Tích lũy dặm thưởng cho cả chặng bay thẳng và nối chuyến' : 'Earn flight miles for direct and connecting itineraries' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Ưu tiên làm thủ tục tại quầy Check-in SkyPriority' : 'Priority SkyPriority check-in counters' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Tự động tính chiết khấu trực tiếp trên biểu phí đặt vé' : 'Automatic fare discount on booking and reservation' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Miễn phí chọn chỗ ngồi ưa thích' : 'Complimentary preferred seat selection' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Huy hiệu Thẻ Vàng cao cấp trên hệ thống' : 'Prestigious Gold Tier digital badge on booking system' }}</span>
               </div>
             </div>
           </div>
@@ -317,7 +317,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             </div>
             <span class="text-xs font-bold text-navy uppercase tracking-wider block">{{ lang.isVietnamese() ? 'Từ 100.000 dặm (-12% vé)' : 'From 100,000 miles (-12% fare)' }}</span>
             <h3 class="text-xl font-bold text-navy mt-1">{{ lang.isVietnamese() ? 'Platinum VIP (Bạch Kim)' : 'Platinum VIP' }}</h3>
-            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đẳng cấp tối thượng chuẩn hàng không 5 sao quốc tế.' : 'Ultimate 5-star international aviation luxury.' }}</p>
+            <p class="text-xs text-slate-500 mt-2">{{ lang.isVietnamese() ? 'Đẳng cấp tối thượng với mức chiết khấu cao nhất hệ thống.' : 'Top tier membership with the highest system discount.' }}</p>
             <div class="mt-6 pt-6 border-t border-slate-100 space-y-3 text-xs">
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
@@ -325,15 +325,15 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Cộng thêm 50% dặm thưởng mỗi chuyến bay' : 'Earn 50% bonus miles on every flight' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Tích lũy trọn vẹn dặm thưởng mọi chặng hành trình' : 'Full distance-based mile accrual across all flight routes' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Sử dụng Phòng chờ Thương gia (Lotus Lounge)' : 'Access to Business Lounge (Lotus Lounge)' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Chiết khấu 12% tối đa áp dụng cho mọi hạng vé thương mại' : 'Maximum 12% discount applied across all commercial cabins' }}</span>
               </div>
               <div class="flex items-center gap-2 text-slate-700">
                 <app-icon name="checkcircle2" class="w-4 h-4 text-emerald-600" />
-                <span>{{ lang.isVietnamese() ? 'Thêm 20kg hành lý ký gửi miễn cước' : 'Additional 20kg complimentary checked baggage' }}</span>
+                <span>{{ lang.isVietnamese() ? 'Huy hiệu Bạch Kim VIP độc quyền' : 'Exclusive Platinum VIP digital badge & recognition' }}</span>
               </div>
             </div>
           </div>
@@ -354,19 +354,19 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
                 [(ngModel)]="calcDistance"
                 class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-gold"
               />
-              <span class="text-[10px] text-slate-400 mt-1 block">{{ lang.isVietnamese() ? 'VD: Hà Nội - TP.HCM ~ 720 dặm' : 'E.g.: Hanoi - HCMC ~ 720 miles' }}</span>
+              <span class="text-[10px] text-slate-400 mt-1 block">{{ lang.isVietnamese() ? 'VD: Hà Nội (HAN) - TP.HCM (SGN) ~ 720 dặm' : 'E.g.: Hanoi (HAN) - HCMC (SGN) ~ 720 miles' }}</span>
             </div>
 
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Hạng ghế đặt chỗ' : 'Booking Cabin Class' }}</label>
-              <select
-                [(ngModel)]="calcClass"
-                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-gold"
-              >
-                <option value="ECONOMY">{{ lang.isVietnamese() ? 'Phổ thông (100% dặm)' : 'Economy (100% miles)' }}</option>
-                <option value="BUSINESS">{{ lang.isVietnamese() ? 'Thương gia (150% dặm)' : 'Business (150% miles)' }}</option>
-                <option value="FIRST">{{ lang.isVietnamese() ? 'Hạng nhất (200% dặm)' : 'First Class (200% miles)' }}</option>
-              </select>
+              <label class="block font-semibold text-slate-600 mb-1">{{ lang.isVietnamese() ? 'Số lượng hành khách trên vé' : 'Passengers on booking' }}</label>
+              <input
+                type="number"
+                min="1"
+                max="9"
+                [(ngModel)]="calcPassengers"
+                class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-gold"
+              />
+              <span class="text-[10px] text-slate-400 mt-1 block">{{ lang.isVietnamese() ? 'Tích lũy 100% dặm cự ly cho mỗi hành khách' : 'Accrues 100% distance miles per passenger' }}</span>
             </div>
           </div>
 
@@ -398,7 +398,7 @@ export class SkyMilesComponent implements OnInit {
   readonly saving = signal(false);
 
   calcDistance = 720;
-  calcClass = 'ECONOMY';
+  calcPassengers = 1;
 
   // Editable profile fields (spec 3.8: user can update them at any time)
   profileFirstName = '';
@@ -518,9 +518,8 @@ export class SkyMilesComponent implements OnInit {
   }
 
   calculatedMiles(): number {
-    let multiplier = 1.0;
-    if (this.calcClass === 'BUSINESS') multiplier = 1.5;
-    if (this.calcClass === 'FIRST') multiplier = 2.0;
-    return Math.round(this.calcDistance * multiplier);
+    const passengers = Math.max(1, Math.min(9, Number(this.calcPassengers) || 1));
+    const dist = Math.max(0, Number(this.calcDistance) || 0);
+    return Math.round(dist * passengers);
   }
 }

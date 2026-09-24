@@ -3,7 +3,7 @@ import { runMigration, MigrationBucket } from './migrate-phase-b-seats';
 import { FlightSeatOverrideSchema } from '../seat-allocation/flight-seat-override.schema';
 
 describe('Phase B Migration & Partial Unique Index Spec', () => {
-  const testMongoUri = process.env.MONGO_TEST_URI || 'mongodb://localhost:27018/airline_db_migration_test';
+  const testMongoUri = process.env.MONGO_TEST_URI || process.env.TEST_MONGO_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/airline_db_migration_test';
   let connection: mongoose.Connection;
 
   beforeAll(async () => {

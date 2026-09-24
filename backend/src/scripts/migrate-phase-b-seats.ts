@@ -13,7 +13,7 @@ export enum MigrationBucket {
 }
 
 export async function runMigration(isDryRun = true) {
-  const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27018/airline_db';
+  const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/airline_db';
   console.log(`\n=== PHASE B SEAT & FINANCIAL SNAPSHOT MIGRATION ===`);
   console.log(`Mode: ${isDryRun ? 'DRY-RUN (Read-Only / No mutations)' : 'EXECUTE (Mutations will be committed)'}`);
   console.log(`Connecting to: ${mongoUri}...`);

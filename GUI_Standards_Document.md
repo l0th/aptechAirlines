@@ -22,14 +22,16 @@
 | **Accent / CTA** | Royal Gold | `#D4AF37` / `#F59E0B` | `bg-amber-500`, `text-amber-500` | Nút tìm kiếm, nút thanh toán, điểm SkyMiles, hạng VIP |
 | **Accent Hover** | Deep Gold | `#B45309` | `hover:bg-amber-600` | Trạng thái di chuột vào nút CTA |
 
-### 2.2. Màu sắc Ngữ thái & Sơ đồ Ghế ngồi (Semantic Colors)
-| Ý nghĩa | Mã HEX | Tailwind Class | Ứng dụng trong hệ thống & Sơ đồ ghế |
+### 2.2. Màu sắc Ngữ thái & Sơ đồ Ghế ngồi Đa Đội bay (Semantic Colors)
+| Ý nghĩa | Mã HEX | Tailwind Class | Ứng dụng trong hệ thống & Sơ đồ ghế đa đội bay |
 | :--- | :--- | :--- | :--- |
-| **Thương gia / SkyBoss (Đặc biệt)** | `#D4AF37` / `#B45309` | `bg-amber-500` | Ghế Hàng 1 - 5, Huy hiệu hạng vé Thương gia |
-| **Chỗ ngồi Còn trống** | `#10B981` | `bg-emerald-500` | Ghế Hàng 6 - 31 (Trạng thái sẵn sàng chọn) |
-| **Chỗ ngồi Thoát hiểm** | `#0284C7` | `bg-sky-600` | Ghế Hàng 12 và 14 (Chỗ để chân rộng) |
-| **Ghế đang được chọn** | `#F59E0B` | `ring-4 ring-amber-400` | Ghế hành khách vừa click vào (Hiệu ứng phát sáng Gold) |
-| **Ghế đã bán / Khóa** | `#94A3B8` | `bg-slate-400` | Ghế đã có người đặt trong CSDL (Kèm icon gạch chéo SVG) |
+| **Thương gia (Business)** | `#D4AF37` / `#B45309` | `bg-amber-500` | Ghế khoang Thương gia theo cấu hình tàu bay (A20N, A21N, B789, A359, B738) |
+| **Phổ thông Đặc biệt (Club)** | `#8B5CF6` | `bg-purple-600` | Ghế khoang Club / Premium Economy trên tàu bay thân rộng (B789, A359) |
+| **Chỗ ngồi Còn trống (Available)**| `#10B981` | `bg-emerald-500` | Ghế khả dụng sẵn sàng cho hành khách chọn |
+| **Chỗ ngồi Thoát hiểm (Exit Row)**| `#0284C7` | `bg-sky-600` | Hàng ghế cửa thoát hiểm có không gian để chân rộng |
+| **Ghế đang được chọn** | `#F59E0B` | `ring-4 ring-amber-400` | Ghế hành khách vừa click chọn (Hiệu ứng phát sáng Gold) |
+| **Ghế đã bán / Đang giữ chỗ** | `#94A3B8` | `bg-slate-400` | Ghế đã có người đặt trong CSDL (`CONFIRMED`, `HELD`) kèm icon khóa SVG |
+| **Ghế khóa kỹ thuật / VIP** | `#64748B` | `bg-slate-500` | Ghế do nhân viên khóa (`BLOCKED_MAINTENANCE`, `CREW_REST`, `VIP_HOLD`) |
 | **Cảnh báo / Hoãn chuyến** | `#F59E0B` | `bg-amber-500` | Thông báo hoãn chuyến bay (`DELAYED`) |
 | **Nguy hiểm / Hủy chuyến** | `#EF4444` | `bg-red-500` | Chuyến bay bị hủy do thời tiết xấu (`CANCELLED`) |
 
@@ -85,14 +87,18 @@
 - **Top Header:** Logo *Aptech Airlines* với biểu tượng máy bay mạ vàng, Menu tra cứu, Đổi vé/Hủy vé, Quản lý chuyến bay, Điểm thưởng SkyMiles, Nút Đổi ngôn ngữ (VI/EN) và Nút Đăng nhập/Đăng ký.
 - **Hero Search Engine:** Box tìm kiếm chuyến bay nổi bật trên nền banner bầu trời, tích hợp chọn khứ hồi/1 chiều, sân bay đi/đến, ngày bay, số khách (Người lớn, Trẻ em, Người cao tuổi) và hạng vé.
 - **Flight Result Cards:** Hiển thị thẻ chuyến bay trực quan, logo hãng, giờ bay, thời gian bay, số ghế trống, giá tiền theo từng hạng vé.
-- **Sơ đồ Ghế ngồi (Interactive Seat Map):** Mô phỏng thân máy bay, mũi máy bay, các dãy ghế 3 - 3, lối đi, ghế thoát hiểm, bảng ghi chú và hộp cảnh báo chuẩn quốc tế.
+- **Sơ đồ Ghế ngồi Đa Chủng loại Tàu bay (Interactive Multi-Aircraft Seat Map):** Tự động thích ứng theo 6 dòng tàu bay (A20N, A21N, B789, A359, B738, AT76), hiển thị sơ đồ khoang thương gia, phổ thông đặc biệt, phổ thông, các dãy ghế (3-3, 2-2, 3-3-3, 1-2-1), lối đi, ghế thoát hiểm, chân rộng, bảng ghi chú và hộp cảnh báo chuẩn quốc tế.
 
 ### 6.2. Cổng Quản trị (Admin / Clerk Portal - `/admin`)
 - **Dark Navy Sidebar:** Thanh điều hướng dọc bên trái màu Xanh Navy tối (`#0A2540`), quản lý:
-  - Bảng điều khiển tổng quan (Dashboard)
-  - Quản lý chuyến bay & Lịch bay (CRUD + Cập nhật thời tiết khẩn cấp)
-  - Đồng bộ chuyến bay thật từ AirLabs API
-  - Quản lý sân bay & Thành phố
-  - Quản lý đơn đặt vé & Giữ chỗ
-  - Quản lý người dùng (Bảo vệ tài khoản SUPER_ADMIN)
-  - Quản lý chính sách hoàn tiền
+  - Bảng điều khiển tổng quan (`/admin/dashboard`)
+  - Báo cáo phân tích doanh thu & tải trọng chuyên sâu (`/admin/analytics`)
+  - Quản lý chuyến bay & Lịch bay (`/admin/flights` - CRUD + Cập nhật thời tiết khẩn cấp)
+  - Mạng lưới thương mại & Lịch bay mẫu 330 ngày (`/admin/commercial-flights`)
+  - Quầy đặt chỗ & đổi vé trực tiếp (`/admin/reservation-desk`)
+  - Vận hành ghế & khóa ghế vật lý (`/admin/seat-operations`)
+  - Cấu hình quy tắc giá ghế động 8 chiều (`/admin/seat-pricing`)
+  - Quản lý sân bay & Thành phố (`/admin/airports`)
+  - Quản lý đơn đặt vé & Giữ chỗ (`/admin/bookings`)
+  - Quản lý người dùng (`/admin/users` - Bảo vệ tài khoản SUPER_ADMIN duy nhất)
+  - Quản lý chính sách hoàn tiền (`/admin/policies`)

@@ -105,7 +105,7 @@ import { User, UserRole } from '../../core/models/user.model';
                         <button
                           type="button"
                           (click)="deleteUser(u)"
-                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-full transition-colors"
                           [title]="lang.t('admin.users.deleteTitle')"
                         >
                           <app-icon name="trash2" class="w-4 h-4" />

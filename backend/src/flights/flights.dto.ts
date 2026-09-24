@@ -192,6 +192,10 @@ export class UpdateFlightStatusDto {
   status: FlightStatus;
 
   @IsOptional()
+  @IsInt()
+  delay_minutes?: number;
+
+  @IsOptional()
   @IsString()
   delay_reason?: string;
 

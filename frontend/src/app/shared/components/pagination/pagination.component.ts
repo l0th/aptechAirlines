@@ -1,11 +1,12 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { LanguageService } from '../../../core/services/language.service';
+import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-pagination',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   template: `
     <div class="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-white border-t border-slate-200 text-xs text-slate-600">
       <!-- Left: Range display -->
@@ -22,7 +23,7 @@ import { LanguageService } from '../../../core/services/language.service';
           [id]="selectId"
           [value]="pageSize"
           (change)="onPageSizeSelect($event)"
-          class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-full text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-gold"
+          class="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-gold"
         >
           @for (opt of pageSizeOptions; track opt) {
             <!-- [selected] cần thiết vì [value] trên <select> được áp trước khi @for render options,
@@ -42,7 +43,7 @@ import { LanguageService } from '../../../core/services/language.service';
           [attr.aria-label]="isVi ? 'Trang đầu' : 'First page'"
           class="w-7 h-7 flex items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <span aria-hidden="true" class="text-xs font-bold">&laquo;</span>
+          <app-icon name="chevronsleft" class="w-3.5 h-3.5" />
         </button>
 
         <!-- Previous Page -->
@@ -53,7 +54,7 @@ import { LanguageService } from '../../../core/services/language.service';
           [attr.aria-label]="isVi ? 'Trang trước' : 'Previous page'"
           class="w-7 h-7 flex items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <span aria-hidden="true" class="text-xs font-bold">&lsaquo;</span>
+          <app-icon name="chevronleft" class="w-3.5 h-3.5" />
         </button>
 
         <!-- Numbered Buttons when totalPages <= 7 -->
@@ -87,7 +88,7 @@ import { LanguageService } from '../../../core/services/language.service';
           [attr.aria-label]="isVi ? 'Trang kế tiếp' : 'Next page'"
           class="w-7 h-7 flex items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <span aria-hidden="true" class="text-xs font-bold">&rsaquo;</span>
+          <app-icon name="chevronright" class="w-3.5 h-3.5" />
         </button>
 
         <!-- Last Page -->
@@ -98,7 +99,7 @@ import { LanguageService } from '../../../core/services/language.service';
           [attr.aria-label]="isVi ? 'Trang cuối' : 'Last page'"
           class="w-7 h-7 flex items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <span aria-hidden="true" class="text-xs font-bold">&raquo;</span>
+          <app-icon name="chevronsright" class="w-3.5 h-3.5" />
         </button>
       </nav>
     </div>

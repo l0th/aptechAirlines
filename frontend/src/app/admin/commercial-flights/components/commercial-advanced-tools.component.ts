@@ -215,7 +215,7 @@ import {
                       @for (r of routes; track r.source_key) {
                         <tr class="hover:bg-slate-50/80 transition-colors font-mono">
                           <td class="px-4 py-3 font-bold text-navy">
-                            {{ r.dep_iata }} ➔ {{ r.arr_iata }}
+                            {{ r.dep_iata }} → {{ r.arr_iata }}
                           </td>
                           <td class="px-4 py-3 text-slate-700">
                             {{ r.airline_iata || r.airline_icao || '-' }}
@@ -224,7 +224,7 @@ import {
                             {{ r.flight_iata || r.flight_number || '-' }}
                           </td>
                           <td class="px-4 py-3 text-slate-600">
-                            {{ r.dep_time || '-' }} ➔ {{ r.arr_time || '-' }}
+                            {{ r.dep_time || '-' }} → {{ r.arr_time || '-' }}
                           </td>
                           <td class="px-4 py-3 text-slate-600">
                             {{ formatDaysList(r.days) }}
@@ -315,7 +315,7 @@ import {
                             </details>
                           </td>
                           <td class="px-4 py-3 font-bold text-slate-800">
-                            {{ t.origin_iata }} ➔ {{ t.dest_iata }}
+                            {{ t.origin_iata }} → {{ t.dest_iata }}
                           </td>
                           <td class="px-4 py-3 text-slate-600">
                             {{ t.aircraft_type }}

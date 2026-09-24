@@ -54,7 +54,11 @@ Bảng phân bổ nhiệm vụ (Task Sheet) ghi nhận chi tiết toàn bộ cá
 | **TS-33** | **Trang Tra cứu & Quản lý vé (Track Booking)** | Xây dựng giao diện tra cứu vé toàn diện: Xem chi tiết vé, cảnh báo chuyến bay hoãn/hủy, Modal Xác nhận vé giữ chỗ, Modal Đổi vé có tìm chuyến mới, Modal Hủy vé nhận tiền hoàn. | `frontend/src/app/pages/track-booking/track-booking.component.ts` | 14 | 15 | Frontend Developer | **Hoàn thành** |
 | **TS-34** | **Trang Tra cứu Công khai & SkyMiles** | Phát triển trang Tra cứu chuyến bay công khai theo số hiệu và ngày bay (`/flight-lookup`); Trang hiển thị thông tin dặm thưởng thành viên (`/skymiles`). | `flight-lookup.component.ts`, `skymiles.component.ts` | 8 | 7 | Frontend Developer | **Hoàn thành** |
 | **TS-35** | **Cổng Quản trị Viên (Admin Portal)** | Phát triển Admin Layout với Dark Navy Sidebar và trọn bộ 7 phân hệ quản trị: Dashboard, Quản lý chuyến bay & cập nhật hoãn/hủy do thời tiết, Đồng bộ AirLabs, Quản lý sân bay, Quản lý vé, Quản lý người dùng và Quản lý chính sách. | `frontend/src/app/admin/*` (7 components quản trị) | 16 | 16 | Fullstack Developer | **Hoàn thành** |
-| **TS-36** | **Kiểm thử, Sửa lỗi & Đóng gói Docker** | Viết Dockerfile đa tầng cho Backend & Frontend Nginx, kiểm thử toàn bộ API, giải quyết lỗi lệch hợp đồng và kiểm chuẩn TypeScript 0 lỗi. | `Dockerfile` (Backend/Frontend), `docker-compose.yml`, `nginx.conf` | 12 | 12 | DevOps & QA | **Hoàn thành** |
+| **TS-37** | **Executive Analytics Dashboard** | Xây dựng phân hệ phân tích quản trị doanh thu, tỷ lệ hủy/đổi vé, thống kê tuyến bay phổ biến, hành vi khách hàng và tải trọng chuyến bay (Load Factor). | `backend/src/analytics/*`, `frontend/src/app/admin/analytics/*` | 8 | 8 | Fullstack Developer | **Hoàn thành** |
+| **TS-38** | **Deterministic E2E Seed Engine** | Phát triển script nạp dữ liệu E2E an toàn, tự động tạo 4 tài khoản thử nghiệm, 12 sân bay, 16 chuyến bay thương mại động và 3 booking mẫu. | `backend/src/scripts/seed-e2e-demo.ts`, `backend/package.json` | 6 | 6 | QA & Backend | **Hoàn thành** |
+| **TS-39** | **Bàn Đặt vé Trợ giúp (Clerk Desk)** | Tích hợp giao diện hỗ trợ đặt vé qua điện thoại và khách vãng lai trực tiếp tại quầy cho Clerk, hỗ trợ giữ chỗ và xuất vé cho hành khách. | `frontend/src/app/admin/reservation-desk/*` | 6 | 6 | Frontend Developer | **Hoàn thành** |
+| **TS-40** | **Chuẩn hóa Minh bạch SkyMiles** | Rà soát và cập nhật quyền lợi thẻ hội viên SkyMiles trung thực với mã nguồn (giảm 3%/7%/12%, tích lũy theo dặm bay thực tế). | `frontend/src/app/pages/skymiles/*` | 4 | 4 | Frontend Developer | **Hoàn thành** |
+| **TS-41** | **Rà soát GUI Standards & i18n Toàn diện** | Rà soát toàn bộ các nút bấm dạng viên thuốc (`rounded-full`), căn chỉnh lưới 12 cột, làm sạch ký tự Dingbat và hoàn tất 31 test suites (768 unit tests). | Toàn bộ Frontend & Backend unit tests | 8 | 8 | QA & Lead Developer | **Hoàn thành** |
 
 ---
 
@@ -65,15 +69,15 @@ Bảng phân bổ nhiệm vụ (Task Sheet) ghi nhận chi tiết toàn bộ cá
    ┌──────────────────────────────────────────────┬──────────────┬────────────┐
    │ Phân hệ công việc                            │ Số giờ (h)   │ Tỷ lệ (%)  │
    ├──────────────────────────────────────────────┼──────────────┼────────────┤
-   │ 1. Kiến trúc, CSDL & Dữ liệu Seed ban đầu     │    26 h      │    9.5 %   │
-   │ 2. Xác thực, Phân quyền & Quản trị tài khoản  │    32 h      │   11.7 %   │
-   │ 3. Nghiệp vụ Lịch bay, Sân bay & Nối chuyến  │    43 h      │   15.7 %   │
-   │ 4. Nghiệp vụ Đặt vé, Giữ chỗ, Đổi & Hủy vé   │    63 h      │   23.0 %   │
-   │ 5. Tích hợp AirLabs API & Scheduler định kỳ  │    21 h      │    7.7 %   │
-   │ 6. Giao diện Người dùng Angular & Icons SVG   │    61 h      │   22.3 %   │
-   │ 7. Phân hệ Quản trị Admin & Clerk            │    16 h      │    5.8 %   │
-   │ 8. Kiểm thử, Sửa lỗi & Đóng gói Docker       │    12 h      │    4.3 %   │
+   │ 1. Kiến trúc, CSDL & Dữ liệu Seed ban đầu     │    32 h      │   10.5 %   │
+   │ 2. Xác thực, Phân quyền & Quản trị tài khoản  │    32 h      │   10.5 %   │
+   │ 3. Nghiệp vụ Lịch bay, Sân bay & Nối chuyến  │    43 h      │   14.0 %   │
+   │ 4. Nghiệp vụ Đặt vé, Giữ chỗ, Đổi & Hủy vé   │    63 h      │   20.6 %   │
+   │ 5. Tích hợp AirLabs API & Scheduler định kỳ  │    21 h      │    6.9 %   │
+   │ 6. Giao diện Người dùng Angular & Icons SVG   │    69 h      │   22.5 %   │
+   │ 7. Phân hệ Quản trị Admin, Clerk & Analytics │    30 h      │    9.8 %   │
+   │ 8. Kiểm thử, Sửa lỗi & Đóng gói Docker       │    16 h      │    5.2 %   │
    ├──────────────────────────────────────────────┼──────────────┼────────────┤
-   │ TỔNG CỘNG TOÀN DỰ ÁN                         │   274 h      │  100.0 %   │
+   │ TỔNG CỘNG TOÀN DỰ ÁN (41 TASKS)              │   306 h      │  100.0 %   │
    └──────────────────────────────────────────────┴──────────────┴────────────┘
 ```

@@ -174,8 +174,8 @@ export interface PassengerSeatSelection {
                   <span>{{ lang.t('seatmap.safetyRegulations') }}</span>
                 </div>
                 <div class="text-slate-700 space-y-1 text-[11px] leading-relaxed">
-                  <p><strong>AUTO (Tự động):</strong> Miễn phí 100%. Hệ thống tự xếp ghế gần nhau khi hoàn tất.</p>
-                  <p><strong>CHOOSE (Tự chọn):</strong> Chọn vị trí mong muốn, áp dụng phụ phí niêm yết theo sơ đồ.</p>
+                  <p><strong>AUTO:</strong> {{ lang.isVietnamese() ? 'Miễn phí 100%. Hệ thống tự xếp ghế gần nhau khi hoàn tất.' : '100% Free. The system automatically assigns adjacent seats upon completion.' }}</p>
+                  <p><strong>CHOOSE:</strong> {{ lang.isVietnamese() ? 'Chọn vị trí mong muốn, áp dụng phụ phí niêm yết theo sơ đồ.' : 'Select preferred seat location; listed seat fee applies per map.' }}</p>
                 </div>
                 @if (seatMapData()?.notice?.exit_row_warning) {
                   <p class="text-slate-600 leading-relaxed text-[11px] pt-1 border-t border-amber-200/60">
@@ -217,8 +217,8 @@ export interface PassengerSeatSelection {
                 } @else if (!displayRows().length || seatMapData()?.layout_available === false) {
                   <div class="py-16 text-center text-slate-500">
                     <app-icon name="plane" class="w-10 h-10 mx-auto text-slate-300 mb-3" />
-                    <p class="text-sm font-semibold text-slate-700">Sơ đồ chỗ ngồi chưa sẵn sàng cho chuyến bay này</p>
-                    <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">Hệ thống sẽ tự động xếp chỗ miễn phí cho quý khách khi hoàn tất đặt vé.</p>
+                    <p class="text-sm font-semibold text-slate-700">{{ lang.isVietnamese() ? 'Sơ đồ chỗ ngồi chưa sẵn sàng cho chuyến bay này' : 'Seat map not yet available for this flight' }}</p>
+                    <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">{{ lang.isVietnamese() ? 'Hệ thống sẽ tự động xếp chỗ miễn phí cho quý khách khi hoàn tất đặt vé.' : 'The system will automatically assign complimentary seats when booking completes.' }}</p>
                   </div>
                 } @else {
                   <div class="space-y-1.5 py-4">

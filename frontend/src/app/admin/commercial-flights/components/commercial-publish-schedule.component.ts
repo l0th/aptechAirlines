@@ -131,7 +131,7 @@ import {
                       {{ lIdx + 1 }}
                     </span>
                     <strong class="font-mono text-sm text-navy">{{ tpl?.flight_number }}</strong>
-                    <span class="font-mono text-xs text-slate-500">({{ tpl?.origin_iata }} ➔ {{ tpl?.dest_iata }})</span>
+                    <span class="font-mono text-xs text-slate-500">({{ tpl?.origin_iata }} → {{ tpl?.dest_iata }})</span>
                   </div>
                   <span class="text-xs font-mono text-slate-400">{{ tpl?.aircraft_type }}</span>
                 </div>

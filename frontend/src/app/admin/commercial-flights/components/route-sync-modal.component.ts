@@ -17,7 +17,7 @@ import { IconComponent } from '../../../shared/components/icon/icon.component';
             <app-icon name="refreshcw" class="w-5 h-5 text-gold" />
             <span>{{ lang.t('admin.commercial.syncModalTitle') }}</span>
           </h3>
-          <button (click)="closeModal.emit()" class="text-slate-400 hover:text-slate-600">
+          <button (click)="closeModal.emit()" class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100">
             <app-icon name="x" class="w-5 h-5" />
           </button>
         </div>

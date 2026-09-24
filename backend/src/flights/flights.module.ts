@@ -15,6 +15,7 @@ import { FlightsScheduler } from './flights.scheduler';
 import { AirlabsCommercialService } from './airlabs-commercial.service';
 import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module';
 import { MailModule } from '../mail/mail.module';
+import { PaypalModule } from '../paypal/paypal.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MailModule } from '../mail/mail.module';
     UsersModule,
     SeatAllocationModule,
     MailModule,
+    PaypalModule,
   ],
   controllers: [FlightsController],
   providers: [

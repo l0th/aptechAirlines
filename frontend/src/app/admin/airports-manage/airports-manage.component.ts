@@ -152,7 +152,7 @@ import { Airport, CountrySuggestion } from '../../core/models/airport.model';
                           type="button"
                           (click)="syncAirport(ap)"
                           [disabled]="syncingIata() === ap.iata_code"
-                          class="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-sky-50 text-sky-600 rounded-full transition-colors"
                           [title]="lang.t('admin.airports.syncFromAirLabs')"
                         >
                           <app-icon name="refreshcw" class="w-4 h-4" [class.animate-spin]="syncingIata() === ap.iata_code" />
@@ -160,7 +160,7 @@ import { Airport, CountrySuggestion } from '../../core/models/airport.model';
                         <button
                           type="button"
                           (click)="openEditModal(ap)"
-                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-full transition-colors"
                           [title]="lang.t('common.edit')"
                         >
                           <app-icon name="edit" class="w-4 h-4" />
@@ -168,7 +168,7 @@ import { Airport, CountrySuggestion } from '../../core/models/airport.model';
                         <button
                           type="button"
                           (click)="deleteAirport(ap)"
-                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-full transition-colors"
                           [title]="lang.t('common.delete')"
                         >
                           <app-icon name="trash2" class="w-4 h-4" />

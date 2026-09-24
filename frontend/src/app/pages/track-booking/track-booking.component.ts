@@ -2,15 +2,17 @@ import { Component, OnInit, computed, effect, inject, signal } from '@angular/co
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { LanguageService } from '../../core/services/language.service';
+import { PaypalService } from '../../core/services/paypal.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { AuthModalService } from '../../shared/services/auth-modal.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { CurrencyFormatPipe } from '../../shared/pipes/currency-format.pipe';
 import { FlightDurationPipe } from '../../shared/pipes/duration.pipe';
-import { BookingStatus, CancellationPolicy } from '../../core/models/booking.model';
+import { BookingStatus, CancellationPolicy, RescheduleQuoteResponse } from '../../core/models/booking.model';
 import { ConnectingRouteOption, Flight, FlightStatus } from '../../core/models/flight.model';
 import { isValidIanaTimeZone, getTimezoneGmtOffset, utcToWallTime } from '../../core/utils/timezone.util';
 
@@ -51,6 +53,13 @@ interface LocalPaymentTransaction {
   card_masked?: string;
   status?: string;
   created_at?: string;
+  payment_provider?: 'PROFILE_CARD' | 'PAYPAL' | 'LEGACY_CARD';
+  provider_order_id?: string;
+  provider_capture_id?: string;
+  provider_refund_id?: string;
+  provider_amount?: number;
+  provider_currency?: string;
+  payment_reference?: string;
 }
 
 /** Document Booking trần (không phải envelope) — backend trả ở confirm/reschedule/cancel. */
@@ -179,7 +188,7 @@ interface TrackedPassengerView {
                 [(ngModel)]="searchCode"
                 name="searchCode"
                 placeholder="{{ lang.t('track.inputPlaceholder') }}"
-                class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-full font-mono text-sm focus:outline-none focus:ring-2 focus:ring-gold uppercase"
+                class="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-gold uppercase"
               />
             </div>
 
@@ -595,14 +604,27 @@ interface TrackedPassengerView {
                         <div>
                           <div class="flex items-center gap-2">
                             <strong class="text-slate-800">{{ transactionLabel(tx.transaction_type) }}</strong>
-                            @if (tx.payment_method) {
+                            @if (tx.payment_provider === 'PAYPAL' || tx.payment_method === 'PAYPAL') {
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                PayPal Sandbox
+                              </span>
+                            } @else if (tx.payment_method) {
                               <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-navy/5 text-navy border border-navy/10">
                                 {{ tx.payment_method === 'PROFILE_CARD' ? (lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card') : tx.payment_method }}
                               </span>
                             }
                           </div>
                           <div class="text-[11px] text-slate-400">
-                            {{ tx.card_masked || '—' }}
+                            @if (tx.payment_provider === 'PAYPAL' || tx.payment_method === 'PAYPAL') {
+                              @if (tx.provider_amount && tx.provider_currency) {
+                                <span class="font-mono text-slate-600 font-semibold">&#36;{{ tx.provider_amount }} {{ tx.provider_currency }}</span>
+                              }
+                              @if (tx.provider_capture_id || tx.provider_order_id || tx.payment_reference) {
+                                <span class="font-mono text-[10px] text-slate-400 ml-1">({{ tx.provider_capture_id || tx.provider_order_id || tx.payment_reference }})</span>
+                              }
+                            } @else {
+                              {{ tx.card_masked || '—' }}
+                            }
                             @if (tx.created_at) {
                               <span> • {{ tx.created_at | date: 'dd/MM/yyyy HH:mm' }}</span>
                             }
@@ -740,29 +762,77 @@ interface TrackedPassengerView {
           }
 
           <div class="space-y-3 text-xs mb-5">
-            <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
-              <div>
-                <span class="block text-[11px] text-slate-500 font-medium">{{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích:' : 'Preferred Credit Card:' }}</span>
-                <strong class="text-xs text-navy font-mono">
-                  @if (auth.currentUser()?.has_preferred_credit_card) {
-                    {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
-                  } @else {
-                    <span class="text-rose-600 font-sans font-normal">{{ lang.isVietnamese() ? 'Chưa có thẻ trong hồ sơ' : 'No card on file' }}</span>
-                  }
-                </strong>
+            <!-- Payment Method Choice: Profile Card vs PayPal Sandbox -->
+            <div class="space-y-1.5">
+              <span class="block text-[11px] text-slate-500 font-medium">{{ lang.t('track.paymentMethod') }}</span>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  (click)="confirmHoldPaymentMethod.set('PROFILE_CARD')"
+                  [class.border-gold]="confirmHoldPaymentMethod() === 'PROFILE_CARD'"
+                  [class.bg-amber-50/50]="confirmHoldPaymentMethod() === 'PROFILE_CARD'"
+                  class="p-2.5 rounded-xl border text-left transition-all"
+                >
+                  <div class="font-bold text-navy flex items-center gap-1.5">
+                    <app-icon name="creditcard" class="w-3.5 h-3.5 text-gold" />
+                    <span class="text-xs">{{ lang.t('track.confirmHoldWithCard') }}</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 mt-1 font-mono truncate">
+                    {{ auth.currentUser()?.preferred_credit_card_masked || (lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card') }}
+                  </div>
+                </button>
+
+                @if (!auth.isStaff() && auth.currentUser()?.role === 'CUSTOMER') {
+                  <button
+                    type="button"
+                    (click)="selectHoldPayPal()"
+                    [class.border-gold]="confirmHoldPaymentMethod() === 'PAYPAL'"
+                    [class.bg-amber-50/50]="confirmHoldPaymentMethod() === 'PAYPAL'"
+                    class="p-2.5 rounded-xl border text-left transition-all"
+                  >
+                    <div class="font-bold text-navy flex items-center gap-1.5">
+                      <span class="text-blue-700 font-black text-xs">PayPal</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">Sandbox</span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 mt-1">
+                      {{ lang.isVietnamese() ? 'Xác nhận trước thanh toán' : 'Confirmed before payment' }}
+                    </div>
+                  </button>
+                }
               </div>
-              <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                {{ lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card' }}
-              </span>
             </div>
 
-            <div class="p-2.5 bg-amber-50/70 rounded-lg border border-amber-200/60 text-[11px] text-slate-600 leading-relaxed">
-              {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
-            </div>
+            @if (confirmHoldPaymentMethod() === 'PROFILE_CARD') {
+              <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <span class="block text-[11px] text-slate-500 font-medium">{{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích:' : 'Preferred Credit Card:' }}</span>
+                  <strong class="text-xs text-navy font-mono">
+                    @if (auth.currentUser()?.has_preferred_credit_card) {
+                      {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                    } @else {
+                      <span class="text-rose-600 font-sans font-normal">{{ lang.isVietnamese() ? 'Chưa có thẻ trong hồ sơ' : 'No card on file' }}</span>
+                    }
+                  </strong>
+                </div>
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  {{ lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card' }}
+                </span>
+              </div>
 
-            @if (!auth.currentUser()?.has_preferred_credit_card) {
-              <div class="p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-[11px] text-rose-700 leading-relaxed font-medium">
-                {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng ưa thích trong Hồ sơ trước khi xác nhận thanh toán.' : 'Please update your preferred credit card in your Profile before confirming payment.' }}
+              @if (!auth.currentUser()?.has_preferred_credit_card) {
+                <div class="p-2.5 bg-rose-50 rounded-lg border border-rose-200 text-[11px] text-rose-700 leading-relaxed font-medium">
+                  {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng ưa thích trong Hồ sơ trước khi xác nhận thanh toán.' : 'Please update your preferred credit card in your Profile before confirming payment.' }}
+                </div>
+              }
+            } @else {
+              <!-- PayPal details -->
+              <div class="p-3 bg-blue-50/50 border border-blue-200/70 rounded-xl space-y-1 text-slate-700">
+                <p class="text-xs text-slate-600">
+                  {{ lang.isVietnamese() ? 'Giá PayPal sẽ được xác nhận trước khi mở thanh toán.' : 'PayPal amount will be confirmed before payment opens.' }}
+                </p>
+                <div class="text-[10px] text-amber-700 italic pt-1 border-t border-blue-100">
+                  * {{ lang.t('booking.paymentSandboxBadge') }}
+                </div>
               </div>
             }
 
@@ -772,18 +842,41 @@ interface TrackedPassengerView {
             </div>
           </div>
 
-          <div class="flex justify-end gap-3">
+          <div class="flex justify-end gap-3 items-center">
             <button (click)="showConfirmHoldModal.set(false)" class="btn-ghost text-xs">{{ lang.t('common.cancel') }}</button>
-            <button
-              [disabled]="submittingAction() || !auth.currentUser()?.has_preferred_credit_card"
-              (click)="executeConfirmHold()"
-              class="btn-gold text-xs !py-2.5 !px-5 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              @if (submittingAction()) {
-                <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+            @if (confirmHoldPaymentMethod() === 'PAYPAL') {
+              @if (!isHoldPayPalEligible()) {
+                <div class="p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800">
+                  {{ lang.isVietnamese() ? 'PayPal hiện không khả dụng.' : 'PayPal is currently unavailable.' }}
+                </div>
+              } @else {
+                <button
+                  type="button"
+                  (click)="startPayPalHoldPayment()"
+                  [disabled]="submittingAction() || isHoldPayPalProcessing()"
+                  class="flex items-center justify-center gap-1.5 bg-[#ffc439] hover:bg-[#f4bb33] active:bg-[#e0ab2e] text-[#003087] font-bold py-2.5 px-4 rounded-full shadow-sm transition-all text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  @if (isHoldPayPalProcessing()) {
+                    <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                    <span>{{ lang.isVietnamese() ? 'Đang xử lý...' : 'Processing...' }}</span>
+                  } @else {
+                    <span>Pay with</span>
+                    <span class="font-extrabold italic">PayPal</span>
+                  }
+                </button>
               }
-              <span>{{ lang.isVietnamese() ? 'Xác nhận thanh toán' : 'Confirm Payment' }}</span>
-            </button>
+            } @else {
+              <button
+                [disabled]="submittingAction() || !auth.currentUser()?.has_preferred_credit_card"
+                (click)="executeConfirmHold()"
+                class="btn-gold text-xs !py-2.5 !px-5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                @if (submittingAction()) {
+                  <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                }
+                <span>{{ lang.isVietnamese() ? 'Xác nhận thanh toán' : 'Confirm Payment' }}</span>
+              </button>
+            }
           </div>
         </div>
       </div>
@@ -1040,7 +1133,84 @@ interface TrackedPassengerView {
             </div>
           }
 
-          <div class="flex justify-end gap-3 pt-3 border-t border-slate-100">
+          <!-- Surcharge Payment Method for Reschedule -->
+          @if ((rescheduleStep() === 2 || !isRoundTrip()) && canConfirmReschedule() && rescheduleQuote() && rescheduleQuote()!.price_difference > 0) {
+            <div class="p-3 mb-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-slate-600 font-medium">{{ lang.isVietnamese() ? 'Phụ thu chênh lệch giá vé:' : 'Fare difference surcharge:' }}</span>
+                <strong class="text-amber-700 font-bold font-mono">{{ rescheduleQuote()!.price_difference | currencyFormat }}</strong>
+              </div>
+              <div class="grid grid-cols-2 gap-2 mb-2">
+                <button
+                  type="button"
+                  (click)="selectReschedulePayment('PROFILE_CARD')"
+                  [class.border-gold]="reschedulePaymentMethod() === 'PROFILE_CARD'"
+                  [class.bg-white]="reschedulePaymentMethod() === 'PROFILE_CARD'"
+                  class="p-2 rounded-lg border text-left transition-all"
+                >
+                  <div class="font-bold text-navy flex items-center gap-1">
+                    <app-icon name="creditcard" class="w-3.5 h-3.5 text-gold" />
+                    <span class="text-xs">{{ lang.t('track.reschedulePayWithCard') }}</span>
+                  </div>
+                  <div class="text-[10px] text-slate-500 font-mono truncate">
+                    {{ auth.currentUser()?.preferred_credit_card_masked || (lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card') }}
+                  </div>
+                </button>
+                @if (!auth.isStaff() && auth.currentUser()?.role === 'CUSTOMER') {
+                  <button
+                    type="button"
+                    (click)="selectReschedulePayment('PAYPAL')"
+                    [class.border-gold]="reschedulePaymentMethod() === 'PAYPAL'"
+                    [class.bg-white]="reschedulePaymentMethod() === 'PAYPAL'"
+                    class="p-2 rounded-lg border text-left transition-all"
+                  >
+                    <div class="font-bold text-navy flex items-center gap-1">
+                      <span class="text-blue-700 font-black text-xs">PayPal</span>
+                      <span class="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800">Sandbox</span>
+                    </div>
+                    @if (rescheduleQuote()?.presentment; as pres) {
+                      <div class="text-[10px] text-slate-500">
+                        &#36;{{ pres.provider_amount }} {{ pres.provider_currency }}
+                      </div>
+                    } @else {
+                      <div class="text-[10px] text-slate-500">
+                        {{ lang.isVietnamese() ? 'Xác nhận trước thanh toán' : 'Confirmed before payment' }}
+                      </div>
+                    }
+                  </button>
+                }
+              </div>
+              @if (reschedulePaymentMethod() === 'PAYPAL') {
+                <div class="mt-2">
+                  @if (!isReschedulePayPalEligible()) {
+                    <div class="p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800">
+                      {{ lang.isVietnamese() ? 'PayPal hiện không khả dụng.' : 'PayPal is currently unavailable.' }}
+                    </div>
+                  } @else {
+                    <button
+                      type="button"
+                      (click)="startPayPalReschedulePayment()"
+                      [disabled]="submittingAction() || isReschedulePayPalProcessing() || !rescheduleQuote()?.presentment"
+                      class="w-full flex items-center justify-center gap-1.5 bg-[#ffc439] hover:bg-[#f4bb33] active:bg-[#e0ab2e] text-[#003087] font-bold py-2 px-3 rounded-full shadow-sm transition-all text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      @if (isReschedulePayPalProcessing()) {
+                        <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                        <span>{{ lang.isVietnamese() ? 'Đang xử lý...' : 'Processing...' }}</span>
+                      } @else {
+                        <span>Pay with</span>
+                        <span class="font-extrabold italic">PayPal</span>
+                        @if (rescheduleQuote()?.presentment; as pres) {
+                          <span class="text-slate-700">(&#36;{{ pres.provider_amount }} {{ pres.provider_currency }})</span>
+                        }
+                      }
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          <div class="flex justify-end gap-3 pt-3 border-t border-slate-100 items-center">
             @if (rescheduleStep() === 2) {
               <button (click)="rescheduleStep.set(1)" class="btn-ghost text-xs">
                 {{ lang.t('track.back') }}
@@ -1060,16 +1230,18 @@ interface TrackedPassengerView {
               </button>
             } @else {
               <!-- Final confirm (one-way step 1 OR round-trip step 2) -->
-              <button
-                [disabled]="!canConfirmReschedule() || submittingAction() || loadingAlternatives() || keepReturnInvalid()"
-                (click)="executeReschedule()"
-                class="btn-navy text-xs !py-2.5 !px-5"
-              >
-                @if (submittingAction()) {
-                  <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-                }
-                <span>{{ lang.t('track.confirmReschedule') }}</span>
-              </button>
+              @if (reschedulePaymentMethod() !== 'PAYPAL' || !rescheduleQuote() || rescheduleQuote()!.price_difference <= 0) {
+                <button
+                  [disabled]="!canConfirmReschedule() || submittingAction() || loadingAlternatives() || keepReturnInvalid()"
+                  (click)="executeReschedule()"
+                  class="btn-navy text-xs !py-2.5 !px-5"
+                >
+                  @if (submittingAction()) {
+                    <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                  }
+                  <span>{{ lang.t('track.confirmReschedule') }}</span>
+                </button>
+              }
             }
           </div>
         </div>
@@ -1168,6 +1340,22 @@ export class TrackBookingComponent implements OnInit {
   readonly authModal = inject(AuthModalService);
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
+  readonly paypalService = inject(PaypalService);
+
+  readonly confirmHoldPaymentMethod = signal<'PROFILE_CARD' | 'PAYPAL'>('PROFILE_CARD');
+  readonly reschedulePaymentMethod = signal<'PROFILE_CARD' | 'PAYPAL'>('PROFILE_CARD');
+  readonly rescheduleQuote = signal<RescheduleQuoteResponse | null>(null);
+  readonly loadingRescheduleQuote = signal(false);
+
+  readonly isHoldPayPalEligible = signal<boolean>(false);
+  readonly isHoldPayPalProcessing = signal<boolean>(false);
+  private currentHoldPayPalClientRequestId: string = '';
+  private currentHoldPayPalCheckoutId: string = '';
+
+  readonly isReschedulePayPalEligible = signal<boolean>(false);
+  readonly isReschedulePayPalProcessing = signal<boolean>(false);
+  private currentReschedulePayPalClientRequestId: string = '';
+  private currentReschedulePayPalCheckoutId: string = '';
 
   /** Today's date as YYYY-MM-DD for date picker min attribute */
   readonly todayDateStr = new Date().toISOString().slice(0, 10);
@@ -1617,7 +1805,119 @@ export class TrackBookingComponent implements OnInit {
 
   openConfirmHoldModal(): void {
     if (!this.requireLogin()) return;
+    this.confirmHoldPaymentMethod.set('PROFILE_CARD');
     this.showConfirmHoldModal.set(true);
+  }
+
+  selectHoldPayPal(): void {
+    if (this.auth.isStaff() || this.auth.currentUser()?.role !== 'CUSTOMER') {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+    this.confirmHoldPaymentMethod.set('PAYPAL');
+    this.isHoldPayPalEligible.set(false);
+    this.paypalService.checkEligibility().then((e) => this.isHoldPayPalEligible.set(e));
+  }
+
+  async startPayPalHoldPayment(): Promise<void> {
+    const b = this.bookingInfo();
+    if (!b?.blocking_number) return;
+    if (!this.requireLogin()) return;
+    if (this.auth.isStaff() || this.auth.currentUser()?.role !== 'CUSTOMER') {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+
+    if (b.total_amount === 0) {
+      this.submittingAction.set(true);
+      try {
+        await firstValueFrom(
+          this.api.confirmHoldTicket({
+            blocking_number: b.blocking_number,
+            payment_method: 'PAYPAL',
+          }),
+        );
+        this.showConfirmHoldModal.set(false);
+        this.currentHoldPayPalClientRequestId = '';
+        this.auth.refreshProfile();
+        this.reloadBooking(
+          this.lang.isVietnamese()
+            ? this.lang.t('track.holdPaymentSuccess') || 'Thanh toán giữ chỗ thành công! Vé đã được xác nhận.'
+            : 'Hold payment successful! Ticket has been confirmed.',
+        );
+      } catch (err: any) {
+        console.error('PayPal zero-hold confirmation error:', err);
+        this.toast.error(err?.error?.message || this.lang.t('booking.captureFailed'));
+      } finally {
+        this.submittingAction.set(false);
+      }
+      return;
+    }
+
+    if (!this.currentHoldPayPalClientRequestId) {
+      this.currentHoldPayPalClientRequestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'req_h_' + Date.now();
+    }
+
+    this.isHoldPayPalProcessing.set(true);
+
+    try {
+      await this.paypalService.startOneTimePayment({
+        presentationMode: 'auto',
+        createOrder: async () => {
+          const res = await firstValueFrom(
+            this.api.createPayPalConfirmHoldOrder({
+              blocking_number: b.blocking_number!,
+              client_request_id: this.currentHoldPayPalClientRequestId,
+            }),
+          );
+          this.currentHoldPayPalCheckoutId = res.checkout_id;
+          return { orderId: res.order_id };
+        },
+        onApprove: async (data: { orderId: string }) => {
+          this.submittingAction.set(true);
+          try {
+            await firstValueFrom(
+              this.api.capturePayPalConfirmHold(this.currentHoldPayPalCheckoutId, data.orderId),
+            );
+            this.showConfirmHoldModal.set(false);
+            this.currentHoldPayPalClientRequestId = '';
+            this.auth.refreshProfile();
+            this.reloadBooking(
+              this.lang.isVietnamese()
+                ? this.lang.t('track.holdPaymentSuccess') || 'Thanh toán giữ chỗ thành công! Vé đã được xác nhận.'
+                : 'Hold payment successful! Ticket has been confirmed.',
+            );
+          } catch (err: any) {
+            console.error('PayPal hold capture error:', err);
+            this.toast.error(err?.error?.message || this.lang.t('booking.captureFailed'));
+          } finally {
+            this.submittingAction.set(false);
+          }
+        },
+        onCancel: () => {
+          console.log('PayPal hold payment cancelled by user');
+        },
+        onError: (err: any) => {
+          console.error('PayPal hold error:', err);
+          this.toast.error(this.lang.t('booking.captureFailed'));
+        },
+      });
+    } catch (err: any) {
+      console.error('Failed to initiate PayPal hold payment:', err);
+      this.toast.error(err?.message || this.lang.t('booking.captureFailed'));
+    } finally {
+      this.isHoldPayPalProcessing.set(false);
+    }
   }
 
   executeConfirmHold(): void {
@@ -1707,6 +2007,8 @@ export class TrackBookingComponent implements OnInit {
     this.selectedNewReturnInventoryId.set('');
     this.availableReturnAlternativeFlights.set([]);
     this.keepReturnLeg.set(true);
+    this.rescheduleQuote.set(null);
+    this.reschedulePaymentMethod.set('PROFILE_CARD');
     this.showRescheduleModal.set(true);
 
     // §3.6.2 Initialize new date from current outbound departure_date
@@ -2040,6 +2342,7 @@ export class TrackBookingComponent implements OnInit {
     const inv = this.selectedInventory(flight);
     this.selectedNewFlightId.set(flight._id);
     this.selectedNewInventoryId.set(inv?._id || '');
+    this.triggerRescheduleQuote();
   }
 
   selectConnectingAlternative(route: ConnectingRouteOption): void {
@@ -2048,6 +2351,7 @@ export class TrackBookingComponent implements OnInit {
     );
     if (!allReservable) return;
     this.selectedConnectingAlternative.set(route);
+    this.triggerRescheduleQuote();
   }
 
   private pickConnectingInventory(inventories: any[]) {
@@ -2080,6 +2384,7 @@ export class TrackBookingComponent implements OnInit {
     const inv = this.selectedReturnInventory(flight);
     this.selectedNewReturnFlightId.set(flight._id);
     this.selectedNewReturnInventoryId.set(inv?._id || '');
+    this.triggerRescheduleQuote();
   }
 
   /**
@@ -2112,6 +2417,7 @@ export class TrackBookingComponent implements OnInit {
     );
     if (!allReservable) return;
     this.selectedReturnConnectingAlternative.set(route);
+    this.triggerRescheduleQuote();
   }
 
   /** Transition from step 1 (outbound) to step 2 (return) — load return alternatives. */
@@ -2326,7 +2632,7 @@ export class TrackBookingComponent implements OnInit {
     this.submitReschedulePayload(payload);
   }
 
-  private submitReschedulePayload(payload: any): void {
+  ensureSeatRequests(payload: any): void {
     if (!payload.seat_requests) {
       const flightIds: string[] = [];
       if (payload.new_flight_id) flightIds.push(payload.new_flight_id);
@@ -2361,7 +2667,193 @@ export class TrackBookingComponent implements OnInit {
       }
       payload.seat_requests = seatRequests;
     }
+  }
 
+  buildCurrentReschedulePayload(): any {
+    const b = this.bookingInfo();
+    if (!b?.confirmation_number) return null;
+
+    if (this.isConnecting()) {
+      const route = this.selectedConnectingAlternative();
+      if (!route?.legs?.length) return null;
+      const newLegs = route.legs.map((leg, index) => ({
+        flight_id: leg.flight_id,
+        inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+        leg_type: `CONNECTING_${index + 1}`,
+      }));
+      if (newLegs.some((leg) => !leg.inventory_id)) return null;
+      return { confirmation_number: b.confirmation_number, new_legs: newLegs };
+    }
+
+    if (this.isRoundTrip() && (this.outboundIsConnecting() || this.returnIsConnecting())) {
+      const payload: any = { confirmation_number: b.confirmation_number };
+      if (this.outboundIsConnecting()) {
+        const route = this.selectedConnectingAlternative();
+        if (!route?.legs?.length) return null;
+        payload.new_legs = route.legs.map((leg, index) => ({
+          flight_id: leg.flight_id,
+          inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+          leg_type: `CONNECTING_${index + 1}`,
+        }));
+        if (payload.new_legs.some((leg: any) => !leg.inventory_id)) return null;
+      } else {
+        if (!this.selectedNewFlightId()) return null;
+        payload.new_flight_id = this.selectedNewFlightId();
+        payload.new_inventory_id = this.selectedNewInventoryId();
+      }
+
+      if (!this.keepReturnLeg()) {
+        if (this.returnIsConnecting()) {
+          const retRoute = this.selectedReturnConnectingAlternative();
+          if (!retRoute?.legs?.length) return null;
+          payload.new_return_legs = retRoute.legs.map((leg, index) => ({
+            flight_id: leg.flight_id,
+            inventory_id: this.pickConnectingInventory(leg.inventories)?._id || '',
+            leg_type: `INBOUND_${index + 1}`,
+          }));
+          if (payload.new_return_legs.some((leg: any) => !leg.inventory_id)) return null;
+        } else {
+          if (this.selectedNewReturnFlightId()) {
+            payload.new_return_flight_id = this.selectedNewReturnFlightId();
+            payload.new_return_inventory_id = this.selectedNewReturnInventoryId();
+          }
+        }
+      }
+      return payload;
+    }
+
+    if (!this.selectedNewFlightId()) return null;
+    const payload: any = {
+      confirmation_number: b.confirmation_number,
+      new_flight_id: this.selectedNewFlightId(),
+      new_inventory_id: this.selectedNewInventoryId(),
+    };
+    if (this.isRoundTrip() && !this.keepReturnLeg() && this.selectedNewReturnFlightId()) {
+      payload.new_return_flight_id = this.selectedNewReturnFlightId();
+      payload.new_return_inventory_id = this.selectedNewReturnInventoryId();
+    }
+    return payload;
+  }
+
+  triggerRescheduleQuote(): void {
+    const raw = this.buildCurrentReschedulePayload();
+    if (!raw) {
+      this.rescheduleQuote.set(null);
+      return;
+    }
+    const payload = { ...raw };
+    this.ensureSeatRequests(payload);
+    this.loadingRescheduleQuote.set(true);
+    this.api.quoteRescheduleBooking(payload).subscribe({
+      next: (q) => {
+        this.rescheduleQuote.set(q);
+        this.loadingRescheduleQuote.set(false);
+        if (this.reschedulePaymentMethod() === 'PAYPAL' && q.price_difference > 0) {
+          this.isReschedulePayPalEligible.set(false);
+          this.paypalService.checkEligibility().then((e) => this.isReschedulePayPalEligible.set(e));
+        }
+      },
+      error: () => {
+        this.rescheduleQuote.set(null);
+        this.loadingRescheduleQuote.set(false);
+      },
+    });
+  }
+
+  selectReschedulePayment(method: 'PROFILE_CARD' | 'PAYPAL'): void {
+    if (method === 'PAYPAL' && (this.auth.isStaff() || this.auth.currentUser()?.role !== 'CUSTOMER')) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+    this.reschedulePaymentMethod.set(method);
+    if (method === 'PAYPAL') {
+      this.isReschedulePayPalEligible.set(false);
+      this.paypalService.checkEligibility().then((e) => this.isReschedulePayPalEligible.set(e));
+    }
+  }
+
+  async startPayPalReschedulePayment(): Promise<void> {
+    const b = this.bookingInfo();
+    if (!b?.confirmation_number) return;
+    if (!this.requireLogin()) return;
+    if (this.auth.isStaff() || this.auth.currentUser()?.role !== 'CUSTOMER') {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+
+    const raw = this.buildCurrentReschedulePayload();
+    if (!raw) return;
+
+    if (!this.currentReschedulePayPalClientRequestId) {
+      this.currentReschedulePayPalClientRequestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'req_resc_' + Date.now();
+    }
+
+    this.isReschedulePayPalProcessing.set(true);
+
+    try {
+      await this.paypalService.startOneTimePayment({
+        presentationMode: 'auto',
+        createOrder: async () => {
+          const payload = { ...raw };
+          this.ensureSeatRequests(payload);
+          payload.client_request_id = this.currentReschedulePayPalClientRequestId;
+          const res = await firstValueFrom(this.api.createPayPalRescheduleOrder(payload));
+          this.currentReschedulePayPalCheckoutId = res.checkout_id;
+          return { orderId: res.order_id };
+        },
+        onApprove: async (data: { orderId: string }) => {
+          this.submittingAction.set(true);
+          try {
+            const res = await firstValueFrom(
+              this.api.capturePayPalReschedule(this.currentReschedulePayPalCheckoutId, data.orderId),
+            );
+            this.showRescheduleModal.set(false);
+            this.currentReschedulePayPalClientRequestId = '';
+            const diff = Number(res?.result?.price_difference) || 0;
+            const isVi = this.lang.isVietnamese();
+            const diffText = diff > 0
+              ? (isVi
+                  ? (this.lang.t('track.surcharge') || '').replace('{amount}', new Intl.NumberFormat('vi-VN').format(Math.abs(diff)))
+                  : `Additional fare: ${new Intl.NumberFormat('en-US').format(Math.abs(diff))} VND.`)
+              : '';
+            const defaultMsg = this.lang.t('track.rescheduleSuccess');
+            const msg = res?.result?.message || defaultMsg;
+            this.reloadBooking(`${msg} ${diffText}`);
+          } catch (err: any) {
+            console.error('PayPal reschedule capture error:', err);
+            this.toast.error(err?.error?.message || this.lang.t('booking.captureFailed'));
+          } finally {
+            this.submittingAction.set(false);
+          }
+        },
+        onCancel: () => {
+          console.log('PayPal reschedule checkout cancelled by user');
+        },
+        onError: (err: any) => {
+          console.error('PayPal reschedule error:', err);
+          this.toast.error(this.lang.t('booking.captureFailed'));
+        },
+      });
+    } catch (err: any) {
+      console.error('Failed to initiate PayPal reschedule payment:', err);
+      this.toast.error(err?.message || this.lang.t('booking.captureFailed'));
+    } finally {
+      this.isReschedulePayPalProcessing.set(false);
+    }
+  }
+
+  private submitReschedulePayload(payload: any): void {
+    this.ensureSeatRequests(payload);
     payload.payment_method = 'PROFILE_CARD';
 
     this.api.rescheduleBooking(payload).subscribe({

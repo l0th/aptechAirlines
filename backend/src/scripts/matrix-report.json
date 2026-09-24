@@ -1,0 +1,222 @@
+{
+  "generatedAt": "2026-09-24T06:44:34.108Z",
+  "database": "airline_e2e_matrix_verification",
+  "totalFlows": 14,
+  "passedFlows": 14,
+  "results": [
+    {
+      "flow": "A",
+      "name": "Guest Search / date range / round trip",
+      "method": "GET",
+      "endpoint": "/api/flights/search",
+      "httpStatus": "HTTP 200",
+      "identifier": "SGN ➔ HAN / return HAN ➔ SGN",
+      "invariant": "Date range (2026-09-29 to 2026-10-14) matched 13 outbounds across 3 dates; return matched 2 flights at 2026-10-19; Adult 100%, Child 75%, Senior 85% verified.",
+      "status": "PASS",
+      "details": {
+        "outboundCount": 13,
+        "returnCount": 2,
+        "distinctDates": [
+          "2026-09-29",
+          "2026-10-13",
+          "2026-10-14"
+        ]
+      }
+    },
+    {
+      "flow": "B",
+      "name": "Registration / login / profile",
+      "method": "POST /api/auth/register, POST /api/auth/login, GET /api/auth/me",
+      "endpoint": "/api/auth/*",
+      "httpStatus": "HTTP 201 / HTTP 201 / HTTP 200",
+      "identifier": "User: flow_b_ac3bf315 (flow_b_ac3bf315@aptechairlines.test)",
+      "invariant": "Registered with bcrypt password; valid signed JWT obtained; profile verifies role CUSTOMER, sky_miles=0, card masked (**** **** **** 4444), password_hash excluded.",
+      "status": "PASS",
+      "details": {
+        "userId": "6ab4c6d06f9bafc89e00e177",
+        "username": "flow_b_ac3bf315",
+        "email": "flow_b_ac3bf315@aptechairlines.test"
+      }
+    },
+    {
+      "flow": "C",
+      "name": "Direct PROFILE_CARD purchase",
+      "method": "POST",
+      "endpoint": "/api/bookings",
+      "httpStatus": "HTTP 201",
+      "identifier": "PNR: PNR-3H2VDU (CNF-V71C24)",
+      "invariant": "Status CONFIRMED; inventory decremented exactly once (168 ➔ 167); single SUCCESS PAYMENT tx (2,640,000 VND [2,200,000 base × 1.20 dynamic pricing]); SkyMiles accrued (+721); active ticket coupon issued.",
+      "status": "PASS",
+      "details": {
+        "pnr": "PNR-3H2VDU",
+        "confirmationNumber": "CNF-V71C24",
+        "bookingId": "6ab4c6d06f9bafc89e00e183"
+      }
+    },
+    {
+      "flow": "D",
+      "name": "Hold >14d + reject <=14d",
+      "method": "POST",
+      "endpoint": "/api/bookings",
+      "httpStatus": "HTTP 201 / HTTP 400",
+      "identifier": "Hold: BLK-3FZ2OD (PNR: PNR-JWEZET)",
+      "invariant": "Eligible hold (+20d) granted BLOCKED status, BLK code, zero payment, zero miles, deadline = departure - 14d, inventory decremented once; Ineligible hold (+5d) strictly rejected with HTTP 400, no booking created, inventory unchanged.",
+      "status": "PASS",
+      "details": {
+        "blockingNumber": "BLK-3FZ2OD",
+        "pnr": "PNR-JWEZET",
+        "timeLimitDeadline": "2026-09-30T01:00:00.000Z"
+      }
+    },
+    {
+      "flow": "E",
+      "name": "Confirm held booking",
+      "method": "POST",
+      "endpoint": "/api/bookings/confirm",
+      "httpStatus": "HTTP 201",
+      "identifier": "BLK-3FZ2OD ➔ CNF-6N8QCP",
+      "invariant": "Status transitioned BLOCKED ➔ CONFIRMED; CNF code issued; exactly one SUCCESS PAYMENT transaction (1,800,000 VND); active coupons confirmed; ZERO double inventory decrement (167 === 167); SkyMiles credited exactly once (+721).",
+      "status": "PASS",
+      "details": {
+        "previousBlockingNumber": "BLK-3FZ2OD",
+        "confirmationNumber": "CNF-6N8QCP"
+      }
+    },
+    {
+      "flow": "F",
+      "name": "Positive reschedule charge",
+      "method": "POST",
+      "endpoint": "/api/bookings/reschedule",
+      "httpStatus": "HTTP 201",
+      "identifier": "PNR: PNR-AL1ANJ (CNF-V4TM6V)",
+      "invariant": "Rescheduled from APT-E2E-PRC-LO (1,200,000 VND) to APT-E2E-PRC-HI (2,500,000 VND); exact difference (+1,300,000 VND) charged; old coupon CANCELLED, new coupon ACTIVE; old inventory restored (+1), new inventory decremented (-1).",
+      "status": "PASS",
+      "details": {
+        "rescheduleCharge": 1300000,
+        "confirmationNumber": "CNF-V4TM6V"
+      }
+    },
+    {
+      "flow": "G",
+      "name": "Negative reschedule refund",
+      "method": "POST",
+      "endpoint": "/api/bookings/reschedule",
+      "httpStatus": "HTTP 201",
+      "identifier": "PNR: PNR-AL1ANJ (CNF-7WNC9B)",
+      "invariant": "Rescheduled from APT-E2E-PRC-HI (2,500,000 VND) back to APT-E2E-PRC-LO (1,200,000 VND); exact difference (1,300,000 VND) refunded to card (**** **** **** 4444); old coupon cancelled, new coupon active; inventory rebalanced.",
+      "status": "PASS",
+      "details": {
+        "rescheduleRefund": 1300000,
+        "cardMasked": "**** **** **** 4444"
+      }
+    },
+    {
+      "flow": "H",
+      "name": "Blocked cancel + positive confirm + 0% refund",
+      "method": "POST",
+      "endpoint": "/api/bookings/cancel",
+      "httpStatus": "HTTP 201",
+      "identifier": "Held: BLK-KCZSGC | Confirmed >30d: CNF-LVFX6I | Confirmed <7d: CNF-PDJ29Y",
+      "invariant": "H1 (BLOCKED): CANCELLED, 0 refund, inventory restored (+1), 0 miles reversed; H2 (>30d): 90% refund (1242000 VND) SUCCESS, inventory restored, miles deducted; H3 (<7d): 0% refund (0 VND), inventory restored, miles deducted.",
+      "status": "PASS",
+      "details": {
+        "h1Cancelled": "BLK-KCZSGC",
+        "h2RefundAmount": 1242000,
+        "h3Cancelled": "CNF-PDJ29Y"
+      }
+    },
+    {
+      "flow": "I",
+      "name": "Disruption DELAYED + CANCELLED",
+      "method": "PATCH",
+      "endpoint": "/api/flights/:id/status",
+      "httpStatus": "HTTP 200",
+      "identifier": "Delayed: APT-E2E-DLY | Cancelled: APT-E2E-CNC",
+      "invariant": "A. SCHEDULED ➔ DELAYED (120m delay, reason verified, Track Booking reflects emergency change); B. SCHEDULED ➔ CANCELLED automatically sweeps bookings to CANCELLED with 100% compensation refund (1800000 VND), coupons CANCELLED, inventory restored.",
+      "status": "PASS",
+      "details": {
+        "delayedFlight": "APT-E2E-DLY",
+        "cancelledFlight": "APT-E2E-CNC",
+        "compensationRefundAmount": 1800000
+      }
+    },
+    {
+      "flow": "J",
+      "name": "Track Booking",
+      "method": "GET",
+      "endpoint": "/api/bookings/track/:code",
+      "httpStatus": "HTTP 200",
+      "identifier": "Tracking Code: PNR-3H2VDU",
+      "invariant": "Envelope returned booking_info (PNR: PNR-3H2VDU, status CONFIRMED, passenger demographic details, fare amounts), flight_coupons array (origin, destination, wall-clock time, status), and emergency change boolean.",
+      "status": "PASS",
+      "details": {
+        "pnr": "PNR-3H2VDU",
+        "status": "CONFIRMED",
+        "couponsCount": 1
+      }
+    },
+    {
+      "flow": "K",
+      "name": "Clerk Booking / customer ownership",
+      "method": "POST",
+      "endpoint": "/api/bookings",
+      "httpStatus": "HTTP 201 / HTTP 200 / HTTP 403",
+      "identifier": "PNR: PNR-T9GFJD (Clerk: e2e_clerk ➔ Customer: flow_b_ac3bf315)",
+      "invariant": "Staff with CLERK role created reservation on behalf of customer; booking.user_id strictly references customer (6ab4c6d06f9bafc89e00e177); customer token tracks booking (HTTP 200); unrelated customer is strictly blocked by ownership guard (HTTP 403).",
+      "status": "PASS",
+      "details": {
+        "pnr": "PNR-T9GFJD",
+        "clerkId": "6ab4c6d03996e5de15f0db30",
+        "customerId": "6ab4c6d06f9bafc89e00e177"
+      }
+    },
+    {
+      "flow": "L",
+      "name": "Public flight lookup + Commercial Admin",
+      "method": "GET",
+      "endpoint": "/api/flights/lookup, /api/airports/resolve, /api/seat-allocation/flight/:flightId/map, /api/flights/commercial-templates",
+      "httpStatus": "HTTP 200 / HTTP 200 / HTTP 200 / HTTP 200 (Unauth 401)",
+      "identifier": "Flight: APT-E2E-HLD | City: \"Ha Noi\" | Fleet: A20N",
+      "invariant": "Public flight lookup retrieves operational status without auth; airport resolver maps \"Ha Noi\" ➔ HAN; seat allocation renders physical 180-seat A20N catalog; commercial admin endpoint (/flights/commercial-templates) requires ADMIN role and rejects unauthenticated requests (HTTP 401).",
+      "status": "PASS",
+      "details": {
+        "publicLookupCount": 1,
+        "resolvedIata": "HAN",
+        "aircraftType": "A20N",
+        "totalCapacity": 180,
+        "totalPhysicalSeats": 180
+      }
+    },
+    {
+      "flow": "M",
+      "name": "Analytics overview + physical capacity",
+      "method": "GET",
+      "endpoint": "/api/analytics/overview, /api/analytics/capacity",
+      "httpStatus": "HTTP 200 / HTTP 200",
+      "identifier": "Executive Management Analytics",
+      "invariant": "Financial ledger identity verified: net_revenue_vnd (15138000 VND) equals independently computed SUM(PAYMENT)+SUM(RESCHEDULE_CHARGE)-SUM(REFUND)-SUM(RESCHEDULE_REFUND); active_booking_value_vnd (11910000 VND) matches contract; physical capacity (2616 seats) matches upcoming fleet; APT-E2E-SEAT reconciles 180 seats (1 confirmed, 1 held, 3 staff blocks, 166 available).",
+      "status": "PASS",
+      "details": {
+        "netRevenueVnd": 15138000,
+        "activeBookingValueVnd": 11910000,
+        "totalSeatCapacity": 2616
+      }
+    },
+    {
+      "flow": "N",
+      "name": "Mail DEV fallback lifecycle",
+      "method": "MailService Lifecycle Methods",
+      "endpoint": "[MAIL:DEV-FALLBACK]",
+      "httpStatus": "Execution Verified",
+      "identifier": "Lifecycle: Reminder / Cancel / Expired Hold / Disruption",
+      "invariant": "All 4 operational email lifecycles (Hold Reminder, Confirmed Cancellation, Expired Hold Expiry, Flight Delay Notice) executed via actual MailService in DEV mode; formatted with IANA wall-clock timezones; returned true (zero failure, zero transaction rollback).",
+      "status": "PASS",
+      "details": {
+        "reminderResult": true,
+        "cancelResult": true,
+        "expiredResult": true,
+        "disruptionResult": true
+      }
+    }
+  ]
+}

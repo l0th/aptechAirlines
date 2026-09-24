@@ -28,7 +28,7 @@ import {
                 {{ lang.t('admin.commercial.drawerCommercializeTitle') }}
               </h3>
               <span class="text-xs font-mono font-bold text-slate-500">
-                {{ route.dep_iata }} ➔ {{ route.arr_iata }}
+                {{ route.dep_iata }} → {{ route.arr_iata }}
               </span>
             </div>
           </div>
@@ -36,7 +36,7 @@ import {
           <button
             type="button"
             (click)="onClose()"
-            class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+            class="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"
           >
             <app-icon name="x" class="w-5 h-5" />
           </button>
@@ -53,7 +53,7 @@ import {
                   {{ lang.t('admin.commercial.queueStep')
                       .replace('{current}', String(q.currentIndex + 1))
                       .replace('{total}', String(q.legs.length))
-                      .replace('{route}', route.dep_iata + ' ➔ ' + route.arr_iata) }}
+                      .replace('{route}', route.dep_iata + ' → ' + route.arr_iata) }}
                 </strong>
                 <span class="text-[11px] text-amber-800">
                   {{ lang.t('admin.commercial.queueAutoAdvance') }}
@@ -83,11 +83,11 @@ import {
               </div>
               <div>
                 <span class="text-slate-400 block text-[10px] uppercase">{{ lang.t('admin.commercial.localTimes') }}</span>
-                <span>{{ route.dep_time || '-' }} ➔ {{ route.arr_time || '-' }}</span>
+                <span>{{ route.dep_time || '-' }} → {{ route.arr_time || '-' }}</span>
               </div>
               <div>
                 <span class="text-slate-400 block text-[10px] uppercase">{{ lang.t('admin.commercial.utcTimes') }}</span>
-                <span>{{ route.dep_time_utc ? route.dep_time_utc + 'Z' : '-' }} ➔ {{ route.arr_time_utc ? route.arr_time_utc + 'Z' : '-' }}</span>
+                <span>{{ route.dep_time_utc ? route.dep_time_utc + 'Z' : '-' }} → {{ route.arr_time_utc ? route.arr_time_utc + 'Z' : '-' }}</span>
               </div>
               <div>
                 <span class="text-slate-400 block text-[10px] uppercase">{{ lang.t('admin.commercial.durationLabel') }}</span>
@@ -272,7 +272,7 @@ import {
             </span>
             <div class="grid grid-cols-2 gap-2 font-mono text-slate-800">
               <div>{{ lang.t('admin.commercial.lblFlight') }} <strong class="text-navy">{{ formFlightNumber || '-' }}</strong></div>
-              <div>{{ lang.t('admin.commercial.lblRoute') }} <strong class="text-navy">{{ route.dep_iata }} ➔ {{ route.arr_iata }}</strong></div>
+              <div>{{ lang.t('admin.commercial.lblRoute') }} <strong class="text-navy">{{ route.dep_iata }} → {{ route.arr_iata }}</strong></div>
               <div>{{ lang.t('admin.commercial.lblAircraft') }} <strong class="text-navy">{{ formAircraftType || '-' }}</strong></div>
               <div>{{ lang.t('admin.commercial.lblCabins') }} <strong>{{ getSelectedCabinsList() }}</strong></div>
             </div>

@@ -15,10 +15,16 @@ import {
   ConfirmTicketDto,
   CreateBookingDto,
   RescheduleTicketDto,
+  QuoteBookingDto,
+  CreatePayPalBookingOrderDto,
+  CapturePayPalOrderDto,
+  CreatePayPalConfirmHoldOrderDto,
+  CreatePayPalRescheduleOrderDto,
 } from './bookings.dto';
 import { BookingStatus } from './bookings.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { StrictCustomerGuard } from '../auth/strict-customer.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
 
@@ -45,6 +51,113 @@ export class BookingsController {
     return this.bookingsService.createBooking(createBookingDto);
   }
 
+  @Post('quote')
+  @UseGuards(JwtAuthGuard)
+  async quote(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Body() quoteBookingDto: QuoteBookingDto,
+  ) {
+    quoteBookingDto.user_id = req.user.sub;
+    return this.bookingsService.quoteBooking(quoteBookingDto, req.user.sub);
+  }
+
+  @Post('reschedule/quote')
+  @UseGuards(JwtAuthGuard)
+  async quoteReschedule(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Body() rescheduleTicketDto: RescheduleTicketDto,
+  ) {
+    await this.bookingsService.assertOwnership(
+      rescheduleTicketDto.pnr_code || rescheduleTicketDto.confirmation_number || '',
+      req.user.sub,
+      req.user.role,
+    );
+    return this.bookingsService.quoteRescheduleTicket(rescheduleTicketDto, req.user.sub);
+  }
+
+  @Post('paypal/create-order')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async createPayPalOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Body() dto: CreatePayPalBookingOrderDto,
+  ) {
+    dto.user_id = req.user.sub;
+    return this.bookingsService.createPayPalBookingOrder(dto, req.user.sub);
+  }
+
+  @Post('paypal/checkouts/:checkoutId/capture')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async capturePayPalOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('checkoutId') checkoutId: string,
+    @Body() dto: CapturePayPalOrderDto,
+  ) {
+    return this.bookingsService.capturePayPalBooking(
+      checkoutId,
+      dto.order_id,
+      req.user.sub,
+      req.user.role,
+    );
+  }
+
+  @Post('paypal/confirm-hold/create-order')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async createPayPalConfirmHoldOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Body() dto: CreatePayPalConfirmHoldOrderDto,
+  ) {
+    await this.bookingsService.assertOwnership(
+      dto.blocking_number,
+      req.user.sub,
+      req.user.role,
+    );
+    return this.bookingsService.createPayPalConfirmHoldOrder(dto, req.user.sub);
+  }
+
+  @Post('paypal/confirm-hold/:checkoutId/capture')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async capturePayPalConfirmHoldOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('checkoutId') checkoutId: string,
+    @Body() dto: CapturePayPalOrderDto,
+  ) {
+    return this.bookingsService.capturePayPalConfirmHold(
+      checkoutId,
+      dto.order_id,
+      req.user.sub,
+      req.user.role,
+    );
+  }
+
+  @Post('paypal/reschedule/create-order')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async createPayPalRescheduleOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Body() dto: CreatePayPalRescheduleOrderDto,
+  ) {
+    await this.bookingsService.assertOwnership(
+      dto.pnr_code || dto.confirmation_number || '',
+      req.user.sub,
+      req.user.role,
+    );
+    return this.bookingsService.createPayPalRescheduleOrder(dto, req.user.sub);
+  }
+
+  @Post('paypal/reschedule/:checkoutId/capture')
+  @UseGuards(JwtAuthGuard, StrictCustomerGuard)
+  async capturePayPalRescheduleOrder(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('checkoutId') checkoutId: string,
+    @Body() dto: CapturePayPalOrderDto,
+  ) {
+    return this.bookingsService.capturePayPalReschedule(
+      checkoutId,
+      dto.order_id,
+      req.user.sub,
+      req.user.role,
+    );
+  }
+
   @Post('confirm')
   @UseGuards(JwtAuthGuard)
   async confirm(
@@ -66,7 +179,7 @@ export class BookingsController {
     @Body() rescheduleTicketDto: RescheduleTicketDto,
   ) {
     await this.bookingsService.assertOwnership(
-      rescheduleTicketDto.confirmation_number,
+      rescheduleTicketDto.pnr_code || rescheduleTicketDto.confirmation_number || '',
       req.user.sub,
       req.user.role,
     );

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -16,6 +17,7 @@ import {
   BookingType,
   PassengerType,
   PaymentMethod,
+  ExternalPaymentProof,
 } from './bookings.schema';
 import { FlightDocument, FlightStatus, isCustomerBookableFlight } from '../flights/flights.schema';
 import {
@@ -23,6 +25,13 @@ import {
   ConfirmTicketDto,
   CreateBookingDto,
   RescheduleTicketDto,
+  FlightLegSelectionDto,
+  SeatSelectionRequestDto,
+  QuoteBookingDto,
+  CreatePayPalBookingOrderDto,
+  CapturePayPalOrderDto,
+  CreatePayPalConfirmHoldOrderDto,
+  CreatePayPalRescheduleOrderDto,
 } from './bookings.dto';
 import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { AirportsService } from '../airports/airports.service';
@@ -31,9 +40,87 @@ import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/users.schema';
 import { PoliciesService } from '../policies/policies.service';
 import { applyPricing, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
-import { formatLocalTime } from '../common/timezone.util';
-import { MailService, ItineraryLegData } from '../mail/mail.service';
+import { formatLocalTime, parseUtcWallTime } from '../common/timezone.util';
+import { MailService, ItineraryLegData, isValidMaskedCard } from '../mail/mail.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
+import {
+  PaypalService,
+  ConvertedPresentmentAmount,
+  assertPayPalRefundExecutionSnapshot,
+  classifyPayPalRefundStatus,
+} from '../paypal/paypal.service';
+import {
+  PayPalCheckoutSession,
+  PayPalCheckoutSessionDocument,
+  PayPalCheckoutOperationType,
+  PayPalCheckoutStatus,
+} from '../paypal/paypal-checkout.schema';
+import { allocateRefundSources, AllocatedRefundItem } from './refund-allocation.util';
+
+
+export function assertPayPalPaymentProof(
+  proof: ExternalPaymentProof | undefined | null,
+  authoritativeAmountVnd: number,
+  context: string,
+): void {
+  if (!proof) {
+    throw new BadRequestException(
+      `[${context}] Missing PayPal external payment proof for authoritative amount ${authoritativeAmountVnd} VND.`,
+    );
+  }
+
+  if (proof.payment_method !== PaymentMethod.PAYPAL) {
+    throw new BadRequestException(
+      `[${context}] Invalid payment method in payment proof: expected PAYPAL, got ${proof.payment_method}.`,
+    );
+  }
+
+  if (proof.status !== 'SUCCESS') {
+    throw new BadRequestException(
+      `[${context}] PayPal payment proof is not successful (status: ${proof.status}).`,
+    );
+  }
+
+  if (typeof proof.expected_amount_vnd !== 'number' || proof.expected_amount_vnd !== authoritativeAmountVnd) {
+    throw new BadRequestException(
+      `[${context}] Payment amount mismatch: authoritative amount ${authoritativeAmountVnd} VND does not match proof expected amount ${proof.expected_amount_vnd} VND.`,
+    );
+  }
+
+  if (!proof.provider_order_id || !proof.provider_order_id.trim()) {
+    throw new BadRequestException(`[${context}] PayPal provider_order_id is required.`);
+  }
+
+  if (!proof.provider_capture_id || !proof.provider_capture_id.trim()) {
+    throw new BadRequestException(`[${context}] PayPal provider_capture_id is required.`);
+  }
+
+  if (!proof.provider_currency || proof.provider_currency.trim().toUpperCase() !== 'USD') {
+    throw new BadRequestException(
+      `[${context}] Invalid PayPal presentment currency: expected USD, got ${proof.provider_currency}.`,
+    );
+  }
+
+  if (
+    typeof proof.exchange_rate_vnd_per_unit !== 'number' ||
+    isNaN(proof.exchange_rate_vnd_per_unit) ||
+    proof.exchange_rate_vnd_per_unit <= 0
+  ) {
+    throw new BadRequestException(
+      `[${context}] Invalid exchange rate in payment proof: ${proof.exchange_rate_vnd_per_unit}.`,
+    );
+  }
+
+  const expectedProviderAmount = (
+    Math.round((authoritativeAmountVnd / proof.exchange_rate_vnd_per_unit) * 100) / 100
+  ).toFixed(2);
+
+  if (proof.provider_amount !== expectedProviderAmount) {
+    throw new BadRequestException(
+      `[${context}] PayPal provider_amount (${proof.provider_amount}) does not match converted authoritative amount (${expectedProviderAmount} USD for ${authoritativeAmountVnd} VND at rate ${proof.exchange_rate_vnd_per_unit}).`,
+    );
+  }
+}
 import {
   BookingSeatSagaOperation,
   BookingSeatSagaOperationDocument,
@@ -70,6 +157,10 @@ export class BookingsService {
     @InjectModel(BookingSeatSagaOperation.name)
     private readonly sagaModel?: Model<BookingSeatSagaOperationDocument>,
     @Optional() private readonly mailService?: MailService,
+    @Optional() private readonly paypalService?: PaypalService,
+    @Optional()
+    @InjectModel(PayPalCheckoutSession.name)
+    private readonly paypalCheckoutModel?: Model<PayPalCheckoutSessionDocument>,
   ) {}
 
   private generateCode(prefix: string): string {
@@ -111,7 +202,7 @@ export class BookingsService {
   /**
    * Requirement 3.4: Make Reservations / Blocking / Direct Buying
    */
-  async createBooking(dto: CreateBookingDto): Promise<BookingDocument> {
+  async createBooking(dto: CreateBookingDto, externalPaymentProof?: ExternalPaymentProof): Promise<BookingDocument> {
     const user = await this.usersService.findById(dto.user_id);
 
     const passengerCount = dto.passengers.length;
@@ -218,6 +309,57 @@ export class BookingsService {
       }
     }
 
+    // Authoritative total payable preflight before any mutation or seat reservations (Fix 7)
+    let preflightSeatFees = 0;
+    if (this.seatAllocationService) {
+      for (const { definition: leg, flight, inventory } of selectedLegs) {
+        const normalizedLeg = normalizeLegType(leg.leg_type);
+        for (let idx = 0; idx < dto.passengers.length; idx++) {
+          const p = dto.passengers[idx];
+          const explicitRequest = dto.seat_requests?.find(
+            (r) => r.passenger_index === idx && r.flight_id === flight._id.toString(),
+          );
+          let selType: 'AUTO' | 'CHOOSE';
+          let explicitSeat: string | undefined;
+
+          if (explicitRequest) {
+            selType = explicitRequest.selection_type;
+            explicitSeat = selType === 'CHOOSE' && explicitRequest.seat_code ? explicitRequest.seat_code.trim() : undefined;
+          } else {
+            const legacySeat =
+              (p as any).seat_codes?.[normalizedLeg] ||
+              (p as any).seat_codes?.[leg.leg_type || 'OUTBOUND'] ||
+              (normalizedLeg === 'OUTBOUND' ? p.seat_code || '' : '');
+            selType = legacySeat && legacySeat.trim() ? ('CHOOSE' as const) : ('AUTO' as const);
+            explicitSeat = selType === 'CHOOSE' ? legacySeat.trim() : undefined;
+          }
+
+          if (selType === 'CHOOSE' && explicitSeat) {
+            const aircraftType = flight.aircraft?.model_code;
+            if (!aircraftType) {
+              throw new BadRequestException(
+                `Flight ${flight.flight_number} is missing aircraft model configuration.`,
+              );
+            }
+            await this.seatAllocationService.validateSeatAvailability(
+              flight._id,
+              explicitSeat,
+              aircraftType,
+              inventory.cabin_class,
+            );
+            const fee = await this.seatAllocationService.calculateSeatFee(
+              flight._id,
+              explicitSeat,
+              aircraftType,
+              'CHOOSE',
+            );
+            preflightSeatFees += fee;
+          }
+        }
+      }
+    }
+    const totalPayable = totalFare + preflightSeatFees;
+
     // Requirement 3.4.2: If <= 2 weeks, CANNOT block, MUST buy!
     if (dto.is_block) {
       if (daysUntilDeparture <= 14) {
@@ -229,33 +371,34 @@ export class BookingsService {
 
     let maskedProfileCard: string | undefined = undefined;
 
-    // Correction 4: Purchase payment preflight before any saga creation or seat reservation mutation
+    // Purchase payment preflight before any saga creation or seat reservation mutation
     if (!dto.is_block) {
       if (!dto.payment_method) {
         throw new BadRequestException('Payment method is required to purchase tickets.');
       }
       if (dto.payment_method === PaymentMethod.PAYPAL) {
-        throw new BadRequestException('PayPal payment is not yet active.');
-      }
-      if (dto.payment_method !== PaymentMethod.PROFILE_CARD) {
+        if (totalPayable > 0) {
+          assertPayPalPaymentProof(externalPaymentProof, totalPayable, 'createBooking:preflight');
+        }
+      } else if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
+        const rawCard = (user.preferred_credit_card || '').trim();
+        const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
+        if (
+          !rawCard ||
+          placeholders.has(rawCard.toUpperCase()) ||
+          rawCard.startsWith('*') ||
+          !CREDIT_CARD_REGEX.test(rawCard)
+        ) {
+          throw new BadRequestException(
+            'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
+          );
+        }
+
+        const digits = rawCard.replace(/\D/g, '');
+        maskedProfileCard = `**** **** **** ${digits.slice(-4)}`;
+      } else {
         throw new BadRequestException('Unsupported payment method.');
       }
-
-      const rawCard = (user.preferred_credit_card || '').trim();
-      const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
-      if (
-        !rawCard ||
-        placeholders.has(rawCard.toUpperCase()) ||
-        rawCard.startsWith('*') ||
-        !CREDIT_CARD_REGEX.test(rawCard)
-      ) {
-        throw new BadRequestException(
-          'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
-        );
-      }
-
-      const digits = rawCard.replace(/\D/g, '');
-      maskedProfileCard = `**** **** **** ${digits.slice(-4)}`;
     }
 
     // Pre-generate Booking ObjectId and SAGA Operation
@@ -526,9 +669,10 @@ export class BookingsService {
     const originalSkyMiles = user.sky_miles || 0;
     let skyMilesCredited = false;
     const totalAmount = totalFare + totalSeatFees;
+    let pnrCode = '';
 
     try {
-      const pnrCode = this.generateCode('PNR');
+      pnrCode = this.generateCode('PNR');
       let status = BookingStatus.CONFIRMED;
       let blockingNumber: string | undefined = undefined;
       let confirmationNumber: string | undefined = undefined;
@@ -541,14 +685,49 @@ export class BookingsService {
         deadline = new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000);
       } else {
         confirmationNumber = this.generateCode('CNF');
-        paymentTransactions.push({
-          transaction_type: 'PAYMENT',
-          payment_method: PaymentMethod.PROFILE_CARD,
-          amount: totalAmount,
-          card_masked: maskedProfileCard!,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        if (dto.payment_method === PaymentMethod.PAYPAL) {
+          if (totalAmount === 0) {
+            paymentTransactions.push({
+              transaction_type: 'PAYMENT',
+              payment_method: PaymentMethod.PAYPAL,
+              payment_provider: 'PAYPAL',
+              payment_reference: this.generateCode('PAY'),
+              amount: 0,
+              currency: 'VND',
+              status: 'SUCCESS',
+              created_at: new Date(),
+            });
+          } else {
+            assertPayPalPaymentProof(externalPaymentProof, totalAmount, 'createBooking:post-allocation');
+            paymentTransactions.push({
+              transaction_type: 'PAYMENT',
+              payment_method: PaymentMethod.PAYPAL,
+              payment_provider: 'PAYPAL',
+              payment_reference: externalPaymentProof!.payment_reference || this.generateCode('PAY'),
+              amount: totalAmount,
+              currency: 'VND',
+              provider_order_id: externalPaymentProof!.provider_order_id,
+              provider_capture_id: externalPaymentProof!.provider_capture_id,
+              provider_amount: externalPaymentProof!.provider_amount,
+              provider_currency: externalPaymentProof!.provider_currency,
+              exchange_rate_vnd_per_unit: externalPaymentProof!.exchange_rate_vnd_per_unit,
+              status: 'SUCCESS',
+              created_at: new Date(),
+            });
+          }
+        } else {
+          paymentTransactions.push({
+            transaction_type: 'PAYMENT',
+            payment_method: PaymentMethod.PROFILE_CARD,
+            payment_provider: 'PROFILE_CARD',
+            payment_reference: this.generateCode('PAY'),
+            amount: totalAmount,
+            card_masked: maskedProfileCard!,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
         await this.usersService.addSkyMiles(user._id.toString(), totalMiles);
         skyMilesCredited = true;
       }
@@ -684,6 +863,8 @@ export class BookingsService {
         } catch (_) {}
       }
 
+
+
       // IF allCompensated -> ABORTED, else leave in PRECOMMIT for scheduler retry
       if (sagaOp) {
         if (allCompensated) {
@@ -707,7 +888,7 @@ export class BookingsService {
   /**
    * Requirement 3.5: Confirm Blocked Ticket (before 2-week cutoff)
    */
-  async confirmTicket(dto: ConfirmTicketDto): Promise<BookingDocument> {
+  async confirmTicket(dto: ConfirmTicketDto, externalPaymentProof?: ExternalPaymentProof): Promise<BookingDocument> {
     const booking = await this.bookingModel.findOne({ blocking_number: dto.blocking_number }).exec();
     if (!booking) {
       throw new NotFoundException(`No booking found with blocking number ${dto.blocking_number}`);
@@ -737,37 +918,67 @@ export class BookingsService {
       throw new BadRequestException('Payment method is required to confirm reservation.');
     }
     if (dto.payment_method === PaymentMethod.PAYPAL) {
-      throw new BadRequestException('PayPal payment is not yet active.');
-    }
-    if (dto.payment_method !== PaymentMethod.PROFILE_CARD) {
+      if (booking.total_amount === 0) {
+        booking.payment_transactions.push({
+          transaction_type: 'PAYMENT',
+          payment_method: PaymentMethod.PAYPAL,
+          payment_provider: 'PAYPAL',
+          payment_reference: this.generateCode('PAY'),
+          amount: 0,
+          currency: 'VND',
+          status: 'SUCCESS',
+          created_at: new Date(),
+        });
+      } else {
+        assertPayPalPaymentProof(externalPaymentProof, booking.total_amount, 'confirmTicket');
+        booking.payment_transactions.push({
+          transaction_type: 'PAYMENT',
+          payment_method: PaymentMethod.PAYPAL,
+          payment_provider: 'PAYPAL',
+          payment_reference: externalPaymentProof!.payment_reference || this.generateCode('PAY'),
+          amount: booking.total_amount,
+          currency: 'VND',
+          provider_order_id: externalPaymentProof!.provider_order_id,
+          provider_capture_id: externalPaymentProof!.provider_capture_id,
+          provider_amount: externalPaymentProof!.provider_amount,
+          provider_currency: externalPaymentProof!.provider_currency,
+          exchange_rate_vnd_per_unit: externalPaymentProof!.exchange_rate_vnd_per_unit,
+          status: 'SUCCESS',
+          created_at: new Date(),
+        });
+      }
+    } else if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
+      const user = await this.usersService.findById(booking.user_id.toString());
+      const rawCard = (user?.preferred_credit_card || '').trim();
+      const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
+      if (
+        !rawCard ||
+        placeholders.has(rawCard.toUpperCase()) ||
+        rawCard.startsWith('*') ||
+        !CREDIT_CARD_REGEX.test(rawCard)
+      ) {
+        throw new BadRequestException(
+          'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
+        );
+      }
+
+      const digits = rawCard.replace(/\D/g, '');
+      const maskedCard = `**** **** **** ${digits.slice(-4)}`;
+
+      booking.payment_transactions.push({
+        transaction_type: 'PAYMENT',
+        payment_method: PaymentMethod.PROFILE_CARD,
+        payment_provider: 'PROFILE_CARD',
+        payment_reference: this.generateCode('PAY'),
+        amount: booking.total_amount,
+        card_masked: maskedCard,
+        currency: 'VND',
+        status: 'SUCCESS',
+        created_at: new Date(),
+      });
+    } else {
       throw new BadRequestException('Unsupported payment method.');
     }
-
-    const user = await this.usersService.findById(booking.user_id.toString());
-    const rawCard = (user?.preferred_credit_card || '').trim();
-    const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
-    if (
-      !rawCard ||
-      placeholders.has(rawCard.toUpperCase()) ||
-      rawCard.startsWith('*') ||
-      !CREDIT_CARD_REGEX.test(rawCard)
-    ) {
-      throw new BadRequestException(
-        'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
-      );
-    }
-
-    const digits = rawCard.replace(/\D/g, '');
-    const maskedCard = `**** **** **** ${digits.slice(-4)}`;
-
-    booking.payment_transactions.push({
-      transaction_type: 'PAYMENT',
-      payment_method: PaymentMethod.PROFILE_CARD,
-      amount: booking.total_amount,
-      card_masked: maskedCard,
-      status: 'SUCCESS',
-      created_at: new Date(),
-    });
 
     // Calculate miles
     let totalMiles = 0;
@@ -776,7 +987,8 @@ export class BookingsService {
       totalMiles += flight.distance_miles;
     }
 
-    const originalSkyMiles = user.sky_miles || 0;
+    const user = await this.usersService.findById(booking.user_id.toString());
+    const originalSkyMiles = user?.sky_miles || 0;
     let skyMilesCredited = false;
     let businessCommitted = false;
     try {
@@ -799,6 +1011,7 @@ export class BookingsService {
         );
         return booking;
       }
+
       if (skyMilesCredited) {
         try {
           await this.usersService.setSkyMiles(booking.user_id.toString(), originalSkyMiles);
@@ -838,7 +1051,7 @@ export class BookingsService {
         throw new BadRequestException('Payment method is required for reschedule fare difference.');
       }
       if (paymentMethod === PaymentMethod.PAYPAL) {
-        throw new BadRequestException('PayPal Sandbox is not enabled yet. Please use profile card.');
+        throw new BadRequestException('PayPal reschedule charge requires completing PayPal checkout.');
       }
       if (paymentMethod !== PaymentMethod.PROFILE_CARD) {
         throw new BadRequestException('Invalid payment method.');
@@ -889,11 +1102,25 @@ export class BookingsService {
         }
       }
 
+      // 3. Fall back to PayPal if booking has successful PayPal payments
+      const hasPaypal = booking.payment_transactions?.some(
+        (t) => t.status === 'SUCCESS' && t.payment_method === PaymentMethod.PAYPAL,
+      );
+      if (hasPaypal) {
+        return {
+          maskedCard: '',
+          paymentMethod: PaymentMethod.PAYPAL,
+        };
+      }
+
       throw new BadRequestException('Cannot process refund: no valid payment card found for this booking.');
     }
   }
 
-  async rescheduleTicket(dto: RescheduleTicketDto): Promise<{
+  async rescheduleTicket(
+    dto: RescheduleTicketDto,
+    externalPaymentProof?: ExternalPaymentProof,
+  ): Promise<{
     booking: BookingDocument;
     price_difference: number;
     message: string;
@@ -914,7 +1141,7 @@ export class BookingsService {
           'Connecting itinerary reschedule is not yet supported as a partial leg change because connection validity must be recalculated.',
         );
       }
-      return this.rescheduleConnectingTicket(booking, dto);
+      return this.rescheduleConnectingTicket(booking, dto, externalPaymentProof);
     }
 
     const passengerCount = booking.passengers.length;
@@ -986,7 +1213,7 @@ export class BookingsService {
     if (booking.booking_type === BookingType.ROUND_TRIP && (outboundIsConnecting || returnIsConnecting)) {
       return this.rescheduleMixedRoundTrip(
         booking, dto, outboundCoupons, inboundCoupons,
-        outboundIsConnecting, returnIsConnecting,
+        outboundIsConnecting, returnIsConnecting, externalPaymentProof,
       );
     }
 
@@ -1133,6 +1360,7 @@ export class BookingsService {
 
     // SAGA setup
     const sagaOperationId = this.generateCode('SAGA-RESCHEDULE');
+    const refundAllocations: AllocatedRefundItem[] = [];
     let sagaOp: BookingSeatSagaOperationDocument | null = null;
     const oldSeatAllocations: Array<{ flight_id: any; seat_code: string }> = [];
     for (const c of outboundCoupons) {
@@ -1481,25 +1709,89 @@ export class BookingsService {
 
       // Financial adjustment
       if (priceDiff > 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_CHARGE',
-          payment_method: resCard.paymentMethod,
-          amount: priceDiff,
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        if (dto.payment_method === PaymentMethod.PAYPAL) {
+          assertPayPalPaymentProof(externalPaymentProof, priceDiff, 'rescheduleTicket');
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: PaymentMethod.PAYPAL,
+            payment_provider: 'PAYPAL',
+            payment_reference: externalPaymentProof!.payment_reference || this.generateCode('PAY'),
+            amount: priceDiff,
+            currency: 'VND',
+            provider_order_id: externalPaymentProof!.provider_order_id,
+            provider_capture_id: externalPaymentProof!.provider_capture_id,
+            provider_amount: externalPaymentProof!.provider_amount,
+            provider_currency: externalPaymentProof!.provider_currency,
+            exchange_rate_vnd_per_unit: externalPaymentProof!.exchange_rate_vnd_per_unit,
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: resCard.paymentMethod,
+            payment_provider: resCard.paymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+            payment_reference: this.generateCode('PAY'),
+            amount: priceDiff,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       } else if (priceDiff < 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_REFUND',
-          payment_method: resCard.paymentMethod,
-          amount: Math.abs(priceDiff),
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        const refundAmt = Math.abs(priceDiff);
+        const allocations = allocateRefundSources(
+          booking.payment_transactions || [],
+          refundAmt,
+          'RESCHEDULE_REFUND',
+          (p) => this.generateCode(p),
+        );
+        if (allocations.length > 0) {
+          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
+          for (const alloc of allocations) {
+            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
+              const rawMasked = (alloc.card_masked || '').trim();
+              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
+                const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
+                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
+              }
+            }
+            refundAllocations.push(alloc);
+            booking.payment_transactions.push({
+              transaction_type: alloc.transaction_type,
+              payment_reference: alloc.payment_reference,
+              source_payment_reference: alloc.source_payment_reference,
+              payment_method: alloc.payment_method,
+              payment_provider: alloc.payment_method === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+              amount: alloc.amount,
+              currency: alloc.currency,
+              card_masked: alloc.card_masked,
+              provider_capture_id: alloc.provider_capture_id,
+              provider_order_id: alloc.provider_order_id,
+              provider_amount: alloc.provider_amount,
+              provider_currency: alloc.provider_currency,
+              exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
+              status: alloc.status,
+              created_at: new Date(),
+            });
+          }
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_REFUND',
+            payment_method: resCard.paymentMethod,
+            payment_provider: resCard.paymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+            payment_reference: this.generateCode('REF'),
+            amount: refundAmt,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       }
 
       // 4. Update SkyMiles delta
@@ -1641,6 +1933,10 @@ export class BookingsService {
         }
       }
 
+      if (this.paypalService && refundAllocations.length > 0) {
+        await this.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+      }
+
       const legsMessage = shouldRescheduleReturn ? 'Outbound and return legs' : 'Outbound leg';
       return {
         booking,
@@ -1727,6 +2023,8 @@ export class BookingsService {
         await sagaOp.save().catch(() => {});
       }
 
+
+
       throw err;
     }
   }
@@ -1744,6 +2042,7 @@ export class BookingsService {
     inboundCoupons: any[],
     outboundIsConnecting: boolean,
     returnIsConnecting: boolean,
+    externalPaymentProof?: ExternalPaymentProof,
   ): Promise<{
     booking: BookingDocument;
     price_difference: number;
@@ -1751,6 +2050,7 @@ export class BookingsService {
   }> {
     const passengerCount = booking.passengers.length;
     const oldTotalFare = booking.total_amount;
+    const refundAllocations: AllocatedRefundItem[] = [];
 
     // Determine what to reschedule
     const hasOutboundLegs = !!(dto.new_legs && dto.new_legs.length >= 2);
@@ -2280,25 +2580,86 @@ export class BookingsService {
 
       // Financial adjustment
       if (priceDiff > 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_CHARGE',
-          payment_method: resCard.paymentMethod,
-          amount: priceDiff,
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        if (dto.payment_method === PaymentMethod.PAYPAL) {
+          assertPayPalPaymentProof(externalPaymentProof, priceDiff, 'rescheduleMixedRoundTrip');
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: PaymentMethod.PAYPAL,
+            payment_provider: 'PAYPAL',
+            payment_reference: externalPaymentProof!.payment_reference || this.generateCode('PAY'),
+            amount: priceDiff,
+            currency: 'VND',
+            provider_order_id: externalPaymentProof!.provider_order_id,
+            provider_capture_id: externalPaymentProof!.provider_capture_id,
+            provider_amount: externalPaymentProof!.provider_amount,
+            provider_currency: externalPaymentProof!.provider_currency,
+            exchange_rate_vnd_per_unit: externalPaymentProof!.exchange_rate_vnd_per_unit,
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: resCard.paymentMethod,
+            payment_reference: this.generateCode('PAY'),
+            amount: priceDiff,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       } else if (priceDiff < 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_REFUND',
-          payment_method: resCard.paymentMethod,
-          amount: Math.abs(priceDiff),
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        const refundAmt = Math.abs(priceDiff);
+        const allocations = allocateRefundSources(
+          booking.payment_transactions || [],
+          refundAmt,
+          'RESCHEDULE_REFUND',
+          (p) => this.generateCode(p),
+        );
+        if (allocations.length > 0) {
+          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
+          for (const alloc of allocations) {
+            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
+              const rawMasked = (alloc.card_masked || '').trim();
+              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
+                const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
+                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
+              }
+            }
+            refundAllocations.push(alloc);
+            booking.payment_transactions.push({
+              transaction_type: alloc.transaction_type,
+              payment_reference: alloc.payment_reference,
+              source_payment_reference: alloc.source_payment_reference,
+              payment_method: alloc.payment_method,
+              amount: alloc.amount,
+              currency: alloc.currency,
+              card_masked: alloc.card_masked,
+              provider_capture_id: alloc.provider_capture_id,
+              provider_order_id: alloc.provider_order_id,
+              provider_amount: alloc.provider_amount,
+              provider_currency: alloc.provider_currency,
+              exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
+              status: alloc.status,
+              created_at: new Date(),
+            });
+          }
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_REFUND',
+            payment_method: resCard.paymentMethod,
+            payment_reference: this.generateCode('REF'),
+            amount: refundAmt,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       }
 
       // SkyMiles adjustment
@@ -2436,6 +2797,10 @@ export class BookingsService {
         }
       }
 
+      if (this.paypalService && refundAllocations.length > 0) {
+        await this.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+      }
+
       const legsMessage = rescheduleOutbound && rescheduleReturn
         ? 'Outbound and return legs' : rescheduleOutbound ? 'Outbound leg' : 'Return leg';
       return {
@@ -2509,6 +2874,8 @@ export class BookingsService {
         await sagaOp.save().catch(() => {});
       }
 
+
+
       throw err;
     }
   }
@@ -2520,6 +2887,7 @@ export class BookingsService {
   private async rescheduleConnectingTicket(
     booking: BookingDocument,
     dto: RescheduleTicketDto,
+    externalPaymentProof?: ExternalPaymentProof,
   ): Promise<{
     booking: BookingDocument;
     price_difference: number;
@@ -2529,6 +2897,7 @@ export class BookingsService {
     const oldTotalFare = booking.total_amount;
     const newLegs = dto.new_legs!;
     const oldCoupons = booking.ticket_coupons.map((coupon: any) => ({ ...coupon }));
+    const refundAllocations: AllocatedRefundItem[] = [];
 
     // 1. Load and validate all new flights
     const loadedFlights: FlightDocument[] = [];
@@ -2853,25 +3222,86 @@ export class BookingsService {
       const priceDiff = newTotalAmount - booking.total_amount;
 
       if (priceDiff > 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_CHARGE',
-          payment_method: resCard.paymentMethod,
-          amount: priceDiff,
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        if (dto.payment_method === PaymentMethod.PAYPAL) {
+          assertPayPalPaymentProof(externalPaymentProof, priceDiff, 'rescheduleConnectingTicket');
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: PaymentMethod.PAYPAL,
+            payment_provider: 'PAYPAL',
+            payment_reference: externalPaymentProof!.payment_reference || this.generateCode('PAY'),
+            amount: priceDiff,
+            currency: 'VND',
+            provider_order_id: externalPaymentProof!.provider_order_id,
+            provider_capture_id: externalPaymentProof!.provider_capture_id,
+            provider_amount: externalPaymentProof!.provider_amount,
+            provider_currency: externalPaymentProof!.provider_currency,
+            exchange_rate_vnd_per_unit: externalPaymentProof!.exchange_rate_vnd_per_unit,
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, true);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_CHARGE',
+            payment_method: resCard.paymentMethod,
+            payment_reference: this.generateCode('PAY'),
+            amount: priceDiff,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       } else if (priceDiff < 0) {
-        const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
-        booking.payment_transactions.push({
-          transaction_type: 'RESCHEDULE_REFUND',
-          payment_method: resCard.paymentMethod,
-          amount: Math.abs(priceDiff),
-          card_masked: resCard.maskedCard,
-          status: 'SUCCESS',
-          created_at: new Date(),
-        });
+        const refundAmt = Math.abs(priceDiff);
+        const allocations = allocateRefundSources(
+          booking.payment_transactions || [],
+          refundAmt,
+          'RESCHEDULE_REFUND',
+          (p) => this.generateCode(p),
+        );
+        if (allocations.length > 0) {
+          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
+          for (const alloc of allocations) {
+            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
+              const rawMasked = (alloc.card_masked || '').trim();
+              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
+                const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
+                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
+              }
+            }
+            refundAllocations.push(alloc);
+            booking.payment_transactions.push({
+              transaction_type: alloc.transaction_type,
+              payment_reference: alloc.payment_reference,
+              source_payment_reference: alloc.source_payment_reference,
+              payment_method: alloc.payment_method,
+              amount: alloc.amount,
+              currency: alloc.currency,
+              card_masked: alloc.card_masked,
+              provider_capture_id: alloc.provider_capture_id,
+              provider_order_id: alloc.provider_order_id,
+              provider_amount: alloc.provider_amount,
+              provider_currency: alloc.provider_currency,
+              exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
+              status: alloc.status,
+              created_at: new Date(),
+            });
+          }
+        } else {
+          const resCard = await this.resolveRescheduleCard(booking, dto.payment_method, false);
+          booking.payment_transactions.push({
+            transaction_type: 'RESCHEDULE_REFUND',
+            payment_method: resCard.paymentMethod,
+            payment_reference: this.generateCode('REF'),
+            amount: refundAmt,
+            card_masked: resCard.maskedCard,
+            currency: 'VND',
+            status: 'SUCCESS',
+            created_at: new Date(),
+          });
+        }
       }
 
       // SkyMiles adjustment
@@ -3001,6 +3431,10 @@ export class BookingsService {
         }
       }
 
+      if (this.paypalService && refundAllocations.length > 0) {
+        await this.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+      }
+
       const diffMsg =
         priceDiff > 0
           ? ` Thu thêm: ${priceDiff.toLocaleString()} VND.`
@@ -3081,6 +3515,8 @@ export class BookingsService {
         await sagaOp.save().catch(() => {});
       }
 
+
+
       throw err;
     }
   }
@@ -3127,7 +3563,8 @@ export class BookingsService {
 
   private distinctCouponLegs(coupons: any[]): Array<{ flightId: string; inventoryId: string }> {
     const legMap = new Map<string, { flightId: string; inventoryId: string }>();
-    for (const coupon of coupons) {
+    for (const coupon of coupons || []) {
+      if (!coupon || !coupon.flight_id || !coupon.inventory_id) continue;
       const flightId = coupon.flight_id.toString();
       const inventoryId = coupon.inventory_id.toString();
       legMap.set(`${flightId}_${inventoryId}`, { flightId, inventoryId });
@@ -3197,9 +3634,12 @@ export class BookingsService {
     const originalStatus = booking.status;
     const originalCancelNum = booking.cancellation_number;
 
+    const passengerCount = booking.passengers?.length ?? 0;
+    const coupons = booking.ticket_coupons ?? [];
+
     await this.releaseSeatsForCouponsStrict(
-      booking.passengers.length,
-      booking.ticket_coupons,
+      passengerCount,
+      coupons,
     );
 
     booking.status = BookingStatus.CANCELLED;
@@ -3213,8 +3653,8 @@ export class BookingsService {
     } catch (saveError) {
       try {
         await this.restoreSeatsForCouponsStrict(
-          booking.passengers.length,
-          booking.ticket_coupons,
+          passengerCount,
+          coupons,
         );
       } catch (_) {}
       booking.status = originalStatus;
@@ -3514,6 +3954,15 @@ export class BookingsService {
     cancellation_number: string;
     currency: string;
     refund_card_masked?: string;
+    refund_details?: Array<{
+      payment_reference: string;
+      payment_method?: PaymentMethod;
+      amount: number;
+      card_masked?: string;
+      provider_amount?: string;
+      provider_currency?: string;
+      status: string;
+    }>;
     message: string;
   }> {
     const booking = await this.bookingModel
@@ -3539,6 +3988,7 @@ export class BookingsService {
     let originalUserSkyMiles = 0;
     let refundCardMasked: string | undefined = undefined;
     let refundPaymentMethod: PaymentMethod | undefined = undefined;
+    let refundAllocations: AllocatedRefundItem[] = [];
 
     if (booking.status === BookingStatus.CONFIRMED) {
       const earliestDeparture = await this.getEarliestDeparture(booking);
@@ -3547,7 +3997,7 @@ export class BookingsService {
       refundPercentage = await this.policiesService.calculateRefundPercentage(daysBefore);
       refundAmount = Math.round((booking.total_amount * refundPercentage) / 100);
 
-      const user = await this.usersService.findById(booking.user_id.toString());
+      const user = booking.user_id ? await this.usersService.findById(booking.user_id.toString()) : null;
       originalUserSkyMiles = user?.sky_miles || 0;
 
       if (refundAmount > 0) {
@@ -3628,12 +4078,48 @@ export class BookingsService {
           }
         }
 
-        if (!usableCard) {
+        const hasPaypal = booking.payment_transactions?.some(
+          (t) => t.status === 'SUCCESS' && t.payment_method === PaymentMethod.PAYPAL,
+        );
+        if (!usableCard && !hasPaypal) {
           throw new BadRequestException('Cannot process refund: no valid payment card found for this booking.');
         }
 
         refundCardMasked = usableCard;
-        refundPaymentMethod = usablePaymentMethod;
+        refundPaymentMethod = usablePaymentMethod || (hasPaypal ? PaymentMethod.PAYPAL : undefined);
+
+        refundAllocations = allocateRefundSources(
+          booking.payment_transactions || [],
+          refundAmount,
+          'REFUND',
+          (p) => this.generateCode(p),
+        );
+
+        if (refundAllocations.length > 0) {
+          for (const alloc of refundAllocations) {
+            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
+              const norm = normalizeCard(alloc.card_masked);
+              if (norm) {
+                alloc.card_masked = norm;
+              } else if (usableCard) {
+                alloc.card_masked = usableCard;
+                if (!alloc.payment_method && usablePaymentMethod) {
+                  alloc.payment_method = usablePaymentMethod;
+                }
+              }
+            }
+          }
+          const cardItem = refundAllocations.find((a) => a.card_masked);
+          if (cardItem?.card_masked) {
+            refundCardMasked = cardItem.card_masked;
+            refundPaymentMethod = cardItem.payment_method || refundPaymentMethod;
+          } else {
+            const ppItem = refundAllocations.find((a) => a.payment_method === PaymentMethod.PAYPAL);
+            if (ppItem) {
+              refundPaymentMethod = PaymentMethod.PAYPAL;
+            }
+          }
+        }
       }
     } else if (booking.status === BookingStatus.BLOCKED) {
       refundPercentage = 0;
@@ -3668,21 +4154,56 @@ export class BookingsService {
 
       if (booking.status === BookingStatus.CONFIRMED) {
         if (refundAmount > 0) {
-          booking.payment_transactions.push({
-            transaction_type: 'REFUND',
-            ...(refundPaymentMethod ? { payment_method: refundPaymentMethod } : {}),
-            amount: refundAmount,
-            card_masked: refundCardMasked!,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
+          if (refundAllocations.length > 0) {
+            for (const alloc of refundAllocations) {
+              booking.payment_transactions.push({
+                transaction_type: alloc.transaction_type,
+                payment_reference: alloc.payment_reference,
+                source_payment_reference: alloc.source_payment_reference,
+                payment_method: alloc.payment_method,
+                payment_provider: alloc.payment_method === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+                amount: alloc.amount,
+                currency: alloc.currency,
+                card_masked: alloc.card_masked,
+                provider_capture_id: alloc.provider_capture_id,
+                provider_order_id: alloc.provider_order_id,
+                provider_amount: alloc.provider_amount,
+                provider_currency: alloc.provider_currency,
+                exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
+                status: alloc.status,
+                created_at: new Date(),
+              });
+            }
+          } else {
+            booking.payment_transactions.push({
+              transaction_type: 'REFUND',
+              payment_reference: this.generateCode('REF'),
+              ...(refundPaymentMethod ? { payment_method: refundPaymentMethod } : {}),
+              payment_provider: refundPaymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+              amount: refundAmount,
+              card_masked: refundCardMasked!,
+              currency: 'VND',
+              status: 'SUCCESS',
+              created_at: new Date(),
+            });
+          }
         }
 
         if (booking.total_miles_accrued > 0) {
           await this.usersService.deductSkyMiles(booking.user_id.toString(), booking.total_miles_accrued);
           skyMilesAdjusted = true;
           booking.total_miles_accrued = 0;
+        }
+      }
+
+      if (booking.status === BookingStatus.CONFIRMED && refundAmount > 0) {
+        if (refundAllocations.length > 0) {
+          const totalAllocated = refundAllocations.reduce((sum, a) => sum + a.amount, 0);
+          if (totalAllocated !== refundAmount) {
+            throw new BadRequestException(
+              `Refund allocation sum mismatch: required ${refundAmount} VND, allocated ${totalAllocated} VND`,
+            );
+          }
         }
       }
 
@@ -3695,6 +4216,10 @@ export class BookingsService {
       await booking.save();
       if (this.seatAllocationService) {
         await this.seatAllocationService.releaseAllocations(booking._id).catch(() => {});
+      }
+
+      if (this.paypalService && refundAllocations.length > 0) {
+        await this.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
       }
 
       if (this.mailService) {
@@ -3722,8 +4247,21 @@ export class BookingsService {
               refundAmount: wasConfirmed ? refundAmount : 0,
               refundPercentage: wasConfirmed ? refundPercentage : 0,
               currency: 'VND',
-              maskedCard: wasConfirmed ? refundCardMasked : undefined,
+              maskedCard: wasConfirmed && isValidMaskedCard(refundCardMasked) ? refundCardMasked : undefined,
               policyDeduction: wasConfirmed ? (100 - refundPercentage) : undefined,
+              refundDetails: refundAllocations.length > 0 ? refundAllocations.map((a) => ({
+                paymentMethod: a.payment_method,
+                payment_method: a.payment_method,
+                amountVnd: a.amount,
+                amount: a.amount,
+                cardMasked: a.card_masked,
+                card_masked: a.card_masked,
+                providerAmount: a.provider_amount,
+                provider_amount: a.provider_amount,
+                providerCurrency: a.provider_currency,
+                provider_currency: a.provider_currency,
+                status: a.status,
+              })) : undefined,
             });
             if (!sent) {
               this.logger.warn(
@@ -3747,6 +4285,17 @@ export class BookingsService {
         cancellation_number: cancellationNumber,
         currency: 'VND',
         ...(refundCardMasked ? { refund_card_masked: refundCardMasked } : {}),
+        refund_details: refundAllocations.length > 0 ? refundAllocations.map((a) => ({
+          payment_reference: a.payment_reference,
+          payment_method: a.payment_method,
+          amount: a.amount,
+          card_masked: a.card_masked,
+          provider_amount: a.provider_amount,
+          provider_currency: a.provider_currency,
+          provider_refund_id: (a as any).provider_refund_id,
+          provider_status: (a as any).provider_status,
+          status: a.status,
+        })) : undefined,
         message,
       };
     } catch (error: any) {
@@ -3944,6 +4493,1588 @@ export class BookingsService {
     }
     if (booking.user_id.toString() !== userId.toString()) {
       throw new ForbiddenException('You do not have permission to manage this booking');
+    }
+  }
+
+  /**
+   * Post-commit PayPal refunds execution with outbox error tracking.
+   */
+  async executePostCommitRefunds(
+    bookingId: any,
+    refundAllocations: AllocatedRefundItem[],
+    pnrCode: string,
+  ): Promise<void> {
+    if (!this.paypalService || !refundAllocations || refundAllocations.length === 0) {
+      return;
+    }
+
+    for (const item of refundAllocations) {
+      if (item.payment_method === PaymentMethod.PAYPAL) {
+        try {
+          assertPayPalRefundExecutionSnapshot({
+            payment_reference: item.payment_reference,
+            provider_capture_id: item.provider_capture_id || '',
+            provider_amount: item.provider_amount || '',
+            provider_currency: item.provider_currency || '',
+            exchange_rate_vnd_per_unit: item.exchange_rate_vnd_per_unit,
+            require_fx: true,
+            context: 'executePostCommitRefunds',
+          });
+        } catch (valErr: any) {
+          this.logger.error(
+            `Incomplete PayPal refund provenance for booking ${pnrCode}, ref ${item.payment_reference}: ${valErr?.message}`,
+          );
+          item.status = 'FAILED';
+          if (typeof this.bookingModel?.updateOne === 'function') {
+            await this.bookingModel.updateOne(
+              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
+              {
+                $set: {
+                  'payment_transactions.$.status': 'FAILED',
+                  'payment_transactions.$.failure_reason': 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE',
+                  'payment_transactions.$.next_retry_at': null,
+                },
+              },
+            );
+          }
+          continue;
+        }
+
+        try {
+          const refundRes = await this.paypalService.refundCapture({
+            captureId: item.provider_capture_id!,
+            providerAmount: item.provider_amount!,
+            providerCurrency: item.provider_currency!,
+            paypalRequestId: item.payment_reference,
+            note: `Refund for PNR ${pnrCode}`,
+          });
+          const classified = classifyPayPalRefundStatus(refundRes.status);
+          const localStatus = classified.local_status;
+          const isFailed = classified.is_failed;
+          if (typeof this.bookingModel?.updateOne === 'function') {
+            await this.bookingModel.updateOne(
+              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
+              {
+                $set: {
+                  'payment_transactions.$.status': localStatus,
+                  'payment_transactions.$.provider_refund_id': refundRes.refund_id,
+                  'payment_transactions.$.provider_status': classified.provider_status,
+                  ...(isFailed
+                    ? {
+                        'payment_transactions.$.failure_reason': `PayPal refund returned status: ${classified.provider_status}`,
+                        'payment_transactions.$.next_retry_at': null,
+                      }
+                    : {}),
+                },
+              },
+            );
+          }
+          item.status = localStatus;
+          (item as any).provider_refund_id = refundRes.refund_id;
+          (item as any).provider_status = classified.provider_status;
+          if (isFailed) {
+            item.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
+            (item as any).next_retry_at = null;
+          }
+        } catch (ppErr: any) {
+          this.logger.error(
+            `Post-commit PayPal refund failed for booking ${pnrCode}, ref ${item.payment_reference}: ${ppErr?.message || ppErr}`,
+          );
+          item.status = 'PENDING';
+          if (typeof this.bookingModel?.updateOne === 'function') {
+            await this.bookingModel.updateOne(
+              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
+              {
+                $set: {
+                  'payment_transactions.$.status': 'PENDING',
+                  'payment_transactions.$.provider_status': 'FAILED',
+                  'payment_transactions.$.failure_reason': ppErr?.message || 'PayPal refund call failed',
+                  'payment_transactions.$.next_retry_at': new Date(Date.now() + 60 * 60 * 1000),
+                },
+              },
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Pure, side-effect-free quote calculation for ticket booking.
+   * Full validation parity with createBooking without database mutation.
+   */
+  async quoteBooking(
+    dto: QuoteBookingDto,
+    userId?: string,
+  ): Promise<{
+    total_fare: number;
+    total_seat_fees: number;
+    total_amount: number;
+    currency: string;
+    early_bird_percent: number;
+    ff_tier: string;
+    ff_discount_percent: number;
+    presentment?: ConvertedPresentmentAmount;
+  }> {
+    if (!dto.legs || dto.legs.length === 0) {
+      throw new BadRequestException('At least one flight leg must be selected.');
+    }
+    if (!dto.passengers || dto.passengers.length === 0) {
+      throw new BadRequestException('At least one passenger must be provided.');
+    }
+
+    const user = userId ? await this.usersService.findById(userId) : null;
+    const skyMiles = user?.sky_miles || 0;
+    const passengerCount = dto.passengers.length;
+
+    const selectedLegs: Array<{ definition: FlightLegSelectionDto; flight: FlightDocument; inventory: any }> = [];
+    for (const leg of dto.legs) {
+      const flight = await this.flightsService.findById(leg.flight_id);
+      this.assertBookableFlight(flight, 'quote');
+      const inventory = flight.inventories.find(
+        (i: any) => i._id.toString() === leg.inventory_id || i.id === leg.inventory_id,
+      );
+      if (!inventory) {
+        throw new NotFoundException(`Inventory ${leg.inventory_id} not found on flight ${flight.flight_number}`);
+      }
+
+      if (inventory.available_seats < passengerCount) {
+        throw new BadRequestException(
+          `Not enough available seats on flight ${flight.flight_number}. Required ${passengerCount}, available ${inventory.available_seats}`,
+        );
+      }
+
+      if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
+        throw new BadRequestException(`Cannot book flight ${flight.flight_number}: flight is ${flight.status}.`);
+      }
+
+      const flightDepTime = new Date(flight.scheduled_departure);
+      if (isNaN(flightDepTime.getTime()) || flightDepTime <= new Date()) {
+        throw new BadRequestException(`Flight ${flight.flight_number} departure is invalid or in the past.`);
+      }
+
+      selectedLegs.push({ definition: leg, flight, inventory });
+    }
+
+    // Validate booking window & itinerary
+    if (dto.booking_type === BookingType.CONNECTING) {
+      this.validateConnectingFlights(selectedLegs.map((leg) => leg.flight));
+      this.validateBookingWindow(selectedLegs.map((leg) => leg.flight), 'Connecting itinerary');
+    } else if (dto.booking_type === BookingType.ROUND_TRIP) {
+      const { outboundLegs, inboundLegs } = this.validateRoundTripLegs(selectedLegs);
+      this.validateBookingWindow(outboundLegs.map((leg) => leg.flight), 'Outbound itinerary');
+      this.validateBookingWindow(inboundLegs.map((leg) => leg.flight), 'Return itinerary');
+    } else {
+      this.validateBookingWindow(selectedLegs.map((leg) => leg.flight), 'Flight');
+    }
+
+    const earliestDeparture = selectedLegs
+      .map((l) => new Date(l.flight.scheduled_departure))
+      .filter((d): d is Date => !isNaN(d.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    const now = new Date();
+    const daysUntilDeparture = earliestDeparture
+      ? (earliestDeparture.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      : 0;
+
+    let totalFare = 0;
+    let earlyBirdPercent = 0;
+    let ffTier = '';
+    let ffDiscountPercent = 0;
+
+    for (const { inventory } of selectedLegs) {
+      for (const p of dto.passengers) {
+        const pricing = applyPricing(inventory.base_price, daysUntilDeparture, skyMiles);
+        earlyBirdPercent = pricing.early_bird_percent;
+        ffTier = pricing.ff_tier;
+        ffDiscountPercent = pricing.ff_percent;
+
+        let fare = pricing.final_price;
+        if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
+        if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+        totalFare += fare;
+      }
+    }
+
+    let totalSeatFees = 0;
+    if (dto.seat_requests && dto.seat_requests.length > 0) {
+      for (const req of dto.seat_requests) {
+        if (req.selection_type === 'CHOOSE' && req.seat_code) {
+          const leg = selectedLegs.find((l) => l.flight._id.toString() === req.flight_id);
+          if (!leg) {
+            throw new BadRequestException(`Seat request references flight ${req.flight_id} not found in selected legs.`);
+          }
+          const aircraftType = leg.flight.aircraft?.model_code;
+          if (!aircraftType) {
+            throw new BadRequestException(
+              `Flight ${leg.flight.flight_number} is missing aircraft model configuration.`,
+            );
+          }
+          if (this.seatAllocationService) {
+            await this.seatAllocationService.validateSeatAvailability(
+              leg.flight._id,
+              req.seat_code,
+              aircraftType,
+              leg.inventory.cabin_class,
+            );
+            const fee = await this.seatAllocationService.calculateSeatFee(
+              leg.flight._id,
+              req.seat_code,
+              aircraftType,
+              'CHOOSE',
+            );
+            totalSeatFees += fee;
+          }
+        }
+      }
+    }
+
+    const totalAmount = totalFare + totalSeatFees;
+    let presentment: ConvertedPresentmentAmount | undefined = undefined;
+    if (this.paypalService && this.paypalService.isPayPalActive()) {
+      presentment = this.paypalService.convertVndToPresentment(totalAmount);
+    }
+
+    return {
+      total_fare: totalFare,
+      total_seat_fees: totalSeatFees,
+      total_amount: totalAmount,
+      currency: 'VND',
+      early_bird_percent: earlyBirdPercent,
+      ff_tier: ffTier,
+      ff_discount_percent: ffDiscountPercent,
+      presentment,
+    };
+  }
+
+  /**
+   * Pure, side-effect-free quote calculation for ticket reschedule.
+   * Accurately preserves unchanged legs in round-trip and connecting itineraries.
+   */
+  async quoteRescheduleTicket(
+    dto: RescheduleTicketDto,
+    userId?: string,
+  ): Promise<{
+    price_difference: number;
+    old_total: number;
+    new_total: number;
+    new_fare: number;
+    new_seat_fees: number;
+    currency: string;
+    presentment?: ConvertedPresentmentAmount;
+  }> {
+    const ident = dto.confirmation_number || dto.pnr_code;
+    if (!ident) {
+      throw new BadRequestException('Confirmation number or PNR code is required to quote reschedule.');
+    }
+    const booking = await this.bookingModel.findOne({
+      $or: [{ confirmation_number: ident }, { pnr_code: ident }],
+    }).exec();
+    if (!booking) {
+      throw new NotFoundException(`Booking with identifier ${ident} not found.`);
+    }
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Only confirmed tickets can be rescheduled.');
+    }
+
+    const passengerCount = booking.passengers?.length || 1;
+    const user = booking.user_id ? await this.usersService.findById(booking.user_id.toString()) : null;
+    const skyMiles = user?.sky_miles || 0;
+    const oldTotal = booking.total_amount || 0;
+
+    const isInbound = (lt?: string) => {
+      const n = normalizeLegType(lt);
+      return n === 'INBOUND' || n.startsWith('INBOUND_');
+    };
+    const isOutbound = (lt?: string) => {
+      const n = normalizeLegType(lt);
+      return n === 'OUTBOUND' || n.startsWith('CONNECTING_');
+    };
+
+    const isReschedulingOutbound = Boolean(
+      (dto.new_flight_id && dto.new_inventory_id) ||
+      (dto.new_legs && dto.new_legs.length > 0),
+    );
+    const shouldRescheduleReturn = Boolean(
+      (dto.new_return_flight_id && dto.new_return_inventory_id) ||
+      (dto.new_return_legs && dto.new_return_legs.length > 0),
+    );
+
+    let newTotalFare = 0;
+    let newTotalSeatFees = 0;
+    const now = new Date();
+
+    const outboundFlights: FlightDocument[] = [];
+    const outboundInventories: any[] = [];
+    const returnFlights: FlightDocument[] = [];
+    const returnInventories: any[] = [];
+
+    if (dto.new_legs && dto.new_legs.length > 0) {
+      for (const legDef of dto.new_legs) {
+        const flight = await this.flightsService.findById(legDef.flight_id);
+        if (!flight) throw new NotFoundException(`Flight ${legDef.flight_id} not found.`);
+        this.assertBookableFlight(flight, 'quote-reschedule');
+        const inv = flight.inventories.find(
+          (i: any) => i._id.toString() === legDef.inventory_id || i.id === legDef.inventory_id,
+        );
+        if (!inv) throw new NotFoundException(`Inventory ${legDef.inventory_id} not found on flight ${flight.flight_number}.`);
+        if (inv.available_seats < passengerCount) {
+          throw new BadRequestException(
+            `Not enough available seats on flight ${flight.flight_number}. Required ${passengerCount}, available ${inv.available_seats}`,
+          );
+        }
+        if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
+          throw new BadRequestException(`Cannot reschedule to flight ${flight.flight_number}: flight is ${flight.status}.`);
+        }
+        const dep = new Date(flight.scheduled_departure);
+        if (isNaN(dep.getTime()) || dep <= now) {
+          throw new BadRequestException(`Flight ${flight.flight_number} departure is invalid or in the past.`);
+        }
+        outboundFlights.push(flight);
+        outboundInventories.push(inv);
+
+        const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        for (const p of booking.passengers) {
+          const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+          let fare = pricing.final_price;
+          if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
+          if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+          newTotalFare += fare;
+        }
+      }
+      if (outboundFlights.length > 1) {
+        this.validateConnectingSequence(outboundFlights, 'outbound');
+        this.validateBookingWindow(outboundFlights, 'Outbound connecting itinerary');
+      }
+    } else if (dto.new_flight_id && dto.new_inventory_id) {
+      const flight = await this.flightsService.findById(dto.new_flight_id);
+      if (!flight) throw new NotFoundException(`Flight ${dto.new_flight_id} not found.`);
+      this.assertBookableFlight(flight, 'quote-reschedule');
+      const inv = flight.inventories.find(
+        (i: any) => i._id.toString() === dto.new_inventory_id || i.id === dto.new_inventory_id,
+      );
+      if (!inv) throw new NotFoundException(`Inventory ${dto.new_inventory_id} not found on flight ${flight.flight_number}.`);
+      if (inv.available_seats < passengerCount) {
+        throw new BadRequestException(
+          `Not enough available seats on flight ${flight.flight_number}. Required ${passengerCount}, available ${inv.available_seats}`,
+        );
+      }
+      if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
+        throw new BadRequestException(`Cannot reschedule to flight ${flight.flight_number}: flight is ${flight.status}.`);
+      }
+      const dep = new Date(flight.scheduled_departure);
+      if (isNaN(dep.getTime()) || dep <= now) {
+        throw new BadRequestException(`Flight ${flight.flight_number} departure is invalid or in the past.`);
+      }
+      outboundFlights.push(flight);
+      outboundInventories.push(inv);
+      this.validateBookingWindow([flight], 'New outbound flight');
+
+      const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      for (const p of booking.passengers) {
+        const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+        let fare = pricing.final_price;
+        if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
+        if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+        newTotalFare += fare;
+      }
+    } else if (booking.booking_type === BookingType.ROUND_TRIP && shouldRescheduleReturn) {
+      // Outbound is NOT rescheduled: retain existing outbound coupons fare and seat fees!
+      const outboundCoupons = booking.ticket_coupons?.filter((c: any) => isOutbound(c.leg_type)) || [];
+      for (const c of outboundCoupons) {
+        newTotalFare += (c.fare_paid || 0);
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+    }
+
+    if (shouldRescheduleReturn) {
+      if (dto.new_return_legs && dto.new_return_legs.length > 0) {
+        for (const legDef of dto.new_return_legs) {
+          const flight = await this.flightsService.findById(legDef.flight_id);
+          if (!flight) throw new NotFoundException(`Return flight ${legDef.flight_id} not found.`);
+          this.assertBookableFlight(flight, 'quote-reschedule');
+          const inv = flight.inventories.find(
+            (i: any) => i._id.toString() === legDef.inventory_id || i.id === legDef.inventory_id,
+          );
+          if (!inv) throw new NotFoundException(`Return inventory ${legDef.inventory_id} not found on flight ${flight.flight_number}.`);
+          if (inv.available_seats < passengerCount) {
+            throw new BadRequestException(
+              `Not enough available seats on flight ${flight.flight_number}. Required ${passengerCount}, available ${inv.available_seats}`,
+            );
+          }
+          if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
+            throw new BadRequestException(`Cannot reschedule to flight ${flight.flight_number}: flight is ${flight.status}.`);
+          }
+          const dep = new Date(flight.scheduled_departure);
+          if (isNaN(dep.getTime()) || dep <= now) {
+            throw new BadRequestException(`Flight ${flight.flight_number} departure is invalid or in the past.`);
+          }
+          returnFlights.push(flight);
+          returnInventories.push(inv);
+
+          const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          for (const p of booking.passengers) {
+            const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+            let fare = pricing.final_price;
+            if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
+            if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+            newTotalFare += fare;
+          }
+        }
+        if (returnFlights.length > 1) {
+          this.validateConnectingSequence(returnFlights, 'return');
+          this.validateBookingWindow(returnFlights, 'Return connecting itinerary');
+        }
+      } else if (dto.new_return_flight_id && dto.new_return_inventory_id) {
+        const flight = await this.flightsService.findById(dto.new_return_flight_id);
+        if (!flight) throw new NotFoundException(`Return flight ${dto.new_return_flight_id} not found.`);
+        this.assertBookableFlight(flight, 'quote-reschedule');
+        const inv = flight.inventories.find(
+          (i: any) => i._id.toString() === dto.new_return_inventory_id || i.id === dto.new_return_inventory_id,
+        );
+        if (!inv) throw new NotFoundException(`Return inventory ${dto.new_return_inventory_id} not found on flight ${flight.flight_number}.`);
+        if (inv.available_seats < passengerCount) {
+          throw new BadRequestException(
+            `Not enough available seats on flight ${flight.flight_number}. Required ${passengerCount}, available ${inv.available_seats}`,
+          );
+        }
+        if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
+          throw new BadRequestException(`Cannot reschedule to flight ${flight.flight_number}: flight is ${flight.status}.`);
+        }
+        const dep = new Date(flight.scheduled_departure);
+        if (isNaN(dep.getTime()) || dep <= now) {
+          throw new BadRequestException(`Flight ${flight.flight_number} departure is invalid or in the past.`);
+        }
+        returnFlights.push(flight);
+        returnInventories.push(inv);
+        this.validateBookingWindow([flight], 'New return flight');
+
+        const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        for (const p of booking.passengers) {
+          const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+          let fare = pricing.final_price;
+          if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
+          if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+          newTotalFare += fare;
+        }
+      }
+    } else if (booking.booking_type === BookingType.ROUND_TRIP && isReschedulingOutbound) {
+      // Inbound is NOT rescheduled: retain existing inbound coupons fare and seat fees!
+      const inboundCoupons = booking.ticket_coupons?.filter((c: any) => isInbound(c.leg_type)) || [];
+      for (const c of inboundCoupons) {
+        newTotalFare += (c.fare_paid || 0);
+        newTotalSeatFees += (c.seat_fee || 0);
+      }
+    }
+
+    // Chronology check between outbound and return
+    if (outboundFlights.length > 0 && returnFlights.length > 0) {
+      const lastOutbound = outboundFlights[outboundFlights.length - 1];
+      const firstReturn = returnFlights[0];
+      if (lastOutbound.scheduled_arrival && new Date(firstReturn.scheduled_departure) <= new Date(lastOutbound.scheduled_arrival)) {
+        throw new BadRequestException('Return flight must depart after the outbound flight arrives.');
+      }
+    }
+
+    if (this.seatAllocationService && dto.seat_requests && dto.seat_requests.length > 0) {
+      const allFlights = [...outboundFlights, ...returnFlights];
+      const allInventories = [...outboundInventories, ...returnInventories];
+      for (const req of dto.seat_requests) {
+        if (req.selection_type === 'CHOOSE' && req.seat_code) {
+          const legIdx = allFlights.findIndex(
+            (f) => f._id.toString() === req.flight_id || (f as any).id === req.flight_id,
+          );
+          if (legIdx < 0) {
+            throw new BadRequestException(
+              `Seat request references flight ${req.flight_id} which is not part of the rescheduled itinerary.`,
+            );
+          }
+          const flight = allFlights[legIdx];
+          const inv = allInventories[legIdx];
+          const aircraftType = flight.aircraft?.model_code || '';
+          if (!aircraftType) {
+            throw new BadRequestException(
+              `Flight ${flight.flight_number} is missing aircraft model configuration.`,
+            );
+          }
+          await this.seatAllocationService.validateSeatAvailability(
+            flight._id,
+            req.seat_code,
+            aircraftType,
+            inv?.cabin_class,
+          );
+          const fee = await this.seatAllocationService.calculateSeatFee(
+            flight._id,
+            req.seat_code,
+            aircraftType,
+            'CHOOSE',
+          );
+          newTotalSeatFees += fee;
+        }
+      }
+    }
+
+    const newTotal = newTotalFare + newTotalSeatFees;
+    const priceDiff = newTotal - oldTotal;
+
+    let presentment: ConvertedPresentmentAmount | undefined = undefined;
+    if (this.paypalService && this.paypalService.isPayPalActive()) {
+      presentment = this.paypalService.convertVndToPresentment(Math.max(0, priceDiff));
+    }
+
+    return {
+      price_difference: priceDiff,
+      old_total: oldTotal,
+      new_total: newTotal,
+      new_fare: newTotalFare,
+      new_seat_fees: newTotalSeatFees,
+      currency: 'VND',
+      presentment,
+    };
+  }
+
+  /**
+   * Central server-side pre-capture verification gate.
+   * Validates ownership, op-type parity, orderId match, expiry, hold deadline, and live quote parity.
+   */
+  private async verifyPreCaptureGate(
+    session: PayPalCheckoutSessionDocument,
+    expectedOpType: PayPalCheckoutOperationType,
+    userId: string,
+    orderId: string,
+    role: string = UserRole.CUSTOMER,
+  ): Promise<void> {
+    if (session.user_id !== userId && role === UserRole.CUSTOMER) {
+      throw new ForbiddenException('You do not have permission to access this checkout session.');
+    }
+    if (session.operation_type !== expectedOpType) {
+      throw new BadRequestException(
+        `Operation type mismatch: session is for ${session.operation_type}, attempted capture for ${expectedOpType}.`,
+      );
+    }
+    if (!session.paypal_order_id || session.paypal_order_id !== orderId) {
+      throw new BadRequestException(
+        `Order ID mismatch: expected ${session.paypal_order_id}, got ${orderId}.`,
+      );
+    }
+    if (session.order_expires_at && new Date() > session.order_expires_at) {
+      session.status = PayPalCheckoutStatus.CANCELLED;
+      session.error_message = 'Checkout session expired.';
+      await session.save();
+      throw new BadRequestException('Checkout session has expired. Please create a new checkout.');
+    }
+
+    // Recompute presentment BEFORE capture to verify snapshot parity
+    const expectedPresentment = this.paypalService.convertVndToPresentment(
+      session.amount_vnd,
+      session.exchange_rate_vnd_per_unit,
+    );
+    if (
+      expectedPresentment.provider_amount !== session.provider_amount ||
+      expectedPresentment.provider_currency !== session.provider_currency
+    ) {
+      throw new BadRequestException(
+        `Provider presentment snapshot mismatch: expected ${expectedPresentment.provider_amount} ${expectedPresentment.provider_currency}, session has ${session.provider_amount} ${session.provider_currency}.`,
+      );
+    }
+
+    if (expectedOpType === PayPalCheckoutOperationType.CONFIRM_HOLD) {
+      const blockingNumber = session.operation_payload?.blocking_number;
+      if (!blockingNumber) throw new BadRequestException('Missing blocking number in session payload.');
+      const booking = await this.bookingModel.findOne({ blocking_number: blockingNumber }).exec();
+      if (!booking) throw new NotFoundException(`Booking with blocking number ${blockingNumber} not found.`);
+      if (booking.time_limit_deadline && new Date() > booking.time_limit_deadline) {
+        await this.cancelExpiredBlockStrict(booking);
+        session.status = PayPalCheckoutStatus.CANCELLED;
+        session.error_message = 'Hold deadline expired before payment capture.';
+        await session.save();
+        throw new BadRequestException(
+          'The 2-week deadline for this blocked ticket has passed. The reservation has been automatically cancelled.',
+        );
+      }
+      if (booking.total_amount !== session.amount_vnd) {
+        session.status = PayPalCheckoutStatus.CANCELLED;
+        session.error_message = `Hold booking total changed from ${session.amount_vnd} to ${booking.total_amount} VND.`;
+        await session.save();
+        throw new BadRequestException('Hold booking total has changed. Please start checkout again.');
+      }
+    } else if (expectedOpType === PayPalCheckoutOperationType.CREATE_BOOKING) {
+      const quote = await this.quoteBooking(session.operation_payload as CreateBookingDto, session.user_id);
+      if (quote.total_amount !== session.amount_vnd) {
+        session.status = PayPalCheckoutStatus.CANCELLED;
+        session.error_message = `Price quote changed from ${session.amount_vnd} to ${quote.total_amount} VND.`;
+        await session.save();
+        throw new BadRequestException(
+          `Price quote changed from ${session.amount_vnd} to ${quote.total_amount} VND. Please review and start checkout again.`,
+        );
+      }
+    } else if (expectedOpType === PayPalCheckoutOperationType.RESCHEDULE) {
+      const quote = await this.quoteRescheduleTicket(session.operation_payload as RescheduleTicketDto, session.user_id);
+      if (quote.price_difference !== session.amount_vnd) {
+        session.status = PayPalCheckoutStatus.CANCELLED;
+        session.error_message = `Reschedule price quote changed from ${session.amount_vnd} to ${quote.price_difference} VND.`;
+        await session.save();
+        throw new BadRequestException(
+          `Reschedule quote changed from ${session.amount_vnd} to ${quote.price_difference} VND. Please review and start checkout again.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Create PayPal Order for Ticket Booking.
+   */
+  async createPayPalBookingOrder(
+    dto: CreatePayPalBookingOrderDto,
+    userId: string,
+  ): Promise<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    if (!this.paypalService || !this.paypalService.isPayPalActive()) {
+      throw new BadRequestException('PayPal payment gateway is currently unavailable or disabled.');
+    }
+    if (dto.is_block) {
+      throw new BadRequestException('Ticket hold / block reservations do not require payment.');
+    }
+    if (!dto.client_request_id) {
+      throw new BadRequestException('client_request_id is required for PayPal order creation.');
+    }
+
+    const existing = await this.paypalCheckoutModel.findOne({
+      user_id: userId,
+      client_request_id: dto.client_request_id,
+      operation_type: PayPalCheckoutOperationType.CREATE_BOOKING,
+    }).exec();
+    if (existing && existing.paypal_order_id) {
+      return {
+        checkout_id: existing.checkout_id,
+        order_id: existing.paypal_order_id,
+        amount: existing.provider_amount,
+        currency: existing.provider_currency,
+        amount_vnd: existing.amount_vnd,
+        exchange_rate: existing.exchange_rate_vnd_per_unit,
+      };
+    }
+
+    const quote = await this.quoteBooking(dto, userId);
+    if (quote.total_amount <= 0) {
+      throw new BadRequestException('Authoritative booking amount must be greater than zero.');
+    }
+
+    const checkoutId = this.generateCode('CHK');
+    const order = await this.paypalService.createOrder({
+      amountVnd: quote.total_amount,
+      clientRequestId: dto.client_request_id,
+      description: 'Aptech Airlines Ticket Purchase',
+    });
+
+    const session = new this.paypalCheckoutModel({
+      checkout_id: checkoutId,
+      client_request_id: dto.client_request_id,
+      user_id: userId,
+      operation_type: PayPalCheckoutOperationType.CREATE_BOOKING,
+      status: PayPalCheckoutStatus.CREATED,
+      paypal_order_id: order.order_id,
+      amount_vnd: quote.total_amount,
+      provider_amount: order.provider_amount,
+      provider_currency: order.provider_currency,
+      exchange_rate_vnd_per_unit: order.exchange_rate_vnd_per_unit,
+      operation_payload: dto,
+      order_expires_at: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+
+    try {
+      await session.save();
+    } catch (saveErr: any) {
+      if (saveErr?.code === 11000 || saveErr?.message?.includes('E11000')) {
+        const raceExisting = await this.paypalCheckoutModel.findOne({
+          user_id: userId,
+          client_request_id: dto.client_request_id,
+          operation_type: PayPalCheckoutOperationType.CREATE_BOOKING,
+        }).exec();
+        if (raceExisting && raceExisting.paypal_order_id) {
+          return {
+            checkout_id: raceExisting.checkout_id,
+            order_id: raceExisting.paypal_order_id,
+            amount: raceExisting.provider_amount,
+            currency: raceExisting.provider_currency,
+            amount_vnd: raceExisting.amount_vnd,
+            exchange_rate: raceExisting.exchange_rate_vnd_per_unit,
+          };
+        }
+      }
+      throw saveErr;
+    }
+
+    return {
+      checkout_id: checkoutId,
+      order_id: order.order_id,
+      amount: order.provider_amount,
+      currency: order.provider_currency,
+      amount_vnd: quote.total_amount,
+      exchange_rate: order.exchange_rate_vnd_per_unit,
+    };
+  }
+
+  /**
+   * Compensation refund helper tracking truthful status.
+   * COMPLETED -> REFUNDED
+   * PENDING -> RECONCILE_REQUIRED
+   * Failed / error -> RECONCILE_REQUIRED
+   * Stores provider_refund_id and provider_refund_status.
+   */
+  private async executeCompensationRefund(
+    session: PayPalCheckoutSessionDocument,
+    bizErr: any,
+    contextNote: string,
+  ): Promise<void> {
+    this.logger.error(
+      `${contextNote} after PayPal capture ${session.paypal_capture_id} for session ${session.checkout_id}. Initiating automated compensation refund: ${bizErr?.message || 'Error'}`,
+    );
+    const reqId = `${session.checkout_id}-compensation-refund`;
+    try {
+      assertPayPalRefundExecutionSnapshot({
+        payment_reference: reqId,
+        provider_capture_id: session.paypal_capture_id || '',
+        provider_amount: session.provider_amount || '',
+        provider_currency: session.provider_currency || '',
+        exchange_rate_vnd_per_unit: session.exchange_rate_vnd_per_unit,
+        require_fx: true,
+        context: 'executeCompensationRefund',
+      });
+      const refundRes = await this.paypalService.refundCapture({
+        captureId: session.paypal_capture_id!,
+        providerAmount: session.provider_amount!,
+        providerCurrency: session.provider_currency!,
+        paypalRequestId: reqId,
+        note: `Automated compensation refund: ${contextNote} (${bizErr?.message})`,
+      });
+      const classified = classifyPayPalRefundStatus(refundRes.status);
+      session.provider_refund_id = refundRes.refund_id;
+      session.provider_refund_status = classified.provider_status;
+
+      if (classified.is_success) {
+        session.status = PayPalCheckoutStatus.REFUNDED;
+      } else {
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        session.failure_reason = `${contextNote}: ${bizErr?.message}. Refund status is ${classified.provider_status}.`;
+      }
+    } catch (refundErr: any) {
+      this.logger.error(
+        `CRITICAL: Compensation refund failed for capture ${session.paypal_capture_id} session ${session.checkout_id}: ${refundErr?.message}. Flagging as RECONCILE_REQUIRED.`,
+      );
+      session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+      session.failure_reason = `${contextNote}: ${bizErr?.message}. Refund failed: ${refundErr?.message}`;
+    }
+    session.error_message = session.failure_reason || bizErr?.message;
+    await session.save();
+  }
+
+  /**
+   * Prepares and claims PayPal capture:
+   * State Machine: CREATED -> CAPTURING -> CAPTURED -> FINALIZING -> COMPLETED
+   */
+  private async prepareAndClaimPayPalCapture(
+    checkoutId: string,
+    orderId: string,
+    userId: string,
+    role: string = UserRole.CUSTOMER,
+    expectedOpType: PayPalCheckoutOperationType,
+  ): Promise<{
+    session: PayPalCheckoutSessionDocument;
+    existingBooking?: any;
+  }> {
+    if (!this.paypalService || !this.paypalService.isPayPalActive()) {
+      throw new BadRequestException('PayPal service is unavailable.');
+    }
+
+    let session = await this.paypalCheckoutModel.findOne({ checkout_id: checkoutId }).exec();
+    if (!session) {
+      throw new NotFoundException('PayPal checkout session not found.');
+    }
+
+    if (session.user_id !== userId && role === UserRole.CUSTOMER) {
+      throw new ForbiddenException('You do not have permission to access this checkout session.');
+    }
+
+    if (session.status === PayPalCheckoutStatus.COMPLETED && session.result_booking_id) {
+      const existingBooking = await this.findById(session.result_booking_id);
+      return { session, existingBooking };
+    }
+
+    if (session.operation_type !== expectedOpType) {
+      throw new BadRequestException(
+        `Operation type mismatch: session is for ${session.operation_type}, attempted capture for ${expectedOpType}.`,
+      );
+    }
+    if (!session.paypal_order_id || session.paypal_order_id !== orderId) {
+      throw new BadRequestException(
+        `Order ID mismatch: expected ${session.paypal_order_id}, got ${orderId}.`,
+      );
+    }
+
+    if (session.status === PayPalCheckoutStatus.FAILED) {
+      throw new BadRequestException(
+        `Checkout session has failed: ${session.error_message || 'Payment capture failed.'}`,
+      );
+    }
+    if (session.status === PayPalCheckoutStatus.CANCELLED) {
+      throw new BadRequestException('Checkout session has been cancelled.');
+    }
+    if (session.status === PayPalCheckoutStatus.REFUNDED) {
+      throw new BadRequestException('Checkout session has been refunded.');
+    }
+    if (session.status === PayPalCheckoutStatus.RECONCILE_REQUIRED) {
+      throw new BadRequestException(
+        `Checkout session requires manual reconciliation: ${session.failure_reason || session.error_message || 'Discrepancy detected.'}`,
+      );
+    }
+    if (session.status === PayPalCheckoutStatus.PENDING) {
+      const order = await this.paypalService.getOrder(session.paypal_order_id);
+      const capture =
+        order?.purchaseUnits?.[0]?.payments?.captures?.[0] ||
+        order?.purchase_units?.[0]?.payments?.captures?.[0];
+
+      if (!capture) {
+        if (order?.status === 'VOIDED') {
+          session.status = PayPalCheckoutStatus.FAILED;
+          session.error_message = 'Order is VOIDED.';
+          await session.save();
+          throw new BadRequestException(
+            'Payment authorization is in status VOIDED. Ticket booking cannot be completed until payment is completed.',
+          );
+        }
+        session.status = PayPalCheckoutStatus.PENDING;
+        session.error_message = 'Payment capture is pending provider settlement.';
+        await session.save();
+        throw new BadRequestException(
+          'Payment authorization is in status PENDING. Ticket booking cannot be completed until payment is completed.',
+        );
+      }
+
+      const captureId = capture.id;
+      const captureStatus = capture.status;
+      const providerAmount = capture.amount?.value || capture.amount?.total || '';
+      const providerCurrency =
+        capture.amount?.currencyCode ||
+        capture.amount?.currency_code ||
+        '';
+
+      if (!captureId || !captureStatus || !providerAmount || !providerCurrency) {
+        if (captureStatus === 'DECLINED' || captureStatus === 'FAILED' || order?.status === 'VOIDED') {
+          session.status = PayPalCheckoutStatus.FAILED;
+          if (captureId) session.paypal_capture_id = captureId;
+          session.error_message = `Payment capture status is ${captureStatus || order?.status || 'FAILED'}.`;
+          await session.save();
+          throw new BadRequestException(
+            `Payment authorization is in status ${captureStatus || order?.status}. Ticket booking cannot be completed until payment is completed.`,
+          );
+        }
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        if (captureId) {
+          session.paypal_capture_id = captureId;
+        }
+        session.failure_reason = `PayPal capture snapshot is incomplete or missing fields (id: ${captureId || 'missing'}, status: ${captureStatus || 'missing'}, amount: ${providerAmount || 'missing'}, currency: ${providerCurrency || 'missing'}).`;
+        session.error_message = session.failure_reason;
+        await session.save();
+        throw new BadRequestException(session.failure_reason);
+      }
+
+      if (captureStatus === 'COMPLETED') {
+        const isAmountMismatch = providerAmount !== session.provider_amount;
+        const isCurrencyMismatch = providerCurrency !== session.provider_currency;
+
+        if (isAmountMismatch || isCurrencyMismatch) {
+          session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+          session.failure_reason = isAmountMismatch
+            ? `Captured amount ${providerAmount} does not match expected session amount ${session.provider_amount}.`
+            : `Captured currency ${providerCurrency} does not match expected session currency ${session.provider_currency}.`;
+          session.error_message = session.failure_reason;
+          session.paypal_capture_id = captureId;
+          await session.save();
+          throw new BadRequestException(session.failure_reason);
+        }
+
+        session.paypal_capture_id = captureId;
+        session.status = PayPalCheckoutStatus.CAPTURED;
+        session.error_message = undefined;
+        await session.save();
+      } else if (captureStatus === 'PENDING') {
+        const isAmountMismatch = providerAmount !== session.provider_amount;
+        const isCurrencyMismatch = providerCurrency !== session.provider_currency;
+
+        if (isAmountMismatch || isCurrencyMismatch) {
+          session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+          session.failure_reason = isAmountMismatch
+            ? `Pending capture amount ${providerAmount} does not match expected session amount ${session.provider_amount}.`
+            : `Pending capture currency ${providerCurrency} does not match expected session currency ${session.provider_currency}.`;
+          session.error_message = session.failure_reason;
+          session.paypal_capture_id = captureId;
+          await session.save();
+          throw new BadRequestException(session.failure_reason);
+        }
+
+        session.paypal_capture_id = captureId;
+        session.status = PayPalCheckoutStatus.PENDING;
+        session.error_message = 'Payment capture is pending provider settlement.';
+        await session.save();
+        throw new BadRequestException(
+          'Payment authorization is in status PENDING. Ticket booking cannot be completed until payment is completed.',
+        );
+      } else if (
+        captureStatus === 'DECLINED' ||
+        captureStatus === 'FAILED' ||
+        order?.status === 'VOIDED'
+      ) {
+        session.status = PayPalCheckoutStatus.FAILED;
+        session.paypal_capture_id = captureId;
+        session.error_message = `Payment capture status is ${captureStatus || order?.status || 'FAILED'}.`;
+        await session.save();
+        throw new BadRequestException(
+          `Payment authorization is in status ${captureStatus || order?.status}. Ticket booking cannot be completed until payment is completed.`,
+        );
+      } else {
+        // PARTIALLY_REFUNDED, REFUNDED, or any non-standard/unexpected capture status (FIX 9)
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        session.paypal_capture_id = captureId;
+        session.failure_reason = `Payment capture has non-standard status: ${captureStatus}. Manual reconciliation required.`;
+        session.error_message = session.failure_reason;
+        await session.save();
+        throw new BadRequestException(session.failure_reason);
+      }
+    }
+
+    // Step 1: Transition CREATED -> CAPTURING
+    if (session.status === PayPalCheckoutStatus.CREATED) {
+      await this.verifyPreCaptureGate(session, expectedOpType, userId, orderId, role);
+
+      const capturingSession = await this.paypalCheckoutModel.findOneAndUpdate(
+        { checkout_id: checkoutId, status: PayPalCheckoutStatus.CREATED },
+        { $set: { status: PayPalCheckoutStatus.CAPTURING } },
+        { new: true },
+      ).exec();
+
+      if (!capturingSession) {
+        const current = await this.paypalCheckoutModel.findOne({ checkout_id: checkoutId }).exec();
+        if (current?.status === PayPalCheckoutStatus.CAPTURING) {
+          throw new ConflictException('Payment capture is currently in progress. Please wait.');
+        }
+        session = current!;
+      } else {
+        session = capturingSession;
+        session.status = PayPalCheckoutStatus.CAPTURING;
+      }
+    }
+
+    // Step 2: CAPTURING owns provider capture
+    if (session.status === PayPalCheckoutStatus.CAPTURING) {
+      let captureResult: {
+        capture_id: string;
+        status: string;
+        provider_amount: string;
+        provider_currency: string;
+      } | null = null;
+
+      try {
+        captureResult = await this.paypalService.captureOrder({
+          orderId,
+          paypalRequestId: `${session.checkout_id}-capture`,
+        });
+      } catch (capErr: any) {
+        this.logger.warn(
+          `captureOrder failed for order ${orderId}: ${capErr.message}. Attempting getOrder recovery.`,
+        );
+        try {
+          const order = await this.paypalService.getOrder(orderId);
+          const capture =
+            order?.purchaseUnits?.[0]?.payments?.captures?.[0] ||
+            order?.purchase_units?.[0]?.payments?.captures?.[0];
+          if (capture) {
+            const capId = capture.id;
+            const capStatus = capture.status;
+            const capAmt = capture.amount?.value || capture.amount?.total || '';
+            const capCur =
+              capture.amount?.currencyCode ||
+              capture.amount?.currency_code ||
+              '';
+
+            if (!capId || !capStatus || !capAmt || !capCur) {
+              session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+              if (capId) session.paypal_capture_id = capId;
+              session.failure_reason = `PayPal recovery getOrder capture record is incomplete (id: ${capId || 'missing'}, status: ${capStatus || 'missing'}, amount: ${capAmt || 'missing'}, currency: ${capCur || 'missing'}).`;
+              session.error_message = session.failure_reason;
+              await session.save();
+              throw new BadRequestException(session.failure_reason);
+            }
+
+            captureResult = {
+              capture_id: capId,
+              status: capStatus,
+              provider_amount: capAmt,
+              provider_currency: capCur,
+            };
+          } else if (order?.status === 'VOIDED') {
+            session.status = PayPalCheckoutStatus.FAILED;
+            session.error_message = `Order is VOIDED. Capture failed: ${capErr.message}`;
+            await session.save();
+            throw capErr;
+          } else {
+            // Ambiguous capture outcome: captureOrder failed and getOrder found no capture
+            session.status = PayPalCheckoutStatus.CAPTURING;
+            session.error_message = `Ambiguous capture outcome: captureOrder failed (${capErr.message}), no capture found in order state ${order?.status}. Retryable.`;
+            await session.save();
+            throw capErr;
+          }
+        } catch (getErr: any) {
+          if (getErr === capErr || getErr instanceof BadRequestException) {
+            throw getErr;
+          }
+          // Ambiguous capture outcome: getOrder also failed/timed out
+          session.status = PayPalCheckoutStatus.CAPTURING;
+          session.error_message = `Ambiguous capture outcome: captureOrder failed (${capErr.message}), getOrder recovery failed (${getErr.message}). Retryable.`;
+          await session.save();
+          throw capErr;
+        }
+      }
+
+      if (captureResult.status === 'PENDING') {
+        const isAmountMismatch = captureResult.provider_amount !== session.provider_amount;
+        const isCurrencyMismatch = captureResult.provider_currency !== session.provider_currency;
+        if (isAmountMismatch || isCurrencyMismatch) {
+          session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+          session.paypal_capture_id = captureResult.capture_id;
+          session.failure_reason = isAmountMismatch
+            ? `Pending capture amount ${captureResult.provider_amount} does not match expected session amount ${session.provider_amount}.`
+            : `Pending capture currency ${captureResult.provider_currency} does not match expected session currency ${session.provider_currency}.`;
+          session.error_message = session.failure_reason;
+          await session.save();
+          throw new BadRequestException(session.failure_reason);
+        }
+        session.status = PayPalCheckoutStatus.PENDING;
+        session.paypal_capture_id = captureResult.capture_id;
+        session.error_message = 'Payment capture is pending provider settlement.';
+        await session.save();
+        throw new BadRequestException(
+          `Payment authorization is in status PENDING. Ticket booking cannot be completed until payment is completed.`,
+        );
+      }
+
+      if (captureResult.status === 'DECLINED' || captureResult.status === 'FAILED') {
+        session.status = PayPalCheckoutStatus.FAILED;
+        session.paypal_capture_id = captureResult.capture_id;
+        session.error_message = `Payment capture status is ${captureResult.status}.`;
+        await session.save();
+        throw new BadRequestException(
+          `Payment authorization is in status ${captureResult.status}. Ticket booking cannot be completed until payment is completed.`,
+        );
+      }
+
+      if (captureResult.status === 'PARTIALLY_REFUNDED' || captureResult.status === 'REFUNDED') {
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        session.paypal_capture_id = captureResult.capture_id;
+        session.failure_reason = `Payment capture has non-standard status: ${captureResult.status}. Manual reconciliation required.`;
+        session.error_message = session.failure_reason;
+        await session.save();
+        throw new BadRequestException(session.failure_reason);
+      }
+
+      if (captureResult.status !== 'COMPLETED') {
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        session.paypal_capture_id = captureResult.capture_id;
+        session.failure_reason = `Payment capture has unexpected status: ${captureResult.status}. Manual reconciliation required.`;
+        session.error_message = session.failure_reason;
+        await session.save();
+        throw new BadRequestException(session.failure_reason);
+      }
+
+      session.paypal_capture_id = captureResult.capture_id;
+      const isAmountMismatch = captureResult.provider_amount !== session.provider_amount;
+      const isCurrencyMismatch = captureResult.provider_currency !== session.provider_currency;
+      const isMissingCaptureId = !captureResult.capture_id;
+
+      if (isAmountMismatch || isCurrencyMismatch || isMissingCaptureId) {
+        session.status = PayPalCheckoutStatus.RECONCILE_REQUIRED;
+        session.failure_reason = isAmountMismatch
+          ? `Captured amount ${captureResult.provider_amount} does not match expected session amount ${session.provider_amount}.`
+          : isCurrencyMismatch
+          ? `Captured currency ${captureResult.provider_currency} does not match expected session currency ${session.provider_currency}.`
+          : 'Capture completed but missing capture ID.';
+        session.error_message = session.failure_reason;
+        await session.save();
+        throw new BadRequestException(session.failure_reason);
+      }
+
+      session.status = PayPalCheckoutStatus.CAPTURED;
+      await session.save();
+    }
+
+    // Step 3: CAS Claim CAPTURED -> FINALIZING
+    let isWinnerClaimant = false;
+    if (session.status === PayPalCheckoutStatus.CAPTURED) {
+      const claimed = await this.paypalCheckoutModel.findOneAndUpdate(
+        {
+          checkout_id: checkoutId,
+          status: PayPalCheckoutStatus.CAPTURED,
+        },
+        {
+          $set: {
+            status: PayPalCheckoutStatus.FINALIZING,
+            finalizing_started_at: new Date(),
+          },
+        },
+        { new: true },
+      ).exec();
+
+      if (claimed) {
+        session = claimed;
+        session.status = PayPalCheckoutStatus.FINALIZING;
+        session.finalizing_started_at = new Date();
+        isWinnerClaimant = true;
+      } else {
+        session = (await this.paypalCheckoutModel.findOne({ checkout_id: checkoutId }).exec())!;
+      }
+    }
+
+    // Step 4: Handle concurrent / non-winner callers in FINALIZING
+    if (session.status === PayPalCheckoutStatus.FINALIZING && !isWinnerClaimant) {
+      if (session.paypal_capture_id) {
+        const existingBooking = await this.bookingModel.findOne({
+          'payment_transactions.provider_capture_id': session.paypal_capture_id,
+        }).exec();
+        if (existingBooking) {
+          session.status = PayPalCheckoutStatus.COMPLETED;
+          session.result_booking_id = existingBooking._id.toString();
+          session.result_confirmation_number = existingBooking.confirmation_number;
+          await session.save();
+          return { session, existingBooking };
+        }
+      }
+
+      const startedAt = session.finalizing_started_at
+        ? new Date(session.finalizing_started_at).getTime()
+        : 0;
+      const isStale = Date.now() - startedAt > 60000;
+
+      if (isStale) {
+        await this.paypalCheckoutModel.findOneAndUpdate(
+          {
+            checkout_id: checkoutId,
+            status: PayPalCheckoutStatus.FINALIZING,
+            finalizing_started_at: session.finalizing_started_at,
+          },
+          {
+            $set: {
+              status: PayPalCheckoutStatus.CAPTURED,
+              finalizing_started_at: undefined,
+            },
+          },
+        ).exec();
+        throw new ConflictException(
+          'Checkout finalization timed out or stalled. Recovered to CAPTURED. Please retry to complete finalization.',
+        );
+      }
+
+      throw new ConflictException('Payment capture is currently finalizing. Please wait.');
+    }
+
+    if (session.status === PayPalCheckoutStatus.COMPLETED && session.result_booking_id) {
+      const existingBooking = await this.findById(session.result_booking_id);
+      return { session, existingBooking };
+    }
+
+    if (session.status !== PayPalCheckoutStatus.FINALIZING) {
+      throw new BadRequestException(`Checkout session cannot be captured in status: ${session.status}`);
+    }
+
+    return { session };
+  }
+
+  /**
+   * Capture PayPal Order and create Confirmed Booking.
+   */
+  async capturePayPalBooking(
+    checkoutId: string,
+    orderId: string,
+    userId: string,
+    role: string = UserRole.CUSTOMER,
+  ): Promise<{ booking: any; checkout_id: string }> {
+    const claimResult = await this.prepareAndClaimPayPalCapture(
+      checkoutId,
+      orderId,
+      userId,
+      role,
+      PayPalCheckoutOperationType.CREATE_BOOKING,
+    );
+
+    if (claimResult.existingBooking) {
+      return { booking: claimResult.existingBooking, checkout_id: checkoutId };
+    }
+
+    const session = claimResult.session;
+    if (!session.paypal_order_id) {
+      throw new BadRequestException('Session missing paypal_order_id for payment proof.');
+    }
+    const bookingDto = { ...(session.operation_payload as CreateBookingDto), payment_method: PaymentMethod.PAYPAL };
+    bookingDto.user_id = userId;
+    const externalProof: ExternalPaymentProof = {
+      payment_method: PaymentMethod.PAYPAL,
+      payment_reference: this.generateCode('PAY'),
+      expected_amount_vnd: session.amount_vnd,
+      provider_order_id: session.paypal_order_id,
+      provider_capture_id: session.paypal_capture_id!,
+      provider_amount: session.provider_amount,
+      provider_currency: session.provider_currency,
+      exchange_rate_vnd_per_unit: session.exchange_rate_vnd_per_unit,
+      status: 'SUCCESS',
+    };
+
+    try {
+      const booking = await this.createBooking(bookingDto, externalProof);
+      session.status = PayPalCheckoutStatus.COMPLETED;
+      session.result_booking_id = booking._id.toString();
+      session.result_confirmation_number = booking.confirmation_number;
+      await session.save();
+      return { booking, checkout_id: checkoutId };
+    } catch (createErr: any) {
+      await this.executeCompensationRefund(session, createErr, 'Booking creation failed');
+      throw createErr;
+    }
+  }
+
+  /**
+   * Create PayPal Order for Hold Confirmation.
+   */
+  async createPayPalConfirmHoldOrder(
+    dto: CreatePayPalConfirmHoldOrderDto,
+    userId: string,
+  ): Promise<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    if (!this.paypalService || !this.paypalService.isPayPalActive()) {
+      throw new BadRequestException('PayPal payment gateway is currently unavailable or disabled.');
+    }
+    if (!dto.blocking_number) {
+      throw new BadRequestException('blocking_number is required.');
+    }
+    if (!dto.client_request_id) {
+      throw new BadRequestException('client_request_id is required.');
+    }
+
+    const booking = await this.bookingModel.findOne({ blocking_number: dto.blocking_number }).exec();
+    if (!booking) {
+      throw new NotFoundException(`Booking with blocking number ${dto.blocking_number} not found`);
+    }
+    if (booking.status !== BookingStatus.BLOCKED) {
+      throw new BadRequestException(`Cannot confirm booking in ${booking.status} status.`);
+    }
+
+    // Check hold deadline: fail closed and cancel if expired
+    if (booking.time_limit_deadline && new Date() > booking.time_limit_deadline) {
+      await this.cancelExpiredBlockStrict(booking);
+      throw new BadRequestException(
+        'The 2-week deadline for this blocked ticket has passed. The reservation has been automatically cancelled.',
+      );
+    }
+
+    const existing = await this.paypalCheckoutModel.findOne({
+      user_id: userId,
+      client_request_id: dto.client_request_id,
+      operation_type: PayPalCheckoutOperationType.CONFIRM_HOLD,
+    }).exec();
+    if (existing && existing.paypal_order_id) {
+      return {
+        checkout_id: existing.checkout_id,
+        order_id: existing.paypal_order_id,
+        amount: existing.provider_amount,
+        currency: existing.provider_currency,
+        amount_vnd: existing.amount_vnd,
+        exchange_rate: existing.exchange_rate_vnd_per_unit,
+      };
+    }
+
+    if (booking.total_amount <= 0) {
+      throw new BadRequestException(
+        'Hold reservation does not require external PayPal payment (zero amount). Use standard confirm endpoint.',
+      );
+    }
+
+    const checkoutId = this.generateCode('CHK');
+    const order = await this.paypalService.createOrder({
+      amountVnd: booking.total_amount,
+      clientRequestId: dto.client_request_id,
+      description: `Aptech Airlines Hold Confirmation ${booking.pnr_code}`,
+    });
+
+    const session = new this.paypalCheckoutModel({
+      checkout_id: checkoutId,
+      client_request_id: dto.client_request_id,
+      user_id: userId,
+      operation_type: PayPalCheckoutOperationType.CONFIRM_HOLD,
+      status: PayPalCheckoutStatus.CREATED,
+      paypal_order_id: order.order_id,
+      amount_vnd: booking.total_amount,
+      provider_amount: order.provider_amount,
+      provider_currency: order.provider_currency,
+      exchange_rate_vnd_per_unit: order.exchange_rate_vnd_per_unit,
+      operation_payload: { blocking_number: dto.blocking_number },
+      order_expires_at: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+
+    try {
+      await session.save();
+    } catch (saveErr: any) {
+      if (saveErr?.code === 11000 || saveErr?.message?.includes('E11000')) {
+        const raceExisting = await this.paypalCheckoutModel.findOne({
+          user_id: userId,
+          client_request_id: dto.client_request_id,
+          operation_type: PayPalCheckoutOperationType.CONFIRM_HOLD,
+        }).exec();
+        if (raceExisting && raceExisting.paypal_order_id) {
+          return {
+            checkout_id: raceExisting.checkout_id,
+            order_id: raceExisting.paypal_order_id,
+            amount: raceExisting.provider_amount,
+            currency: raceExisting.provider_currency,
+            amount_vnd: raceExisting.amount_vnd,
+            exchange_rate: raceExisting.exchange_rate_vnd_per_unit,
+          };
+        }
+      }
+      throw saveErr;
+    }
+
+    return {
+      checkout_id: checkoutId,
+      order_id: order.order_id,
+      amount: order.provider_amount,
+      currency: order.provider_currency,
+      amount_vnd: booking.total_amount,
+      exchange_rate: order.exchange_rate_vnd_per_unit,
+    };
+  }
+
+  /**
+   * Capture PayPal Order and confirm Hold Booking.
+   */
+  async capturePayPalConfirmHold(
+    checkoutId: string,
+    orderId: string,
+    userId: string,
+    role: string = UserRole.CUSTOMER,
+  ): Promise<{ booking: any; checkout_id: string }> {
+    const claimResult = await this.prepareAndClaimPayPalCapture(
+      checkoutId,
+      orderId,
+      userId,
+      role,
+      PayPalCheckoutOperationType.CONFIRM_HOLD,
+    );
+
+    if (claimResult.existingBooking) {
+      return { booking: claimResult.existingBooking, checkout_id: checkoutId };
+    }
+
+    const session = claimResult.session;
+    if (!session.paypal_order_id) {
+      throw new BadRequestException('Session missing paypal_order_id for payment proof.');
+    }
+    const blockingNumber = session.operation_payload?.blocking_number;
+    const externalProof: ExternalPaymentProof = {
+      payment_method: PaymentMethod.PAYPAL,
+      payment_reference: this.generateCode('PAY'),
+      expected_amount_vnd: session.amount_vnd,
+      provider_order_id: session.paypal_order_id,
+      provider_capture_id: session.paypal_capture_id!,
+      provider_amount: session.provider_amount,
+      provider_currency: session.provider_currency,
+      exchange_rate_vnd_per_unit: session.exchange_rate_vnd_per_unit,
+      status: 'SUCCESS',
+    };
+
+    try {
+      const confirmedBooking = await this.confirmTicket(
+        { blocking_number: blockingNumber, payment_method: PaymentMethod.PAYPAL, paypal_order_id: session.paypal_order_id },
+        externalProof,
+      );
+      session.status = PayPalCheckoutStatus.COMPLETED;
+      session.result_booking_id = confirmedBooking._id.toString();
+      session.result_confirmation_number = confirmedBooking.confirmation_number;
+      await session.save();
+      return { booking: confirmedBooking, checkout_id: checkoutId };
+    } catch (confErr: any) {
+      await this.executeCompensationRefund(session, confErr, 'Confirm hold failed');
+      throw confErr;
+    }
+  }
+
+  /**
+   * Create PayPal Order for Ticket Reschedule Surcharge.
+   */
+  async createPayPalRescheduleOrder(
+    dto: CreatePayPalRescheduleOrderDto,
+    userId: string,
+  ): Promise<{
+    checkout_id: string;
+    order_id: string;
+    amount: string;
+    currency: string;
+    amount_vnd: number;
+    exchange_rate: number;
+  }> {
+    if (!this.paypalService || !this.paypalService.isPayPalActive()) {
+      throw new BadRequestException('PayPal payment gateway is currently unavailable or disabled.');
+    }
+    const ident = dto.confirmation_number || dto.pnr_code;
+    if (!ident) {
+      throw new BadRequestException('Confirmation number or PNR code is required for reschedule.');
+    }
+    if (!dto.client_request_id) {
+      throw new BadRequestException('client_request_id is required.');
+    }
+
+    const existing = await this.paypalCheckoutModel.findOne({
+      user_id: userId,
+      client_request_id: dto.client_request_id,
+      operation_type: PayPalCheckoutOperationType.RESCHEDULE,
+    }).exec();
+    if (existing && existing.paypal_order_id) {
+      return {
+        checkout_id: existing.checkout_id,
+        order_id: existing.paypal_order_id,
+        amount: existing.provider_amount,
+        currency: existing.provider_currency,
+        amount_vnd: existing.amount_vnd,
+        exchange_rate: existing.exchange_rate_vnd_per_unit,
+      };
+    }
+
+    const quote = await this.quoteRescheduleTicket(dto, userId);
+    if (quote.price_difference <= 0) {
+      throw new BadRequestException(
+        'Reschedule does not require external PayPal payment (zero or negative price difference). Use standard reschedule endpoint.',
+      );
+    }
+
+    const checkoutId = this.generateCode('CHK');
+    const order = await this.paypalService.createOrder({
+      amountVnd: quote.price_difference,
+      clientRequestId: dto.client_request_id,
+      description: `Aptech Airlines Reschedule Surcharge ${ident}`,
+    });
+
+    const session = new this.paypalCheckoutModel({
+      checkout_id: checkoutId,
+      client_request_id: dto.client_request_id,
+      user_id: userId,
+      operation_type: PayPalCheckoutOperationType.RESCHEDULE,
+      status: PayPalCheckoutStatus.CREATED,
+      paypal_order_id: order.order_id,
+      amount_vnd: quote.price_difference,
+      provider_amount: order.provider_amount,
+      provider_currency: order.provider_currency,
+      exchange_rate_vnd_per_unit: order.exchange_rate_vnd_per_unit,
+      operation_payload: dto,
+      order_expires_at: new Date(Date.now() + 3 * 60 * 60 * 1000),
+    });
+
+    try {
+      await session.save();
+    } catch (saveErr: any) {
+      if (saveErr?.code === 11000 || saveErr?.message?.includes('E11000')) {
+        const raceExisting = await this.paypalCheckoutModel.findOne({
+          user_id: userId,
+          client_request_id: dto.client_request_id,
+          operation_type: PayPalCheckoutOperationType.RESCHEDULE,
+        }).exec();
+        if (raceExisting && raceExisting.paypal_order_id) {
+          return {
+            checkout_id: raceExisting.checkout_id,
+            order_id: raceExisting.paypal_order_id,
+            amount: raceExisting.provider_amount,
+            currency: raceExisting.provider_currency,
+            amount_vnd: raceExisting.amount_vnd,
+            exchange_rate: raceExisting.exchange_rate_vnd_per_unit,
+          };
+        }
+      }
+      throw saveErr;
+    }
+
+    return {
+      checkout_id: checkoutId,
+      order_id: order.order_id,
+      amount: order.provider_amount,
+      currency: order.provider_currency,
+      amount_vnd: quote.price_difference,
+      exchange_rate: order.exchange_rate_vnd_per_unit,
+    };
+  }
+
+  /**
+   * Capture PayPal Order and execute Ticket Reschedule.
+   */
+  async capturePayPalReschedule(
+    checkoutId: string,
+    orderId: string,
+    userId: string,
+    role: string = UserRole.CUSTOMER,
+  ): Promise<{ result: any; checkout_id: string }> {
+    const claimResult = await this.prepareAndClaimPayPalCapture(
+      checkoutId,
+      orderId,
+      userId,
+      role,
+      PayPalCheckoutOperationType.RESCHEDULE,
+    );
+
+    if (claimResult.existingBooking) {
+      return { result: { booking: claimResult.existingBooking }, checkout_id: checkoutId };
+    }
+
+    const session = claimResult.session;
+    if (!session.paypal_order_id) {
+      throw new BadRequestException('Session missing paypal_order_id for payment proof.');
+    }
+    const rescheduleDto = {
+      ...(session.operation_payload as RescheduleTicketDto),
+      payment_method: PaymentMethod.PAYPAL,
+      paypal_order_id: session.paypal_order_id,
+    };
+
+    const externalProof: ExternalPaymentProof = {
+      payment_method: PaymentMethod.PAYPAL,
+      payment_reference: this.generateCode('PAY'),
+      expected_amount_vnd: session.amount_vnd,
+      provider_order_id: session.paypal_order_id,
+      provider_capture_id: session.paypal_capture_id!,
+      provider_amount: session.provider_amount,
+      provider_currency: session.provider_currency,
+      exchange_rate_vnd_per_unit: session.exchange_rate_vnd_per_unit,
+      status: 'SUCCESS',
+    };
+
+    try {
+      const res = await this.rescheduleTicket(rescheduleDto, externalProof);
+      session.status = PayPalCheckoutStatus.COMPLETED;
+      if (res?.booking?._id) {
+        session.result_booking_id = res.booking._id.toString();
+        session.result_confirmation_number = res.booking.confirmation_number;
+      }
+      await session.save();
+      return { result: res, checkout_id: checkoutId };
+    } catch (resErr: any) {
+      await this.executeCompensationRefund(session, resErr, 'Reschedule failed');
+      throw resErr;
     }
   }
 }

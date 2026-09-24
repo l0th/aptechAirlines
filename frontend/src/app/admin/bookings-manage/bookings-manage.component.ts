@@ -55,6 +55,13 @@ interface AdminPaymentTransaction {
   card_masked?: string;
   status?: string;
   created_at?: string;
+  payment_provider?: 'PROFILE_CARD' | 'PAYPAL' | 'LEGACY_CARD';
+  provider_order_id?: string;
+  provider_capture_id?: string;
+  provider_refund_id?: string;
+  provider_amount?: number;
+  provider_currency?: string;
+  payment_reference?: string;
 }
 
 interface AdminBooking {
@@ -284,7 +291,7 @@ interface AdminItinerary {
                             type="button"
                             (click)="confirmTicket(b)"
                             [disabled]="submitting()"
-                            class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
+                            class="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-full border border-emerald-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
                             [title]="lang.t('admin.bookings.confirmTicketTitle')"
                           >
                             <app-icon name="checkcircle2" class="w-4 h-4" />
@@ -295,7 +302,7 @@ interface AdminItinerary {
                           <a
                             [routerLink]="['/admin/reservation-desk']"
                             [queryParams]="{ booking: b._id }"
-                            class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 transition-colors inline-flex items-center justify-center"
+                            class="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full border border-blue-200 transition-colors inline-flex items-center justify-center"
                             [title]="lang.t('admin.bookings.rescheduleTitle')"
                           >
                             <app-icon name="calendar" class="w-4 h-4" />
@@ -307,7 +314,7 @@ interface AdminItinerary {
                             type="button"
                             (click)="cancelTicket(b)"
                             [disabled]="submitting()"
-                            class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
+                            class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-full border border-rose-200 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
                             [title]="lang.t('admin.bookings.cancelTicketTitle')"
                           >
                             <app-icon name="xcircle" class="w-4 h-4" />
@@ -317,7 +324,7 @@ interface AdminItinerary {
                         <button
                           type="button"
                           (click)="viewDetails(b)"
-                          class="p-1.5 hover:bg-slate-100 text-navy rounded-lg transition-colors inline-flex items-center justify-center"
+                          class="p-1.5 hover:bg-slate-100 text-navy rounded-full transition-colors inline-flex items-center justify-center"
                           [title]="lang.t('admin.bookings.viewDetailsTitle')"
                         >
                           <app-icon name="eye" class="w-4 h-4" />
@@ -462,18 +469,28 @@ interface AdminItinerary {
                     <div>
                       <div class="flex items-center gap-1.5">
                         <span class="font-bold" [ngClass]="transactionClass(t.transaction_type)">{{ t.transaction_type }}</span>
-                        @if (t.payment_method === 'PROFILE_CARD') {
+                        @if (t.payment_provider === 'PAYPAL' || t.payment_method === 'PAYPAL') {
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                            PayPal Sandbox
+                          </span>
+                        } @else if (t.payment_method === 'PROFILE_CARD') {
                           <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                             {{ lang.isVietnamese() ? 'Thẻ hồ sơ' : 'Profile Card' }}
-                          </span>
-                        } @else if (t.payment_method === 'PAYPAL') {
-                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                            PayPal
                           </span>
                         }
                       </div>
                       <span class="text-[10px] text-slate-400 block mt-0.5">
-                        {{ t.card_masked || 'N/A' }} • {{ t.status || 'SUCCESS' }}
+                        @if (t.payment_provider === 'PAYPAL' || t.payment_method === 'PAYPAL') {
+                          @if (t.provider_amount && t.provider_currency) {
+                            <span class="font-mono text-slate-600 font-semibold">&#36;{{ t.provider_amount }} {{ t.provider_currency }}</span>
+                          }
+                          @if (t.provider_capture_id || t.provider_order_id || t.payment_reference) {
+                            <span class="font-mono text-slate-400 ml-1">({{ t.provider_capture_id || t.provider_order_id || t.payment_reference }})</span>
+                          }
+                        } @else {
+                          {{ t.card_masked || 'N/A' }}
+                        }
+                        • {{ t.status || 'SUCCESS' }}
                         @if (t.created_at) {
                           <span> • {{ t.created_at | date: 'dd/MM/yyyy HH:mm' }}</span>
                         }

@@ -80,7 +80,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                         <button
                           type="button"
                           (click)="openEditModal(p)"
-                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-slate-100 text-slate-600 rounded-full transition-colors"
                           [title]="lang.t('common.edit')"
                         >
                           <app-icon name="edit" class="w-4 h-4" />
@@ -88,7 +88,7 @@ import { CancellationPolicy } from '../../core/models/booking.model';
                         <button
                           type="button"
                           (click)="deletePolicy(p)"
-                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors"
+                          class="p-1.5 hover:bg-rose-50 text-rose-600 rounded-full transition-colors"
                           [title]="lang.t('common.delete')"
                         >
                           <app-icon name="trash2" class="w-4 h-4" />

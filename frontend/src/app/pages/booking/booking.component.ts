@@ -2,9 +2,11 @@ import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/services/api.service';
 import { AuthService } from '../../core/services/auth.service';
 import { LanguageService } from '../../core/services/language.service';
+import { PaypalService } from '../../core/services/paypal.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { AuthModalService } from '../../shared/services/auth-modal.service';
 import { IconComponent } from '../../shared/components/icon/icon.component';
@@ -16,6 +18,7 @@ import {
   LegType,
   FlightLegSelection,
   PassengerInput,
+  PresentmentAmount,
 } from '../../core/models/booking.model';
 
 interface PassengerFormModel {
@@ -321,7 +324,7 @@ interface BookingContext {
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <!-- Option 1: Hold Ticket (Block) -->
                 <div
-                  (click)="canHoldTicket && isBlock.set(true)"
+                  (click)="canHoldTicket && setBookingMode(true)"
                   [class.border-gold]="isBlock()"
                   [class.bg-amber-50/50]="isBlock()"
                   [class.opacity-60]="!canHoldTicket"
@@ -367,7 +370,7 @@ interface BookingContext {
 
                 <!-- Option 2: Buy Immediately -->
                 <div
-                  (click)="isBlock.set(false)"
+                  (click)="setBookingMode(false)"
                   [class.border-gold]="!isBlock()"
                   [class.bg-amber-50/50]="!isBlock()"
                   class="p-5 rounded-2xl border-2 cursor-pointer transition-all relative"
@@ -400,51 +403,123 @@ interface BookingContext {
                 <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
                   <h3 class="text-base font-bold text-navy flex items-center gap-2">
                     <app-icon name="creditcard" class="w-5 h-5 text-gold" />
-                    <span>{{ lang.isVietnamese() ? 'Phương thức thanh toán' : 'Payment Method' }}</span>
+                    <span>{{ lang.t('booking.paymentMethod') }}</span>
                   </h3>
                   <span class="text-xs text-emerald-600 font-semibold flex items-center gap-1">
                     <app-icon name="shieldcheck" class="w-4 h-4" />
-                    {{ lang.isVietnamese() ? 'Hồ sơ tài khoản' : 'Profile Account' }}
+                    {{ lang.isVietnamese() ? 'Cổng thanh toán bảo mật' : 'Secure Payment Gateway' }}
                   </span>
                 </div>
 
-                <div class="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-navy/5 flex items-center justify-center text-navy shrink-0">
-                      <app-icon name="creditcard" class="w-5 h-5 text-gold" />
-                    </div>
+                <!-- Payment Method Selection Radios -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                  <!-- Option 1: Profile Card -->
+                  <div
+                    (click)="selectPaymentMethod('PROFILE_CARD')"
+                    [class.border-gold]="selectedPaymentMethod() === 'PROFILE_CARD'"
+                    [class.bg-amber-50/40]="selectedPaymentMethod() === 'PROFILE_CARD'"
+                    class="p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between"
+                  >
                     <div>
-                      <div class="text-xs font-bold text-navy">
-                        {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích' : 'Preferred Credit Card' }}
+                      <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                          <app-icon name="creditcard" class="w-4 h-4 text-gold" />
+                          <span class="text-xs font-bold text-navy">{{ lang.t('booking.paymentPreferredCard') }}</span>
+                        </div>
+                        <input
+                          type="radio"
+                          name="paymentMethodSelector"
+                          [checked]="selectedPaymentMethod() === 'PROFILE_CARD'"
+                          class="text-gold focus:ring-gold"
+                        />
                       </div>
-                      <div class="text-xs text-slate-500 font-mono mt-0.5">
-                        @if (!auth.isAuthenticated()) {
-                          <span class="text-slate-500 font-sans font-medium">
-                            {{ lang.isVietnamese() ? 'Đăng nhập để sử dụng thẻ tín dụng ưa thích trong hồ sơ.' : 'Sign in to use the preferred credit card in your profile.' }}
-                          </span>
-                        } @else if (auth.currentUser()?.has_preferred_credit_card) {
-                          {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                      <p class="text-[11px] text-slate-500 leading-relaxed">
+                        {{ lang.t('booking.paymentPreferredCardDesc') }}
+                      </p>
+                    </div>
+                    <div class="mt-3 text-[11px] font-mono text-slate-600">
+                      @if (!auth.isAuthenticated()) {
+                        <span class="text-slate-400 font-sans">{{ lang.isVietnamese() ? 'Yêu cầu đăng nhập' : 'Sign in required' }}</span>
+                      } @else if (auth.currentUser()?.has_preferred_credit_card) {
+                        {{ auth.currentUser()?.preferred_credit_card_masked || '•••• •••• •••• ••••' }}
+                      } @else {
+                        <span class="text-rose-500 font-sans">{{ lang.isVietnamese() ? 'Chưa có thẻ trong hồ sơ' : 'No card on file' }}</span>
+                      }
+                    </div>
+                  </div>
+
+                  <!-- Option 2: PayPal Sandbox (Strictly customer only) -->
+                  @if (!auth.isStaff() && (!auth.isAuthenticated() || auth.currentUser()?.role === 'CUSTOMER')) {
+                    <div
+                      (click)="selectPaymentMethod('PAYPAL')"
+                      [class.border-gold]="selectedPaymentMethod() === 'PAYPAL'"
+                      [class.bg-amber-50/40]="selectedPaymentMethod() === 'PAYPAL'"
+                      class="p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        <div class="flex items-center justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <span class="font-bold text-xs text-blue-800">PayPal</span>
+                            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">Sandbox</span>
+                          </div>
+                          <input
+                            type="radio"
+                            name="paymentMethodSelector"
+                            [checked]="selectedPaymentMethod() === 'PAYPAL'"
+                            class="text-gold focus:ring-gold"
+                          />
+                        </div>
+                        <p class="text-[11px] text-slate-500 leading-relaxed">
+                          {{ lang.t('booking.paymentPaypalDesc') }}
+                        </p>
+                      </div>
+                      <div class="mt-3 text-[11px] text-slate-600 flex flex-col gap-1">
+                        @if (serverQuotePresentment()) {
+                          <div class="flex items-center justify-between">
+                            <span class="font-semibold text-navy">&#36;{{ serverQuotePresentment()?.provider_amount }} USD</span>
+                            <span class="text-[10px] text-slate-400">1 USD = {{ serverQuotePresentment()?.exchange_rate_vnd_per_unit | number }} VND</span>
+                          </div>
                         } @else {
-                          <span class="text-amber-600 font-sans font-medium">
-                            {{ lang.isVietnamese() ? 'Chưa có thẻ ưa thích trong hồ sơ' : 'No preferred card in profile' }}
+                          <span class="text-[10px] text-slate-400 italic">
+                            {{ lang.isVietnamese() ? 'Giá PayPal sẽ được xác nhận trước khi mở thanh toán.' : 'PayPal amount will be confirmed before payment opens.' }}
                           </span>
                         }
                       </div>
                     </div>
-                  </div>
-                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60 self-start sm:self-auto">
-                    {{ lang.isVietnamese() ? 'Thẻ trong hồ sơ' : 'Profile Card' }}
-                  </span>
-                </div>
-
-                <div class="mt-4 p-3 bg-amber-50/60 rounded-xl border border-amber-200/50 text-[11px] text-slate-600 leading-relaxed">
-                  {{ lang.isVietnamese() ? 'Thẻ tín dụng ưa thích đã lưu trong hồ sơ hãng bay để thanh toán vé.' : 'Preferred credit card saved in your airline profile for ticket transactions.' }}
-                  @if (auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
-                    <div class="mt-1.5 text-rose-600 font-medium">
-                      {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng trong trang Hồ sơ cá nhân trước khi thanh toán vé ngay.' : 'Please update your preferred credit card in your Profile before instant purchase.' }}
-                    </div>
                   }
                 </div>
+
+                @if (selectedPaymentMethod() === 'PROFILE_CARD') {
+                  <div class="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600 leading-relaxed">
+                    {{ lang.isVietnamese() ? 'Thanh toán trực tiếp bằng thẻ đã lưu trong hồ sơ thành viên.' : 'Charged directly to the saved credit card on your member profile.' }}
+                    @if (auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
+                      <div class="mt-1 text-rose-600 font-medium">
+                        {{ lang.isVietnamese() ? 'Vui lòng cập nhật thẻ tín dụng trong Hồ sơ cá nhân trước khi thanh toán.' : 'Please update your credit card in Profile before instant purchase.' }}
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  @if (serverQuotePresentment(); as quote) {
+                    <div class="p-3.5 bg-blue-50/50 border border-blue-200/70 rounded-xl text-xs text-slate-700 space-y-1">
+                      <div class="flex items-center justify-between font-semibold text-navy">
+                        <span>{{ lang.t('booking.providerAmount') }}</span>
+                        <span class="text-sm font-mono text-blue-800">&#36;{{ quote.provider_amount }} {{ quote.provider_currency }}</span>
+                      </div>
+                      <div class="text-[11px] text-slate-500">
+                        @if (quote.exchange_rate_vnd_per_unit > 0) {
+                          {{ (lang.t('booking.paymentRateNotice') || '').replace('{rate}', (quote.exchange_rate_vnd_per_unit | number) || '') }}
+                        }
+                      </div>
+                      <div class="text-[10px] text-amber-700 italic pt-1 border-t border-blue-100">
+                        * {{ lang.t('booking.paymentSandboxBadge') }}
+                      </div>
+                    </div>
+                  } @else {
+                    <div class="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600 leading-relaxed">
+                      {{ lang.isVietnamese() ? 'Giá PayPal sẽ được xác nhận trước khi mở thanh toán.' : 'PayPal amount will be confirmed before payment opens.' }}
+                    </div>
+                  }
+                }
               </div>
             }
 
@@ -624,29 +699,66 @@ interface BookingContext {
                 </div>
               </div>
 
-              <!-- Action Submit Button -->
+              <!-- Action Submit Button / PayPal Buttons -->
               <div class="mt-6">
-                <button
-                  type="button"
-                  (click)="submitBooking()"
-                  [disabled]="loading() || (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card)"
-                  class="btn-gold w-full text-sm !py-3.5 uppercase tracking-wider font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  @if (loading()) {
-                    <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
-                    <span>{{ lang.t('common.loading') }}</span>
-                  } @else if (isBlock()) {
-                    <app-icon name="shieldcheck" class="w-4 h-4" />
-                    <span>{{ lang.t('booking.btnHolding') }}</span>
-                  } @else {
-                    <app-icon name="creditcard" class="w-4 h-4" />
-                    <span>{{ lang.t('booking.btnConfirm') }}</span>
-                  }
-                </button>
-                @if (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
-                  <div class="mt-2 text-xs text-rose-600 text-center font-medium">
-                    {{ lang.isVietnamese() ? 'Cần cập nhật thẻ tín dụng ưa thích trong hồ sơ để mua vé ngay.' : 'A preferred credit card in your profile is required for instant purchase.' }}
+                @if (!isBlock() && selectedPaymentMethod() === 'PAYPAL') {
+                  <div class="space-y-3">
+                    @if (!auth.isAuthenticated()) {
+                      <button
+                        type="button"
+                        (click)="authModal.open()"
+                        class="btn-gold w-full text-sm !py-3.5 uppercase tracking-wider font-bold"
+                      >
+                        <app-icon name="user" class="w-4 h-4" />
+                        <span>{{ lang.t('booking.loginRequired') }}</span>
+                      </button>
+                    } @else if (!isPayPalEligible()) {
+                      <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                        {{ lang.isVietnamese() ? 'PayPal hiện không khả dụng cho giao dịch này. Vui lòng thanh toán bằng Thẻ hồ sơ.' : 'PayPal is currently unavailable for this transaction. Please use Profile Card payment.' }}
+                      </div>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="startPayPalBookingPayment()"
+                        [disabled]="loading() || isPayPalProcessing()"
+                        class="w-full flex items-center justify-center gap-2.5 bg-[#ffc439] hover:bg-[#f4bb33] active:bg-[#e0ab2e] text-[#003087] font-black py-3.5 px-4 rounded-full shadow-md transition-all uppercase tracking-wider text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        @if (isPayPalProcessing()) {
+                          <app-icon name="loader-2" class="w-5 h-5 animate-spin" />
+                          <span>{{ lang.isVietnamese() ? 'Đang kết nối PayPal...' : 'Connecting to PayPal...' }}</span>
+                        } @else {
+                          <span>Pay with</span>
+                          <span class="font-extrabold italic text-base">PayPal</span>
+                          @if (serverQuotePresentment()) {
+                            <span class="text-xs font-semibold text-slate-700">(&#36;{{ serverQuotePresentment()?.provider_amount }} USD)</span>
+                          }
+                        }
+                      </button>
+                    }
                   </div>
+                } @else {
+                  <button
+                    type="button"
+                    (click)="submitBooking()"
+                    [disabled]="loading() || (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card)"
+                    class="btn-gold w-full text-sm !py-3.5 uppercase tracking-wider font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    @if (loading()) {
+                      <app-icon name="refreshcw" class="w-4 h-4 animate-spin" />
+                      <span>{{ lang.t('common.loading') }}</span>
+                    } @else if (isBlock()) {
+                      <app-icon name="shieldcheck" class="w-4 h-4" />
+                      <span>{{ lang.t('booking.btnHolding') }}</span>
+                    } @else {
+                      <app-icon name="creditcard" class="w-4 h-4" />
+                      <span>{{ lang.t('booking.btnConfirm') }}</span>
+                    }
+                  </button>
+                  @if (!isBlock() && auth.isAuthenticated() && !auth.currentUser()?.has_preferred_credit_card) {
+                    <div class="mt-2 text-xs text-rose-600 text-center font-medium">
+                      {{ lang.isVietnamese() ? 'Cần cập nhật thẻ tín dụng ưa thích trong hồ sơ để mua vé ngay.' : 'A preferred credit card in your profile is required for instant purchase.' }}
+                    </div>
+                  }
                 }
               </div>
 
@@ -682,10 +794,18 @@ export class BookingComponent implements OnInit {
   readonly lang = inject(LanguageService);
   private readonly toast = inject(ToastService);
   readonly authModal = inject(AuthModalService);
+  readonly paypalService = inject(PaypalService);
 
   readonly isBlock = signal(false);
   readonly isSeatMapOpen = signal(false);
   readonly loading = signal(false);
+  readonly selectedPaymentMethod = signal<'PROFILE_CARD' | 'PAYPAL'>('PROFILE_CARD');
+  readonly isPayPalEligible = signal<boolean>(false);
+  readonly isPayPalProcessing = signal<boolean>(false);
+  readonly serverQuotePresentment = signal<PresentmentAmount | null>(null);
+
+  private currentPayPalCheckoutId: string = '';
+  private currentPayPalClientRequestId: string = '';
 
   context: BookingContext | null = null;
   passengers: PassengerFormModel[] = [];
@@ -696,6 +816,7 @@ export class BookingComponent implements OnInit {
   earliestDeparture: Date | null = null;
   /** Hold deadline = earliest departure − 14 days (mirrors backend `time_limit_deadline`). */
   holdDeadline: Date | null = null;
+
   /** Flight used by the seat map: DIRECT outbound, or CONNECTING leg 1. */
   seatMapFlightId = '';
   seatMapFlightNumber = '';
@@ -714,6 +835,16 @@ export class BookingComponent implements OnInit {
         if (!this.passengers[0].last_name) {
           this.passengers[0].last_name = u.last_name || '';
         }
+      }
+    });
+
+    // Auto-check PayPal eligibility when PayPal payment method is selected in Buy Now mode
+    effect(() => {
+      const isBlk = this.isBlock();
+      const method = this.selectedPaymentMethod();
+      const isAuth = this.auth.isAuthenticated();
+      if (!isBlk && method === 'PAYPAL' && isAuth) {
+        this.paypalService.checkEligibility().then((eligible) => this.isPayPalEligible.set(eligible));
       }
     });
   }
@@ -1069,6 +1200,7 @@ export class BookingComponent implements OnInit {
   }
 
   handleSeatsConfirmed(seats: Record<number, string>): void {
+    this.serverQuotePresentment.set(null);
     this.passengers.forEach((p, i) => {
       p.seat_code = seats[i] || '';
     });
@@ -1087,6 +1219,7 @@ export class BookingComponent implements OnInit {
   }
 
   handleSeatsSanitized(seats: Record<number, string>): void {
+    this.serverQuotePresentment.set(null);
     let changed = false;
     this.passengers.forEach((p, i) => {
       const validSeat = seats[i] || '';
@@ -1333,40 +1466,175 @@ export class BookingComponent implements OnInit {
     return this.lang.isVietnamese() ? 'Đặt vé không thành công. Vui lòng thử lại.' : 'Booking failed. Please try again.';
   }
 
-  submitBooking(): void {
-    // Spec: guests must register / login before buying or blocking a ticket.
-    // Do NOT call the API with a fake fallback user id — prompt login instead.
+  setBookingMode(block: boolean): void {
+    this.serverQuotePresentment.set(null);
+    this.isBlock.set(block);
+  }
+
+  selectPaymentMethod(method: 'PROFILE_CARD' | 'PAYPAL'): void {
+    if (method === 'PAYPAL' && (this.auth.isStaff() || (this.auth.isAuthenticated() && this.auth.currentUser()?.role !== 'CUSTOMER'))) {
+      this.toast.warning(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+    this.serverQuotePresentment.set(null);
+    this.selectedPaymentMethod.set(method);
+    if (method === 'PAYPAL') {
+      this.isPayPalEligible.set(false);
+      this.paypalService.checkEligibility().then((eligible) => this.isPayPalEligible.set(eligible));
+    }
+  }
+
+  async startPayPalBookingPayment(): Promise<void> {
     if (!this.auth.isAuthenticated() || !this.auth.currentUser()?._id) {
       this.toast.warning(this.lang.t('booking.loginRequired'));
       this.authModal.open();
       return;
     }
+    if (this.auth.isStaff() || this.auth.currentUser()?.role !== 'CUSTOMER') {
+      this.toast.error(
+        this.lang.isVietnamese()
+          ? 'Thanh toán trực tiếp PayPal chỉ dành riêng cho tài khoản hành khách.'
+          : 'Interactive PayPal payments are exclusively reserved for customer accounts.',
+      );
+      return;
+    }
+    if (!this.validateBookingForm()) {
+      return;
+    }
 
+    this.serverQuotePresentment.set(null);
+
+    if (!this.currentPayPalClientRequestId) {
+      this.currentPayPalClientRequestId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    }
+
+    this.isPayPalProcessing.set(true);
+
+    const legs = this.buildLegs();
+    const payload = {
+      user_id: this.auth.currentUser()!._id,
+      booking_type: this.resolveBookingType(),
+      is_block: false,
+      passengers: this.buildPassengerPayload(),
+      legs: legs,
+      seat_requests: this.buildSeatRequests(legs),
+      client_request_id: this.currentPayPalClientRequestId,
+    };
+
+    let quote: any;
+    try {
+      quote = await firstValueFrom(this.api.quoteBooking(payload));
+    } catch (quoteErr: any) {
+      this.isPayPalProcessing.set(false);
+      console.error('Pre-checkout quote fetch failed:', quoteErr);
+      const errMsg = quoteErr?.error?.message || quoteErr?.message || this.lang.t('booking.quoteFailed') || 'Failed to fetch quote';
+      this.toast.error(errMsg);
+      return;
+    }
+
+    if (!quote || typeof quote.total_amount !== 'number') {
+      this.isPayPalProcessing.set(false);
+      this.toast.error('Invalid quote response received.');
+      return;
+    }
+
+    this.totalAmount = quote.total_amount;
+    if (quote.presentment) {
+      this.serverQuotePresentment.set(quote.presentment);
+    }
+
+    // Zero-external-charge customer flow (Fix 2)
+    if (quote.total_amount === 0) {
+      this.loading.set(true);
+      try {
+        const createPayload = {
+          ...payload,
+          payment_method: 'PAYPAL' as const,
+        };
+        const booking = await firstValueFrom(this.api.createBooking(createPayload));
+        this.toast.success(this.lang.t('booking.captureSuccess') || 'Booking completed successfully');
+        this.currentPayPalClientRequestId = '';
+        this.handleBookingSuccess(booking);
+      } catch (err: any) {
+        console.error('Zero amount booking failed:', err);
+        this.toast.error(err?.error?.message || err?.message || 'Booking failed');
+      } finally {
+        this.loading.set(false);
+        this.isPayPalProcessing.set(false);
+      }
+      return;
+    }
+
+    // Authoritative total > 0: proceed to PayPal SDK startOneTimePayment
+    try {
+      await this.paypalService.startOneTimePayment({
+        presentationMode: 'auto',
+        createOrder: async () => {
+          const res = await firstValueFrom(this.api.createPayPalBookingOrder(payload));
+          this.currentPayPalCheckoutId = res.checkout_id;
+          return { orderId: res.order_id };
+        },
+        onApprove: async (data: { orderId: string }) => {
+          this.loading.set(true);
+          try {
+            const res = await firstValueFrom(
+              this.api.capturePayPalBooking(this.currentPayPalCheckoutId, data.orderId),
+            );
+            this.toast.success(this.lang.t('booking.captureSuccess'));
+            this.currentPayPalClientRequestId = '';
+            this.handleBookingSuccess(res.booking);
+          } catch (err: any) {
+            console.error('PayPal capture error:', err);
+            this.toast.error(err?.error?.message || this.lang.t('booking.captureFailed'));
+          } finally {
+            this.loading.set(false);
+          }
+        },
+        onCancel: () => {
+          console.log('PayPal checkout session cancelled by user');
+        },
+        onError: (err: any) => {
+          console.error('PayPal checkout session error:', err);
+          this.toast.error(this.lang.t('booking.captureFailed'));
+        },
+      });
+    } catch (err: any) {
+      console.error('Failed to initiate PayPal checkout:', err);
+      this.toast.error(err?.message || this.lang.t('booking.captureFailed'));
+    } finally {
+      this.isPayPalProcessing.set(false);
+    }
+  }
+
+  validateBookingForm(): boolean {
     const ctx = this.context;
     if (!ctx) {
       this.toast.error(this.lang.isVietnamese() ? 'Không tìm thấy thông tin chuyến bay đã chọn' : 'Selected flight information not found');
-      return;
+      return false;
     }
 
-    // Frontend composition integrity validation against original search selection
     if (!this.validatePassengerComposition()) {
       this.toast.error(this.lang.t('booking.compositionMismatchError'));
-      return;
+      return false;
     }
 
-    // Validate passengers
     for (let i = 0; i < this.passengers.length; i++) {
       const p = this.passengers[i];
       if (!p.first_name.trim() || !p.last_name.trim()) {
         this.toast.warning(this.lang.isVietnamese() ? `Vui lòng nhập họ và tên của Hành khách ${i + 1}` : `Please enter full name for Passenger ${i + 1}`);
-        return;
+        return false;
       }
       if (!p.id_card_or_passport.trim()) {
         this.toast.warning(this.lang.isVietnamese() ? `Vui lòng nhập số CCCD / Hộ chiếu của Hành khách ${i + 1}` : `Please enter ID / Passport number for Passenger ${i + 1}`);
-        return;
+        return false;
       }
 
-      // Requirement 1.3.4: If customer supplies DOB, validate that it is a real valid calendar date and not in the future
       if (p.date_of_birth && p.date_of_birth.trim()) {
         const dobStr = p.date_of_birth.trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dobStr)) {
@@ -1375,7 +1643,7 @@ export class BookingComponent implements OnInit {
               ? `Hành khách ${i + 1}: Ngày sinh không đúng định dạng YYYY-MM-DD`
               : `Passenger ${i + 1}: Date of birth format must be YYYY-MM-DD`,
           );
-          return;
+          return false;
         }
         const [yStr, mStr, dStr] = dobStr.split('-');
         const y = parseInt(yStr, 10);
@@ -1387,7 +1655,7 @@ export class BookingComponent implements OnInit {
               ? `Hành khách ${i + 1}: Ngày sinh không hợp lệ`
               : `Passenger ${i + 1}: Invalid date of birth`,
           );
-          return;
+          return false;
         }
         const parsedDate = new Date(Date.UTC(y, m - 1, d));
         if (
@@ -1400,7 +1668,7 @@ export class BookingComponent implements OnInit {
               ? `Hành khách ${i + 1}: Ngày sinh không tồn tại trong lịch thực tế`
               : `Passenger ${i + 1}: Date of birth does not exist on the calendar`,
           );
-          return;
+          return false;
         }
         const now = new Date();
         const todayUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
@@ -1410,13 +1678,11 @@ export class BookingComponent implements OnInit {
               ? `Hành khách ${i + 1}: Ngày sinh không thể là ngày trong tương lai`
               : `Passenger ${i + 1}: Date of birth cannot be in the future`,
           );
-          return;
+          return false;
         }
       }
     }
 
-    // Free hold is only allowed when departure is more than 14 days away
-    // (same rule the backend enforces with a 400).
     if (this.isBlock() && !this.canHoldTicket) {
       this.toast.warning(
         this.lang.isVietnamese()
@@ -1424,6 +1690,20 @@ export class BookingComponent implements OnInit {
           : 'Flight departs within 14 days and cannot be held. Please choose "Instant Purchase".',
       );
       this.isBlock.set(false);
+      return false;
+    }
+
+    return true;
+  }
+
+  submitBooking(): void {
+    if (!this.auth.isAuthenticated() || !this.auth.currentUser()?._id) {
+      this.toast.warning(this.lang.t('booking.loginRequired'));
+      this.authModal.open();
+      return;
+    }
+
+    if (!this.validateBookingForm()) {
       return;
     }
 
@@ -1439,7 +1719,6 @@ export class BookingComponent implements OnInit {
       }
     }
 
-    // Prepare flight legs (backend takes `legs: [{ flight_id, inventory_id, leg_type }]`)
     const legs = this.buildLegs();
     if (!legs.length) {
       this.toast.error(this.lang.isVietnamese() ? 'Không xác định được chuyến bay đã chọn. Vui lòng tìm kiếm lại.' : 'Unable to identify selected flight. Please search again.');
@@ -1461,17 +1740,11 @@ export class BookingComponent implements OnInit {
     this.api.createBooking(payload).subscribe({
       next: (booking) => {
         this.loading.set(false);
-        sessionStorage.removeItem('booking_context');
-        sessionStorage.setItem('confirmed_booking', JSON.stringify(booking));
-        // Backend vừa cộng dặm SkyMiles cho hồ sơ → làm mới cache user để
-        // thanh điều hướng/hồ sơ hiển thị số dặm đúng ngay sau khi đặt vé.
-        this.auth.refreshProfile();
-        this.router.navigate(['/booking-success']);
+        this.handleBookingSuccess(booking);
       },
       error: (err) => {
         this.loading.set(false);
         if (err?.status === 401) {
-          // Session expired or token invalid — prompt re-login.
           this.toast.warning(this.lang.t('booking.sessionExpired'));
           this.authModal.open();
           return;
@@ -1479,5 +1752,12 @@ export class BookingComponent implements OnInit {
         this.toast.error(this.extractErrorMessage(err));
       },
     });
+  }
+
+  private handleBookingSuccess(booking: any): void {
+    sessionStorage.removeItem('booking_context');
+    sessionStorage.setItem('confirmed_booking', JSON.stringify(booking));
+    this.auth.refreshProfile();
+    this.router.navigate(['/booking-success']);
   }
 }
