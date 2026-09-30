@@ -1,158 +1,34 @@
-import { Routes } from '@angular/router';
-import { staffGuard, adminOnlyGuard } from './core/guards/auth.guard';
-
-export const routes: Routes = [
-  // Client Portal
-  {
-    path: '',
-    loadComponent: () =>
-      import('./pages/home/home.component').then((m) => m.HomeComponent),
-  },
-  {
-    path: 'results',
-    loadComponent: () =>
-      import('./pages/flight-results/flight-results.component').then(
-        (m) => m.FlightResultsComponent,
-      ),
-  },
-  {
-    path: 'booking',
-    loadComponent: () =>
-      import('./pages/booking/booking.component').then((m) => m.BookingComponent),
-  },
-  {
-    path: 'booking-success',
-    loadComponent: () =>
-      import('./pages/booking-success/booking-success.component').then(
-        (m) => m.BookingSuccessComponent,
-      ),
-  },
-  {
-    path: 'track',
-    loadComponent: () =>
-      import('./pages/track-booking/track-booking.component').then(
-        (m) => m.TrackBookingComponent,
-      ),
-  },
-  {
-    path: 'flight-lookup',
-    loadComponent: () =>
-      import('./pages/flight-lookup/flight-lookup.component').then(
-        (m) => m.FlightLookupComponent,
-      ),
-  },
-  {
-    path: 'skymiles',
-    loadComponent: () =>
-      import('./pages/skymiles/skymiles.component').then(
-        (m) => m.SkyMilesComponent,
-      ),
-  },
-
-  // Admin & Clerk Portal
-  {
-    path: 'admin',
-    canActivate: [staffGuard],
-    loadComponent: () =>
-      import('./admin/admin-layout/admin-layout.component').then(
-        (m) => m.AdminLayoutComponent,
-      ),
-    children: [
-      {
-        path: '',
-        redirectTo: 'dashboard',
-        pathMatch: 'full',
-      },
-      {
-        path: 'dashboard',
-        loadComponent: () =>
-          import('./admin/dashboard/dashboard.component').then(
-            (m) => m.DashboardComponent,
-          ),
-      },
-      {
-        path: 'analytics',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/analytics/analytics.component').then(
-            (m) => m.AnalyticsComponent,
-          ),
-      },
-      {
-        path: 'flights',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/flights-manage/flights-manage.component').then(
-            (m) => m.FlightsManageComponent,
-          ),
-      },
-      {
-        path: 'commercial-flights',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/commercial-flights/commercial-flights.component').then(
-            (m) => m.CommercialFlightsComponent,
-          ),
-      },
-      {
-        path: 'airports',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/airports-manage/airports-manage.component').then(
-            (m) => m.AirportsManageComponent,
-          ),
-      },
-      {
-        path: 'bookings',
-        loadComponent: () =>
-          import('./admin/bookings-manage/bookings-manage.component').then(
-            (m) => m.BookingsManageComponent,
-          ),
-      },
-      {
-        path: 'reservation-desk',
-        loadComponent: () =>
-          import('./admin/reservation-desk/reservation-desk.component').then(
-            (m) => m.ReservationDeskComponent,
-          ),
-      },
-      {
-        path: 'users',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/users-manage/users-manage.component').then(
-            (m) => m.UsersManageComponent,
-          ),
-      },
-      {
-        path: 'policies',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/policies-manage/policies-manage.component').then(
-            (m) => m.PoliciesManageComponent,
-          ),
-      },
-      {
-        path: 'seat-operations',
-        loadComponent: () =>
-          import('./admin/seat-operations/seat-operations.component').then(
-            (m) => m.SeatOperationsComponent,
-          ),
-      },
-      {
-        path: 'seat-pricing',
-        canActivate: [adminOnlyGuard],
-        loadComponent: () =>
-          import('./admin/seat-pricing/seat-pricing.component').then(
-            (m) => m.SeatPricingComponent,
-          ),
-      },
-    ],
-  },
-
-  // Catch-all
-  {
-    path: '**',
-    redirectTo: '',
-  },
+import { Routes } from '@angular/router';import { authGuard,staffGuard,adminGuard } from './core/guards';
+export const routes:Routes=[
+ {path:'',loadComponent:()=>import('./shared/site-shell.component').then(m=>m.SiteShellComponent),children:[
+  {path:'',loadComponent:()=>import('./pages/home.component').then(m=>m.HomeComponent)},
+  {path:'results',loadComponent:()=>import('./pages/results.component').then(m=>m.ResultsComponent)},
+  {path:'auth',loadComponent:()=>import('./pages/auth.component').then(m=>m.AuthComponent)},
+  {path:'booking/passengers',loadComponent:()=>import('./pages/passengers.component').then(m=>m.PassengersComponent)},
+  {path:'booking/seats',loadComponent:()=>import('./pages/seats.component').then(m=>m.SeatsComponent)},
+  {path:'booking/review',loadComponent:()=>import('./pages/review.component').then(m=>m.ReviewComponent)},
+  {path:'booking/success',loadComponent:()=>import('./pages/success.component').then(m=>m.SuccessComponent)},
+  {path:'trips',canActivate:[authGuard],loadComponent:()=>import('./pages/trips.component').then(m=>m.TripsComponent)},
+  {path:'reschedule',canActivate:[authGuard],loadComponent:()=>import('./pages/reschedule.component').then(m=>m.RescheduleComponent)},
+  {path:'track',canActivate:[authGuard],loadComponent:()=>import('./pages/track.component').then(m=>m.TrackComponent)},
+  {path:'lookup',loadComponent:()=>import('./pages/lookup.component').then(m=>m.LookupComponent)},
+  {path:'profile',canActivate:[authGuard],loadComponent:()=>import('./pages/profile.component').then(m=>m.ProfileComponent)},
+  {path:'skymiles',loadComponent:()=>import('./pages/skymiles.component').then(m=>m.SkyMilesComponent)}
+ ]},
+ {path:'admin',canActivate:[staffGuard],loadComponent:()=>import('./admin/admin-shell.component').then(m=>m.AdminShellComponent),children:[
+  {path:'',loadComponent:()=>import('./admin/dashboard.component').then(m=>m.DashboardComponent)},
+  {path:'dashboard',canActivate:[adminGuard],loadComponent:()=>import('./admin/dashboard.component').then(m=>m.DashboardComponent)},
+  {path:'analytics',canActivate:[adminGuard],loadComponent:()=>import('./admin/dashboard.component').then(m=>m.DashboardComponent)},
+  {path:'bookings',loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.BookingsAdminComponent)},
+  {path:'users',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.UsersAdminComponent)},
+  {path:'flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.FlightsAdminComponent)},
+  {path:'airports',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.AirportsAdminComponent)},
+  {path:'policies',canActivate:[adminGuard],loadComponent:()=>import('./admin/policies.component').then(m=>m.PoliciesComponent)},
+  {path:'commercial',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},
+  {path:'commercial-flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},
+  {path:'seat-pricing',canActivate:[adminGuard],loadComponent:()=>import('./admin/seat-pricing.component').then(m=>m.SeatPricingComponent)},
+  {path:'seat-operations',loadComponent:()=>import('./admin/seat-operations.component').then(m=>m.SeatOperationsComponent)},
+  {path:'reservation-desk',loadComponent:()=>import('./admin/reservation-desk.component').then(m=>m.ReservationDeskComponent)}
+ ]},
+ {path:'**',redirectTo:''}
 ];

@@ -85,7 +85,7 @@ async function main() {
   await preCleanConn.dropDatabase();
   await preCleanConn.close();
 
-  // Step B: Bootstrap NestJS Application (SeedService initializes baseline SuperAdmin, Airports, Policies)
+  // Step B: Bootstrap NestJS Application (database bootstrap initializes baseline SuperAdmin, Airports, Policies)
   logger.log('B. Bootstrapping NestJS application on ephemeral port...');
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn', 'log'] });
   app.setGlobalPrefix('api');

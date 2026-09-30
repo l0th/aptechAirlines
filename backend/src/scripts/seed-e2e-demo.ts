@@ -1101,7 +1101,7 @@ export async function run(options?: { mongoUri?: string; isCleanup?: boolean }) 
   console.log('\n[1/6] Verifying immutable SUPER_ADMIN protection (Requirement 3)...');
   const existingSuperAdmin = await usersCol.findOne({ role: UserRole.SUPER_ADMIN });
   if (!existingSuperAdmin) {
-    console.log('   ℹ️  SUPER_ADMIN not present in database. Note: Application bootstrap (SeedService) manages SUPER_ADMIN creation.');
+    console.log('   ℹ️  SUPER_ADMIN not present in database. Note: database/bootstrap-db.js manages the initial SUPER_ADMIN outside backend startup.');
   } else {
     console.log(`   ✅ Existing SUPER_ADMIN confirmed immutable: "${existingSuperAdmin.username}".`);
   }
@@ -1161,12 +1161,12 @@ export async function run(options?: { mongoUri?: string; isCleanup?: boolean }) 
   }
   console.log(`   ✅ Verified/provisioned ${e2eAirports.length} reference airports safely.`);
 
-  // Requirement 4: Cancellation policies are owned by application bootstrap (SeedService).
+  // Requirement 4: Cancellation policies are owned by database/bootstrap-db.js.
   // Require normal policies to exist before proceeding with business flows.
   const policyCount = await policiesCol.countDocuments();
   if (policyCount === 0) {
     throw new Error(
-      '⛔ FATAL: Cancellation policies not found in database. SeedService bootstraps policies on backend start. Please run normal application bootstrap before running E2E demo.',
+      '⛔ FATAL: Cancellation policies not found in database. database/bootstrap-db.js bootstraps policies. Run the database bootstrap before the E2E demo.',
     );
   }
   console.log(`   ✅ Confirmed ${policyCount} cancellation policies present.`);

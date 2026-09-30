@@ -1,57 +1,6 @@
-@import "tailwindcss/base";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
-
-@layer base {
-  body {
-    @apply font-sans bg-slate-50 text-slate-800 antialiased selection:bg-amber-100 selection:text-amber-900;
-  }
+:root{
+  --navy:#071b2e;--navy-2:#0d2b47;--gold:#d6b35a;--gold-2:#f2c85f;--ink:#102033;--muted:#68778a;
+  --line:#dde5ec;--surface:#fff;--soft:#f5f7fa;--success:#16845b;--danger:#c53b3b;--warn:#a76b00;
+  --shadow:0 20px 55px rgba(7,27,46,.12);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
 }
-
-@layer components {
-  /* Buttons - Pill Shaped with Shadow Lift as specified in GUI Standards */
-  .btn-gold {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold rounded-full px-6 py-3 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
-  }
-
-  .btn-navy {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap bg-[#0A2540] hover:bg-[#13395F] text-white font-semibold rounded-full px-5 py-2.5 shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-md transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
-  }
-
-  .btn-outline-navy {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap border-2 border-[#0A2540] text-[#0A2540] hover:bg-slate-100 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
-  }
-
-  .btn-outline-gold {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap border-2 border-amber-500 text-amber-600 hover:bg-amber-50 font-medium rounded-full px-5 py-2.5 shadow-sm hover:shadow hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none;
-  }
-
-  .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap text-slate-700 hover:text-navy hover:bg-slate-100 font-medium rounded-full px-4 py-2 transition-all duration-150 disabled:opacity-50;
-  }
-
-  /* Luxury Card Style */
-  .card-luxury {
-    @apply bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all duration-200;
-  }
-
-  .badge-status {
-    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider;
-  }
-}
-
-/* Custom Glow for Selected Seat */
-.seat-glow {
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.75);
-}
-
-/* Custom Aircraft Shape */
-.aircraft-fuselage {
-  background: linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 10%, #FFFFFF 90%, #F1F5F9 100%);
-  border: 3px solid #CBD5E1;
-  border-top-left-radius: 9999px;
-  border-top-right-radius: 9999px;
-  border-bottom-left-radius: 40px;
-  border-bottom-right-radius: 40px;
-}
-
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--soft);color:var(--ink);font-family:inherit}button,input,select,textarea{font:inherit}button{cursor:pointer}a{text-decoration:none;color:inherit}.container{width:min(1180px,calc(100% - 32px));margin:auto}.page{padding:36px 0 70px}.eyebrow{font-size:11px;letter-spacing:.16em;font-weight:800;text-transform:uppercase;color:#a37412}.title{font-size:clamp(28px,4vw,46px);line-height:1.05;letter-spacing:-.035em;margin:8px 0 10px;color:var(--navy)}.subtitle{color:var(--muted);line-height:1.65;margin:0}.card{background:var(--surface);border:1px solid var(--line);border-radius:24px;box-shadow:0 10px 28px rgba(15,35,52,.06)}.btn{border:0;border-radius:999px;padding:12px 18px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:8px}.btn-primary{background:linear-gradient(135deg,var(--gold),#e8a92f);color:#fff;box-shadow:0 10px 22px rgba(214,179,90,.28)}.btn-dark{background:var(--navy);color:white}.btn-outline{background:white;border:1px solid #cbd7e2;color:var(--navy)}.field{display:grid;gap:7px}.field label,.field>span{font-size:12px;font-weight:800;color:#506176;text-transform:uppercase;letter-spacing:.04em}.control{width:100%;border:1px solid #d7e0e8;background:#fbfcfd;border-radius:14px;padding:12px 14px;outline:none;color:var(--ink)}.control:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(214,179,90,.14)}.grid{display:grid;gap:16px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.muted{color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800}.pill-gold{background:#fff6dc;color:#8a6414}.pill-success{background:#e9f7f1;color:var(--success)}.pill-danger{background:#fff0f0;color:var(--danger)}.empty{padding:48px 22px;text-align:center}.error{color:var(--danger);font-size:13px;font-weight:700}.success{color:var(--success)}.section-head{display:flex;justify-content:space-between;align-items:end;gap:20px;margin:26px 0 16px}.section-head h2{margin:0;color:var(--navy)}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:760px}.table th,.table td{padding:13px 14px;border-bottom:1px solid #edf1f4;text-align:left;font-size:13px}.table th{color:#607084;font-size:11px;text-transform:uppercase;letter-spacing:.05em;background:#f8fafb}.admin-shell{display:grid;grid-template-columns:240px 1fr;min-height:100vh}.admin-nav{background:var(--navy);color:white;padding:26px 18px;position:sticky;top:0;height:100vh}.admin-brand{font-weight:900;font-size:18px;color:var(--gold-2);margin-bottom:26px}.admin-nav a{display:block;padding:11px 12px;border-radius:12px;color:#c8d5e0;font-size:13px;font-weight:700;margin:4px 0}.admin-nav a.active,.admin-nav a:hover{background:#123553;color:white}.admin-main{padding:28px;background:#f4f6f8;min-width:0}@media(max-width:860px){.grid-4,.grid-3{grid-template-columns:repeat(2,1fr)}.admin-shell{grid-template-columns:1fr}.admin-nav{height:auto;position:relative;display:flex;gap:6px;overflow:auto;padding:12px}.admin-brand{display:none}.admin-nav a{white-space:nowrap}.admin-main{padding:18px}}@media(max-width:640px){.container{width:min(100% - 20px,1180px)}.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}.page{padding-top:24px}.section-head{align-items:flex-start;flex-direction:column}}

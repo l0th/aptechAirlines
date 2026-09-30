@@ -1,6 +1,6 @@
 # Airline Reservation System (ARS) - Aptech Airlines Fullstack
 
-Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Aptech Airlines** - Giải pháp Fullstack toàn diện gồm **Backend NestJS**, **Frontend Angular 21**, **Database MongoDB**, và **Containerization Docker** theo chuẩn đồ án eProject.
+Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Aptech Airlines** - Giải pháp Fullstack đầy đủ gồm **Backend NestJS**, **Frontend Angular 21**, **Database MongoDB**, và **Containerization Docker** theo chuẩn đồ án eProject.
 
 ---
 
@@ -52,34 +52,25 @@ Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Apt
 
 ---
 
-## 🔐 Tài khoản Đăng nhập Hệ thống & Dữ liệu E2E Demo
+## Chạy dự án bằng Docker
 
-### 1. Tài khoản Quản trị Tối cao (SUPER_ADMIN)
-Hệ thống tự động khởi tạo duy nhất **1 tài khoản `SUPER_ADMIN`** khi khởi động lần đầu:
-- **Username:** `superadmin`
-- **Password:** Được cấu hình qua biến môi trường `SUPER_ADMIN_PASSWORD` trong file `.env` (mặc định môi trường phát triển cục bộ: xem file `.env` bị bỏ qua bởi Git).
-- **Email:** `superadmin@airline.com`
-- **Quy tắc bảo vệ:** 
-  - ❌ **Không thể xóa** tài khoản `SUPER_ADMIN`.
-  - ❌ **Không thể tạo thêm** bất kỳ tài khoản nào mang role `SUPER_ADMIN`.
+Docker Compose chỉ khởi chạy đúng 3 service: **MongoDB + Backend + Frontend**. MongoDB được tạo trống và lưu dữ liệu trong Docker volume; hệ thống **không tự bootstrap/seed dữ liệu nghiệp vụ** khi khởi động.
 
-### 2. Bộ Dữ liệu Thử nghiệm An toàn (Safe Deterministic E2E Dataset)
-Hệ thống tích hợp sẵn script nạp dữ liệu kiểm thử tự động, an toàn và lũy thừa (Idempotent):
+> **Frontend hiện hành:** repository này sử dụng giao diện mới trong `frontend/src/app/` (các component mới như `app.component.ts`, `shared/site-shell.component.ts`, các trang `pages/*.component.ts` và admin mới). Các component frontend cũ đã được loại khỏi source chính. Khi chạy hoặc build, luôn dùng `frontend/Dockerfile` / `frontend/package.json` hiện tại ở nhánh này; không khôi phục hoặc chạy lại bộ frontend cũ.
+
+Copy `.env.example` thành `.env`, cấu hình `JWT_SECRET`, AirLabs/SMTP/PayPal nếu sử dụng, sau đó chạy:
+
 ```bash
-# Nạp dữ liệu kiểm thử E2E (Tạo 4 user, 12 sân bay, 16 chuyến bay thương mại, sơ đồ ghế, booking mẫu)
-npm run seed:e2e --prefix backend
-
-# Dọn dẹp dữ liệu E2E sau khi kiểm thử (Bảo vệ dữ liệu thật và tài khoản SUPER_ADMIN)
-npm run seed:e2e:cleanup --prefix backend
+docker compose up -d --build
 ```
 
-**Danh sách tài khoản E2E (Mật khẩu chung: `E2ePass@2026`):**
-- **Khách hàng thường (CUSTOMER):** `e2e_customer`
-- **Khách hàng VIP Hạng Vàng (CUSTOMER Gold):** `e2e_customer_gold`
-- **Nhân viên Quầy vé (CLERK):** `e2e_clerk`
-- **Quản trị viên (ADMIN):** `e2e_admin`
+- Frontend: `http://localhost:4200`
+- Backend API: `http://localhost:3000/api`
+- MongoDB cho MongoDB Compass/Admin: `mongodb://localhost:27018/airline_db`
 
----
+Dữ liệu tài khoản, sân bay, chính sách, chuyến bay... được quản trị thủ công qua MongoDB Compass/Admin hoặc qua giao diện/API quản trị của hệ thống. Docker không tự chèn dữ liệu mẫu vào database.
+
+Nếu muốn dùng MongoDB bên ngoài thay cho container đi kèm, chỉ cần đổi `MONGO_URI` trong `.env` sang connection string của MongoDB đó.
 
 ## 🚀 Hướng dẫn Chạy Hệ thống & Kiểm thử
 
@@ -97,10 +88,11 @@ docker compose up --build
    ```bash
    cd backend
    npm install
-   npm run seed:e2e     # Nạp dữ liệu chuyến bay và người dùng thử nghiệm
    npm run start:dev
    ```
    Backend lắng nghe tại `http://localhost:3000/api`. Kết nối MongoDB mặc định tại `mongodb://localhost:27017/airline_db`.
+
+   `npm run seed:e2e` chỉ dành cho kiểm thử/demo khi chủ động cần dữ liệu mẫu; không nằm trong luồng Docker khởi động thông thường.
 
 2. **Khởi động Frontend:**
    ```bash

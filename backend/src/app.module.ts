@@ -9,7 +9,6 @@ import { FlightsModule } from './flights/flights.module';
 import { PoliciesModule } from './policies/policies.module';
 import { BookingsModule } from './bookings/bookings.module';
 import { MailModule } from './mail/mail.module';
-import { SeedModule } from './seed/seed.module';
 import { ReferenceModule } from './reference/reference.module';
 import { SeatAllocationModule } from './seat-allocation/seat-allocation.module';
 import { PaypalModule } from './paypal/paypal.module';
@@ -30,7 +29,6 @@ const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/airline_db'
     PoliciesModule,
     BookingsModule,
     MailModule,
-    SeedModule,
     ReferenceModule,
     SeatAllocationModule,
     PaypalModule,
