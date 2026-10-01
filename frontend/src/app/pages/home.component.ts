@@ -33,8 +33,8 @@ type LocationSuggestion = {
 
         <div class="search card">
           <div class="trip-tabs">
-            <button [class.on]="!roundTrip" (click)="roundTrip=false">Một chiều</button>
-            <button [class.on]="roundTrip" (click)="roundTrip=true">Khứ hồi</button>
+            <button [class.on]="!roundTrip" (click)="setRoundTrip(false)">Một chiều</button>
+            <button [class.on]="roundTrip" (click)="setRoundTrip(true)">Khứ hồi</button>
           </div>
 
           <div class="grid grid-2">
@@ -89,10 +89,10 @@ type LocationSuggestion = {
 
           <label class="range-toggle"><input type="checkbox" [(ngModel)]="flexibleDates" (change)="toggleFlexibleDates()"> Tìm chuyến trong khoảng ngày</label>
 
-          <div class="grid grid-3 row">
+          <div class="grid search-options row">
             <div class="field"><span>Ngày đi</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
             @if(flexibleDates){<div class="field"><span>Đến ngày</span><input class="control" type="date" [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"></div>}
-            <div class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate" [disabled]="!roundTrip"></div>
+            @if(roundTrip){<div class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"></div>}
             <div class="field"><span>Hạng vé</span><select class="control" [(ngModel)]="cabin"><option value="ECONOMY">Phổ thông</option><option value="CLUB">Club</option><option value="BUSINESS">Thương gia</option><option value="FIRST">Hạng nhất</option></select></div>
           </div>
 
@@ -118,7 +118,7 @@ type LocationSuggestion = {
     </section>
   `,
   styles: [`
-    .hero{background:radial-gradient(circle at 80% 10%,#214f74 0,transparent 30%),linear-gradient(135deg,#061725,#0a2944);color:white;padding:72px 0 110px}.hero-inner{display:grid;grid-template-columns:1fr 1.05fr;gap:50px;align-items:center}.gold{color:#f2c85f}.copy h1{font-size:clamp(42px,5vw,68px);line-height:1.02;letter-spacing:-.045em;margin:15px 0}.copy p{color:#c7d5e0;line-height:1.7;font-size:17px;max-width:600px}.hero-points{display:flex;flex-wrap:wrap;gap:10px;margin-top:25px}.hero-points span{display:flex;gap:7px;align-items:center;border:1px solid rgba(255,255,255,.14);padding:8px 11px;border-radius:999px;color:#dce6ed;font-size:12px}.search{padding:26px;box-shadow:0 30px 70px rgba(0,0,0,.25);overflow:visible}.trip-tabs{display:flex;gap:8px;margin-bottom:18px}.trip-tabs button{border:0;border-radius:999px;padding:9px 15px;font-weight:800;background:#edf2f6;color:#657487}.trip-tabs button.on{background:#071b2e;color:#fff}.row{margin-top:11px}.location-field{position:relative}.location-help{margin:9px 2px 0;color:#6d7f91;font-size:11px;line-height:1.5}.range-toggle{display:flex;align-items:center;gap:8px;margin:13px 2px 0;color:#314b60;font-size:12px;font-weight:700}.range-toggle input{accent-color:#0a2540}.suggestions{position:absolute;left:0;right:0;top:calc(100% + 7px);z-index:20;background:#fff;border:1px solid #d9e2e9;border-radius:14px;box-shadow:0 16px 38px rgba(6,23,37,.18);max-height:320px;overflow:auto;padding:6px}.suggestions button{width:100%;border:0;background:#fff;border-radius:10px;padding:10px 11px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer}.suggestions button:hover{background:#f4f7f9}.suggest-main{display:grid;gap:3px;min-width:0}.suggest-main b{font-size:13px;color:#102b42;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.suggest-main small{font-size:10px;color:#758493;line-height:1.35}.suggest-code{flex:0 0 auto;border-radius:999px;padding:5px 8px;background:#e9f5ef;color:#08734f;font-size:10px;font-weight:900}.suggest-code.reference{background:#fff4d6;color:#74550e}.travellers{display:flex;justify-content:space-between;gap:12px;margin:20px 0}.travellers>div{display:grid;gap:7px}.travellers span{font-size:11px;text-transform:uppercase;font-weight:800;color:#708093}.travellers b{display:flex;align-items:center;gap:9px;color:#071b2e}.travellers button{width:28px;height:28px;border-radius:50%;border:1px solid #d6e0e8;background:#fff}.full{width:100%;margin-top:6px}.feature article{padding:24px}.feature app-icon{color:#b17a16}.feature h3{color:#071b2e}.feature p{color:#68778a;line-height:1.6}@media(max-width:900px){.hero-inner{grid-template-columns:1fr}.hero{padding-top:45px}.copy{text-align:center}.copy p{margin-inline:auto}.hero-points{justify-content:center}}@media(max-width:620px){.travellers{flex-wrap:wrap}.travellers>div{min-width:28%}}
+    .hero{background:radial-gradient(circle at 80% 10%,#214f74 0,transparent 30%),linear-gradient(135deg,#061725,#0a2944);color:white;padding:72px 0 110px}.hero-inner{display:grid;grid-template-columns:1fr 1.05fr;gap:50px;align-items:center}.gold{color:#f2c85f}.copy h1{font-size:clamp(42px,5vw,68px);line-height:1.02;letter-spacing:-.045em;margin:15px 0}.copy p{color:#c7d5e0;line-height:1.7;font-size:17px;max-width:600px}.hero-points{display:flex;flex-wrap:wrap;gap:10px;margin-top:25px}.hero-points span{display:flex;gap:7px;align-items:center;border:1px solid rgba(255,255,255,.14);padding:8px 11px;border-radius:999px;color:#dce6ed;font-size:12px}.search{padding:26px;box-shadow:0 30px 70px rgba(0,0,0,.25);overflow:visible}.trip-tabs{display:flex;gap:8px;margin-bottom:18px}.trip-tabs button{border:0;border-radius:999px;padding:9px 15px;font-weight:800;background:#edf2f6;color:#657487}.trip-tabs button.on{background:#071b2e;color:#fff}.row{margin-top:11px}.search-options{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.location-field{position:relative}.location-help{margin:9px 2px 0;color:#6d7f91;font-size:11px;line-height:1.5}.range-toggle{display:flex;align-items:center;gap:8px;margin:13px 2px 0;color:#314b60;font-size:12px;font-weight:700}.range-toggle input{accent-color:#0a2540}.suggestions{position:absolute;left:0;right:0;top:calc(100% + 7px);z-index:20;background:#fff;border:1px solid #d9e2e9;border-radius:14px;box-shadow:0 16px 38px rgba(6,23,37,.18);max-height:320px;overflow:auto;padding:6px}.suggestions button{width:100%;border:0;background:#fff;border-radius:10px;padding:10px 11px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer}.suggestions button:hover{background:#f4f7f9}.suggest-main{display:grid;gap:3px;min-width:0}.suggest-main b{font-size:13px;color:#102b42;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.suggest-main small{font-size:10px;color:#758493;line-height:1.35}.suggest-code{flex:0 0 auto;border-radius:999px;padding:5px 8px;background:#e9f5ef;color:#08734f;font-size:10px;font-weight:900}.suggest-code.reference{background:#fff4d6;color:#74550e}.travellers{display:flex;justify-content:space-between;gap:12px;margin:20px 0}.travellers>div{display:grid;gap:7px}.travellers span{font-size:11px;text-transform:uppercase;font-weight:800;color:#708093}.travellers b{display:flex;align-items:center;gap:9px;color:#071b2e}.travellers button{width:28px;height:28px;border-radius:50%;border:1px solid #d6e0e8;background:#fff}.full{width:100%;margin-top:6px}.feature article{padding:24px}.feature app-icon{color:#b17a16}.feature h3{color:#071b2e}.feature p{color:#68778a;line-height:1.6}@media(max-width:900px){.hero-inner{grid-template-columns:1fr}.hero{padding-top:45px}.copy{text-align:center}.copy p{margin-inline:auto}.hero-points{justify-content:center}}@media(max-width:620px){.travellers{flex-wrap:wrap}.travellers>div{min-width:28%}}
   `]
 })
 export class HomeComponent {
@@ -178,6 +178,11 @@ export class HomeComponent {
 
   toggleFlexibleDates() {
     if (!this.flexibleDates) this.departureEnd = '';
+  }
+
+  setRoundTrip(value: boolean) {
+    this.roundTrip = value;
+    if (!value) this.returnDate = '';
   }
 
   search() {

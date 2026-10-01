@@ -24,7 +24,7 @@ import { PaypalService } from '../core/paypal.service';
     }@else if(auth.staff()){
       <div class="staff-banner warning">
         <span>STAFF</span>
-        <div><strong>Chưa chọn khách hàng</strong><small>Vào Reservation Desk và chọn CUSTOMER trước khi tạo booking.</small></div>
+        <div><strong>Chưa chọn khách hàng</strong><small>Vào Quầy đặt vé và chọn KHÁCH HÀNG trước khi tạo đặt chỗ.</small></div>
         <button class="btn btn-dark" (click)="router.navigate(['/admin/reservation-desk'])">Reservation Desk</button>
       </div>
     }
@@ -168,7 +168,7 @@ export class ReviewComponent{
   money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
 
   async submit(){
-    if(this.auth.staff()&&!this.isStaffBooking){this.error='Staff phải chọn CUSTOMER trong Reservation Desk trước.';return}
+    if(this.auth.staff()&&!this.isStaffBooking){this.error='Nhân viên phải chọn khách hàng tại Quầy đặt vé trước.';return}
     if(this.mode==='block'&&!this.canBlock){this.error='Chuyến này không còn đủ điều kiện giữ chỗ hơn 14 ngày.';return}
     this.busy=true;this.error='';
     const customerId=this.isStaffBooking?this.staffCustomer._id:'self';

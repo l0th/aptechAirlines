@@ -99,7 +99,7 @@ import { IconComponent } from '../shared/icon.component';
           }
 
           @if(!direct.length&&!connections.length){
-            <div class="card empty"><h2>Chưa có chuyến có thể đặt</h2><p class="muted">Backend chưa có commercial flight phù hợp cho ngày/tuyến này. Thử ngày khác hoặc sân bay khác.</p></div>
+            <div class="card empty"><h2>Không tìm thấy chuyến bay phù hợp</h2><p class="muted">Hiện chưa có chuyến bay phù hợp với ngày và hành trình bạn đã chọn. Vui lòng thử ngày khác hoặc sân bay khác.</p></div>
           }
         </ng-template>
       }
@@ -127,7 +127,7 @@ export class ResultsComponent{
   get unresolvedLocations(){const x:string[]=[];if(this.data?.origin_scope?.kind==='none')x.push('nơi đi');if(this.data?.dest_scope?.kind==='none')x.push('nơi đến');return x}
   get locationNotices(){const x:string[]=[];const o=this.locationNotice(this.data?.origin_info,this.data?.origin_scope,'Nơi đi');const d=this.locationNotice(this.data?.dest_info,this.data?.dest_scope,'Nơi đến');if(o)x.push(o);if(d)x.push(d);return x}
 
-  load(){this.loading=true;this.error='';this.api.searchFlights({...this.q,adults:Number(this.q['adults']||1),children:Number(this.q['children']||0),seniors:Number(this.q['seniors']||0),include_connecting:true}).subscribe({next:r=>{this.data=r;this.loading=false},error:e=>{this.error=this.message(e,'Backend không phản hồi.');this.loading=false}})}
+  load(){this.loading=true;this.error='';this.api.searchFlights({...this.q,adults:Number(this.q['adults']||1),children:Number(this.q['children']||0),seniors:Number(this.q['seniors']||0),include_connecting:true}).subscribe({next:r=>{this.data=r;this.loading=false},error:e=>{this.error=this.message(e,'Không thể tải kết quả tìm kiếm. Vui lòng thử lại.');this.loading=false}})}
 
   chooseDirect(f:any,direction:'OUTBOUND'|'INBOUND'){
     const option={kind:'DIRECT',source:f,legs:this.normalizeDirect(f,direction)};
