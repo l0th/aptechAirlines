@@ -43,11 +43,6 @@ import { AuthService } from '../core/auth.service';
               </select>
             </div>
             <div class="field"><span>Tuổi</span><input class="control" type="number" min="0" step="1" [(ngModel)]="reg.age"></div>
-            <div class="field">
-              <span>Thẻ ưu tiên</span>
-              <input class="control" inputmode="numeric" [(ngModel)]="reg.preferred_credit_card" autocomplete="cc-number" placeholder="4111 1111 1111 1111">
-              <small>12–19 chữ số. Máy chủ chỉ trả lại số thẻ đã che.</small>
-            </div>
           </div>
           <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="reg.address" autocomplete="street-address"></div>
           <div class="field"><span>Mật khẩu</span><input class="control" type="password" minlength="6" [(ngModel)]="reg.password" autocomplete="new-password"><small>Tối thiểu 6 ký tự.</small></div>
@@ -92,8 +87,7 @@ export class AuthComponent {
     address: '',
     phone_number: '',
     sex: 'OTHER',
-    age: 18,
-    preferred_credit_card: ''
+    age: 18
   };
 
   switchMode(mode: 'login' | 'register') {
@@ -116,7 +110,6 @@ export class AuthComponent {
           email: this.reg.email.trim(),
           address: this.reg.address.trim(),
           phone_number: this.reg.phone_number.trim(),
-          preferred_credit_card: this.reg.preferred_credit_card.trim(),
           age: Number(this.reg.age)
         };
 
@@ -151,14 +144,12 @@ export class AuthComponent {
       this.reg.email,
       this.reg.address,
       this.reg.phone_number,
-      this.reg.sex,
-      this.reg.preferred_credit_card
+      this.reg.sex
     ];
     if (required.some(v => !String(v ?? '').trim())) return 'Vui lòng nhập đầy đủ thông tin đăng ký.';
     if (String(this.reg.password).length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(this.reg.email).trim())) return 'Email không đúng định dạng.';
     if (!/^(?=(?:\D*\d){7,15}\D*$)\+?[0-9\s().-]+$/.test(String(this.reg.phone_number).trim())) return 'Số điện thoại phải có từ 7 đến 15 chữ số.';
-    if (!/^(?=(?:\D*\d){12,19}\D*$)[0-9\s-]+$/.test(String(this.reg.preferred_credit_card).trim())) return 'Số thẻ phải có từ 12 đến 19 chữ số.';
     const age = Number(this.reg.age);
     if (!Number.isInteger(age) || age < 0) return 'Tuổi phải là số nguyên không âm.';
     return '';

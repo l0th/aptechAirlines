@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Country, CountryDocument, City, CityDocument, RouteRef, RouteRefDocument, RouteSyncState, RouteSyncStateDocument } from './reference.schema';
 import { Airport, AirportDocument } from '../airports/airports.schema';
 import { AirportsService } from '../airports/airports.service';
+import { AIRPORT_REFERENCE_DATA } from '../airports/airports-reference.data';
 
 const VI_NAMES: Record<string, string> = {
   VN: 'Việt Nam', SG: 'Singapore', TH: 'Thái Lan', MY: 'Malaysia', JP: 'Nhật Bản', KR: 'Hàn Quốc', HK: 'Hồng Kông', CN: 'Trung Quốc', TW: 'Đài Loan', PH: 'Philippines', ID: 'Indonesia', IN: 'Ấn Độ', AE: 'Các Tiểu vương quốc Ả Rập Thống nhất', QA: 'Qatar', GB: 'Vương quốc Anh', FR: 'Pháp', DE: 'Đức', AU: 'Úc', US: 'Hoa Kỳ', KH: 'Campuchia', LA: 'Lào', MM: 'Myanmar', BN: 'Brunei', NZ: 'New Zealand', CA: 'Canada'
@@ -134,7 +135,11 @@ export class ReferenceService {
     const cleanDep = depIata?.trim().toUpperCase();
     if (!cleanDep) return { dep_iata: depIata, updated: 0, records_seen: 0, pages: 0, truncated: false, complete: false };
 
-    // 1. Determine generation and starting offset
+    // AirLabs /routes uses offset as a PAGE INDEX (0, 1, 2, ...), not a row offset.
+    // The provider currently caps each response at 50 rows even when a larger limit is requested.
+    // Keep next_offset in the same provider page-index semantics so resumable syncs stay correct.
+
+    // 1. Determine generation and starting page offset
     const existingSyncState = await this.routeSyncStateModel.findOne({ dep_iata: cleanDep }).exec();
 
     let generation: string;
@@ -248,8 +253,10 @@ export class ReferenceService {
         } else {
           // request.has_more is missing/undefined/non-boolean
           authoritativeEnd = false;
-          // Conservative fallback only to decide whether another fetch is worth attempting
-          continuePagination = items.length >= limit;
+          // Conservative fallback only to decide whether another fetch is worth attempting.
+          // Do not compare with the requested limit because AirLabs may cap the actual page
+          // size (currently 50) even when limit=200 was requested.
+          continuePagination = items.length > 0;
         }
 
         for (const item of items) {
@@ -350,7 +357,8 @@ export class ReferenceService {
           }
         }
 
-        currentOffset += items.length;
+        // AirLabs offset is the next page number, not the number of rows consumed.
+        currentOffset += 1;
 
         if (authoritativeEnd || items.length === 0 || !continuePagination) {
           break;
@@ -425,6 +433,188 @@ export class ReferenceService {
       sync_generation: generation,
       next_offset: isComplete ? 0 : currentOffset,
     };
+  }
+
+  /**
+   * Targeted AirLabs route sync for one exact airport pair.
+   *
+   * This intentionally does NOT update RouteSyncState because a dep+arr filtered
+   * response is not a complete snapshot of every route departing the origin.
+   * It only refreshes RouteRef rows for the requested pair, which lets direct
+   * commercial discovery avoid scanning hundreds of unrelated routes first.
+   */
+  async syncRoutesForPair(depIata: string, arrIata: string, limit = 50) {
+    const apiKey = this.getApiKey();
+    const cleanDep = depIata?.trim().toUpperCase();
+    const cleanArr = arrIata?.trim().toUpperCase();
+    if (!cleanDep || !cleanArr) {
+      return {
+        dep_iata: cleanDep || depIata,
+        arr_iata: cleanArr || arrIata,
+        updated: 0,
+        records_seen: 0,
+        pages: 0,
+        truncated: false,
+      };
+    }
+
+    const providerLimit = Math.min(Math.max(Number(limit) || 50, 1), 50);
+    const maxPages = 5;
+    let pageOffset = 0;
+    let pageCount = 0;
+    let totalSeen = 0;
+    let totalUpdated = 0;
+    let truncated = false;
+
+    while (pageCount < maxPages) {
+      pageCount++;
+      const res = await fetch(
+        `https://airlabs.co/api/v9/routes?dep_iata=${cleanDep}&arr_iata=${cleanArr}&limit=${providerLimit}&offset=${pageOffset}&api_key=${apiKey}`,
+      );
+
+      if (res.status === 429) {
+        throw new BadRequestException('AirLabs API Rate Limit (429): Quota exceeded or too many requests.');
+      }
+      if (!res.ok) {
+        throw new BadRequestException(`Lỗi khi gọi AirLabs API: HTTP mã ${res.status}`);
+      }
+
+      const data = await res.json();
+      const items: any[] = Array.isArray(data.response) ? data.response : [];
+
+      for (const item of items) {
+        if ((!item.airline_iata && !item.airline_icao) || !item.dep_iata || !item.arr_iata) continue;
+        if (
+          item.dep_iata.trim().toUpperCase() !== cleanDep ||
+          item.arr_iata.trim().toUpperCase() !== cleanArr
+        ) {
+          continue;
+        }
+
+        totalSeen++;
+        const source_key = computeSourceKey(item);
+        const has_schedule =
+          !!(item.dep_time || item.dep_time_utc) &&
+          Array.isArray(item.days) &&
+          item.days.length > 0;
+
+        await this.routeRefModel.findOneAndUpdate(
+          { source_key },
+          {
+            source_key,
+            airline_iata: item.airline_iata?.trim().toUpperCase(),
+            airline_icao: item.airline_icao?.trim().toUpperCase(),
+            flight_number: item.flight_number?.toString().trim(),
+            flight_iata: item.flight_iata?.trim().toUpperCase(),
+            flight_icao: item.flight_icao?.trim().toUpperCase(),
+            cs_airline_iata: item.cs_airline_iata?.trim().toUpperCase(),
+            cs_flight_iata: item.cs_flight_iata?.trim().toUpperCase(),
+            cs_flight_number: item.cs_flight_number?.toString().trim(),
+            dep_iata: cleanDep,
+            dep_icao: item.dep_icao?.trim().toUpperCase(),
+            dep_time: item.dep_time?.trim(),
+            dep_time_utc: item.dep_time_utc?.trim(),
+            dep_terminals: Array.isArray(item.dep_terminals) ? item.dep_terminals : undefined,
+            arr_iata: cleanArr,
+            arr_icao: item.arr_icao?.trim().toUpperCase(),
+            arr_time: item.arr_time?.trim(),
+            arr_time_utc: item.arr_time_utc?.trim(),
+            arr_terminals: Array.isArray(item.arr_terminals) ? item.arr_terminals : undefined,
+            duration: typeof item.duration === 'number' ? item.duration : undefined,
+            days: Array.isArray(item.days)
+              ? item.days.map((d: string) => d.trim().toLowerCase())
+              : undefined,
+            aircraft_icao: item.aircraft_icao?.trim().toUpperCase(),
+            has_schedule,
+            source: 'airlabs',
+            synced_at: new Date(),
+            airlabs_updated: item.updated,
+          },
+          { upsert: true, new: true },
+        ).exec();
+        totalUpdated++;
+      }
+
+      const hasMore = data.request?.has_more === true;
+      if (!hasMore || items.length === 0) {
+        break;
+      }
+
+      pageOffset += 1;
+      if (pageCount >= maxPages) {
+        truncated = true;
+      }
+    }
+
+    return {
+      dep_iata: cleanDep,
+      arr_iata: cleanArr,
+      updated: totalUpdated,
+      records_seen: totalSeen,
+      pages: pageCount,
+      truncated,
+      next_offset: truncated ? pageOffset : 0,
+    };
+  }
+
+  async ensureRoutesForPair(
+    depIata: string,
+    arrIata: string,
+    maxAgeMs = 7 * 24 * 60 * 60 * 1000,
+  ) {
+    const cleanDep = depIata?.trim().toUpperCase();
+    const cleanArr = arrIata?.trim().toUpperCase();
+    if (!cleanDep || !cleanArr) {
+      return { from_cache: true, stale: false, count: 0, routes: [] };
+    }
+
+    const filter = { source: 'airlabs', dep_iata: cleanDep, arr_iata: cleanArr };
+    const routes = await this.routeRefModel.find(filter).exec();
+    const latestSyncedAt = routes.reduce(
+      (latest: Date | null, route: any) =>
+        !latest || (route.synced_at && new Date(route.synced_at) > latest)
+          ? new Date(route.synced_at)
+          : latest,
+      null,
+    );
+    const isFresh = Boolean(
+      latestSyncedAt &&
+        Date.now() - new Date(latestSyncedAt).getTime() < maxAgeMs,
+    );
+
+    if (routes.length > 0 && isFresh) {
+      return {
+        from_cache: true,
+        stale: false,
+        synced_at: latestSyncedAt,
+        count: routes.length,
+        routes,
+      };
+    }
+
+    try {
+      await this.syncRoutesForPair(cleanDep, cleanArr);
+      const refreshedRoutes = await this.routeRefModel.find(filter).exec();
+      return {
+        from_cache: false,
+        stale: false,
+        synced_at: new Date(),
+        count: refreshedRoutes.length,
+        routes: refreshedRoutes,
+      };
+    } catch (err: any) {
+      if (routes.length > 0) {
+        return {
+          from_cache: true,
+          stale: true,
+          synced_at: latestSyncedAt,
+          count: routes.length,
+          routes,
+          refresh_error: err.message,
+        };
+      }
+      throw err;
+    }
   }
 
   async ensureRoutesForAirport(depIata: string, maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
@@ -705,6 +895,20 @@ export class ReferenceService {
         iata_codes: [],
         matched_kind: 'none',
         label: 'Không tìm thấy',
+        using_nearest_airport: false,
+      };
+    }
+
+    // Keep the curated, directly-serviced IATA hubs usable even when a fresh
+    // local database has not loaded the airport reference collection yet.
+    const curatedAirport = AIRPORT_REFERENCE_DATA.find(
+      (airport) => airport.iata_code === upperToken && airport.is_serviced_directly,
+    );
+    if (curatedAirport) {
+      return {
+        iata_codes: [upperToken],
+        matched_kind: 'airport',
+        label: curatedAirport.airport_name,
         using_nearest_airport: false,
       };
     }

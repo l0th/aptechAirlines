@@ -365,7 +365,7 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
     expect(result.pages).toBe(5);
     expect(result.truncated).toBe(true);
     expect(result.complete).toBe(false);
-    expect(result.next_offset).toBe(50);
+    expect(result.next_offset).toBe(5);
     expect(result.records_seen).toBe(50);
 
     // Verify persisted state
@@ -375,7 +375,7 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
         dep_iata: 'HAN',
         complete: false,
         truncated: true,
-        next_offset: 50,
+        next_offset: 5,
         sync_generation: expect.any(String),
         generation_started_at_offset_zero: true,
       }),
@@ -392,7 +392,7 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
       dep_iata: 'HAN',
       sync_generation: 'gen_existing_123',
       generation_started_at_offset_zero: true,
-      next_offset: 50,
+      next_offset: 5,
       complete: false,
       truncated: true,
       records_seen: 50,
@@ -424,8 +424,8 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
     // Calling syncRoutesForAirport without explicit offset resumes from existingState.next_offset
     const result = await service.syncRoutesForAirport('HAN', 200);
 
-    // Verify fetch used offset=50
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('offset=50'));
+    // Verify fetch resumes from AirLabs page index 5
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('offset=5'));
 
     // Reused the exact same sync_generation
     expect(result.sync_generation).toBe('gen_existing_123');
@@ -529,7 +529,7 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
         dep_iata: 'HAN',
         sync_generation: generationId,
         generation_started_at_offset_zero: true,
-        next_offset: 50,
+        next_offset: 5,
         complete: false,
         truncated: true,
       }),
@@ -789,7 +789,7 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
   // SECTION 6: PROVIDER PAGINATION DETAILS & OFFSETS
   // =========================================================================
 
-  it('19. provider returns fewer items than limit with request.has_more=true -> continues, offset advances by actual items.length', async () => {
+  it('19. provider returns fewer items than requested limit with request.has_more=true -> advances by one provider page', async () => {
     const page1 = Array.from({ length: 42 }, (_, i) => ({
       airline_iata: 'VN',
       flight_iata: `VN${100 + i}`,
@@ -843,8 +843,8 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
     const call2Url = (global.fetch as jest.Mock).mock.calls[1][0];
 
     expect(call1Url).toContain('offset=10');
-    // Offset advanced by 42 (actual items), so page 2 fetch has offset=52 (NOT 210)
-    expect(call2Url).toContain('offset=52');
+    // AirLabs offset is a page index, so page 2 is offset=11 regardless of row count.
+    expect(call2Url).toContain('offset=11');
   });
 
   it('20. provider request.has_more=false on page 1 -> stops immediately', async () => {

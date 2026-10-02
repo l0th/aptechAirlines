@@ -1,0 +1,13 @@
+{
+  "name": "aptech-airlines-database-bootstrap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portable MongoDB bootstrap for Aptech Airlines",
+  "scripts": {
+    "bootstrap": "node bootstrap-db.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "mongodb": "^6.20.0"
+  }
+}

@@ -62,6 +62,12 @@ describe('Admin Commercial Network Discovery (Phase C3.1+ Invariants)', () => {
         });
       }),
       ensureRoutesForAirport: jest.fn().mockResolvedValue({ complete: true, routes: [] }),
+      ensureRoutesForPair: jest.fn().mockResolvedValue({
+        from_cache: true,
+        stale: false,
+        count: 0,
+        routes: [],
+      }),
       findRouteNetworkConnections: jest.fn().mockResolvedValue([]),
     };
 

@@ -58,6 +58,7 @@ export class FlightsRouteQueryService extends FlightsServicePart {
       ...getCustomerBookableFlightFilter(),
       origin_iata: { $in: originIatas },
       dest_iata: { $in: destIatas },
+      scheduled_departure: { $gt: new Date() },
     };
 
     if (departureDateEnd) {
@@ -252,6 +253,7 @@ export class FlightsRouteQueryService extends FlightsServicePart {
         ...getCustomerBookableFlightFilter(),
         origin_iata: { $in: originIatas },
         departure_date: leg1DateFilter,
+        scheduled_departure: { $gt: new Date(now) },
         'inventories.available_seats': { $gte: totalPassengers },
       })
       .exec();
@@ -285,6 +287,7 @@ export class FlightsRouteQueryService extends FlightsServicePart {
         ...getCustomerBookableFlightFilter(),
         origin_iata: leg2OriginFilter,
         departure_date: { $in: leg2Dates },
+        scheduled_departure: { $gt: new Date(now) },
         'inventories.available_seats': { $gte: totalPassengers },
       })
       .exec();
@@ -315,6 +318,7 @@ export class FlightsRouteQueryService extends FlightsServicePart {
           origin_iata: leg3OriginFilter,
           dest_iata: { $in: destIatas },
           departure_date: { $in: leg2Dates },
+          scheduled_departure: { $gt: new Date(now) },
           'inventories.available_seats': { $gte: totalPassengers },
         })
         .exec();

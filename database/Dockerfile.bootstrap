@@ -1,0 +1,6 @@
+FROM node:20-alpine
+WORKDIR /bootstrap
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY bootstrap-db.js ./bootstrap-db.js
+ENTRYPOINT ["node", "bootstrap-db.js"]

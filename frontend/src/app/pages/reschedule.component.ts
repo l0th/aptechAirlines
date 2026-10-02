@@ -33,9 +33,9 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
       <section class="card booking-card">
         <div class="booking-head">
           <div>
-            <span class="pill pill-success">{{booking.status}}</span>
+            <span class="pill pill-success">{{statusLabel(booking.status)}}</span>
             <h2>{{booking.pnr_code||booking.confirmation_number}}</h2>
-            <p>{{booking.booking_type}} · {{passengerTotal}} hành khách · {{cabinLabel}}</p>
+            <p>{{bookingTypeLabel(booking.booking_type)}} · {{passengerTotal}} hành khách · {{cabinLabel}}</p>
           </div>
           <div class="route-summary">
             <span>Chiều đi</span><strong>{{outboundOrigin||'—'}} → {{outboundDestination||'—'}}</strong>
@@ -50,7 +50,7 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
             <button type="button" [class.active]="direction==='BOTH'" (click)="setDirection('BOTH')">Đổi cả hai chiều</button>
           </div>
           @if(!supportsReturnOnly){
-            <p class="contract-note">Booking khứ hồi direct hiện yêu cầu đổi chiều đi hoặc đổi cả hai chiều. Nếu một trong hai chiều là nối chuyến, hệ thống cho phép đổi riêng chiều về.</p>
+            <p class="contract-note">Vé khứ hồi bay thẳng hiện hỗ trợ đổi chiều đi hoặc đổi cả hai chiều. Nếu một trong hai chiều là hành trình nối chuyến, bạn có thể đổi riêng chiều về.</p>
           }
         }
       </section>
@@ -60,10 +60,11 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
           <div class="search-block">
             <div class="block-title"><span class="step">1</span><div><b>Chuyến mới · chiều đi</b><small>{{outboundOrigin}} → {{outboundDestination}}</small></div></div>
             <div class="grid grid-3">
-              <div class="field"><span>Nơi đi</span><input class="control" [(ngModel)]="outboundOrigin" placeholder="SGN"></div>
-              <div class="field"><span>Nơi đến</span><input class="control" [(ngModel)]="outboundDestination" placeholder="HAN"></div>
+              <div class="field"><span>Nơi đi · giữ nguyên</span><input class="control route-locked" [value]="outboundOrigin" readonly aria-readonly="true"></div>
+              <div class="field"><span>Nơi đến · giữ nguyên</span><input class="control route-locked" [value]="outboundDestination" readonly aria-readonly="true"></div>
               <div class="field"><span>Ngày mới</span><input class="control" type="date" [(ngModel)]="outboundDate" [min]="minDate" [max]="maxDate"></div>
             </div>
+            <p class="route-note">Đổi vé chỉ cho phép đổi ngày/chuyến bay; tuyến {{outboundOrigin}} → {{outboundDestination}} được giữ nguyên theo vé gốc.</p>
           </div>
         }
 
@@ -71,10 +72,11 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
           <div class="search-block" [class.with-divider]="needsOutbound">
             <div class="block-title"><span class="step">{{needsOutbound?2:1}}</span><div><b>Chuyến mới · chiều về</b><small>{{returnOrigin}} → {{returnDestination}}</small></div></div>
             <div class="grid grid-3">
-              <div class="field"><span>Nơi đi</span><input class="control" [(ngModel)]="returnOrigin" placeholder="HAN"></div>
-              <div class="field"><span>Nơi đến</span><input class="control" [(ngModel)]="returnDestination" placeholder="SGN"></div>
+              <div class="field"><span>Nơi đi · giữ nguyên</span><input class="control route-locked" [value]="returnOrigin" readonly aria-readonly="true"></div>
+              <div class="field"><span>Nơi đến · giữ nguyên</span><input class="control route-locked" [value]="returnDestination" readonly aria-readonly="true"></div>
               <div class="field"><span>Ngày mới</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="minDate" [max]="maxDate"></div>
             </div>
+            <p class="route-note">Đổi vé chỉ cho phép đổi ngày/chuyến bay; tuyến {{returnOrigin}} → {{returnDestination}} được giữ nguyên theo vé gốc.</p>
           </div>
         }
 
@@ -151,15 +153,15 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
             <div class="difference" [class.refund]="priceDifference<0"><span>Chênh lệch</span><strong>{{signedMoney(priceDifference)}}</strong></div>
           </div>
           @if(priceDifference>0){
-            <div class="payment">
-              <label><input type="radio" name="reschedulePayment" value="PROFILE_CARD" [(ngModel)]="payment"> Thẻ trong hồ sơ</label>
-              @if(!auth.staff()){
-                <label [class.disabled]="!paypalEnabled"><input type="radio" name="reschedulePayment" value="PAYPAL" [(ngModel)]="payment" [disabled]="!paypalEnabled"> PayPal {{paypalEnabled?'':'(chưa bật)'}}</label>
-              }
-            </div>
-            @if(auth.staff()){<p class="refund-note">Staff xử lý phần chênh lệch bằng thẻ hồ sơ của khách hàng.</p>}
+            @if(auth.staff()){
+              <p class="refund-note"><strong>Giao dịch tại quầy.</strong> Nhân viên xử lý phần chênh lệch theo luồng hỗ trợ hiện có.</p>
+            }@else{
+              <div class="payment">
+                <label [class.disabled]="!paypalEnabled"><input type="radio" name="reschedulePayment" value="PAYPAL" [(ngModel)]="payment" [disabled]="!paypalEnabled"> <span><b>PayPal Checkout</b><small>{{paypalEnabled?'Thanh toán phần chênh lệch qua PayPal':'PayPal chưa được bật'}}</small></span></label>
+              </div>
+            }
           }@else if(priceDifference<0){
-            <p class="refund-note">Hành trình mới rẻ hơn. Hệ thống sẽ xử lý phần chênh lệch theo nghiệp vụ reschedule hiện có.</p>
+            <p class="refund-note"><strong>Hành trình mới rẻ hơn.</strong> Phần chênh lệch được hoàn về nguồn thanh toán gốc của booking; không cần nhập tài khoản hay thẻ mới tại đây.</p>
           }@else{
             <p class="refund-note">Không có chênh lệch giá, không cần thanh toán thêm.</p>
           }
@@ -173,7 +175,7 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
   </div>
   `,
   styles: [`
-    .finder{padding:18px;margin:18px 0;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}.code-field{max-width:560px}.notice-error{background:#fff0f0;border:1px solid #f0caca;padding:12px 14px;border-radius:14px}.booking-card{padding:20px;margin-bottom:14px}.booking-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.booking-head h2{margin:10px 0 5px;color:#071b2e}.booking-head p{margin:0;color:#68778a}.route-summary{display:grid;grid-template-columns:auto auto;gap:5px 14px;text-align:right}.route-summary span{font-size:10px;text-transform:uppercase;color:#82909e;font-weight:800}.route-summary strong{color:#102b42}.direction-picker{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid #e8edf1}.direction-picker button{border:1px solid #d9e1e7;background:#fff;color:#44576a;border-radius:999px;padding:9px 14px;font-weight:800;cursor:pointer}.direction-picker button.active{background:#0a2540;color:#fff;border-color:#0a2540}.direction-picker button:disabled{opacity:.38;cursor:not-allowed}.contract-note{margin:11px 0 0;padding:10px 12px;border-radius:12px;background:#f6f8fa;color:#647588;font-size:12px}.search-card{padding:20px;margin:14px 0}.search-block+.with-divider{border-top:1px solid #e7edf1;margin-top:20px;padding-top:20px}.block-title{display:flex;gap:10px;align-items:center;margin-bottom:12px}.block-title b,.block-title small{display:block}.block-title b{color:#102b42}.block-title small{color:#7a8997;margin-top:2px}.step{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#fff1bf;color:#735608;font-weight:900;font-size:12px}.search-actions{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:18px}.result-head{margin-top:28px}.flight{padding:18px;margin-top:12px;display:grid;grid-template-columns:1.4fr .7fr auto;gap:16px;align-items:center}.flight.chosen,.connection.chosen{border-color:#d6b35a;box-shadow:0 0 0 3px rgba(214,179,90,.12)}.flight small,.flight span{display:block;color:#68778a;margin-top:4px}.flight b,.flight strong{display:block;color:#071b2e}.connection{padding:20px;margin-top:12px}.connection-title,.connection-foot{display:flex;align-items:center;justify-content:space-between;gap:15px}.connection-title h3{margin:8px 0 0;color:#071b2e}.leg{display:grid;grid-template-columns:80px 1fr auto 1fr;gap:10px;padding:10px 0;border-top:1px dashed #dfe7ed;font-size:13px}.leg:first-of-type{margin-top:14px}.connection-foot{border-top:1px solid #edf1f4;padding-top:14px}.selection-progress{padding:16px 18px;margin-top:18px;background:#f4f8fb}.selection-progress b,.selection-progress span{display:block}.selection-progress b{color:#17324a}.selection-progress span{color:#718093;font-size:12px;margin-top:3px}.quote{padding:24px;margin-top:24px}.quote h2{margin:7px 0 18px;color:#071b2e}.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.price-grid>div{background:#f7f9fb;border-radius:16px;padding:15px}.price-grid span{display:block;color:#68778a;font-size:11px;text-transform:uppercase;font-weight:800}.price-grid strong{display:block;color:#071b2e;font-size:20px;margin-top:6px}.price-grid .difference{background:#fff7df}.price-grid .difference.refund{background:#eaf8f1}.payment{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0;font-weight:700;color:#435468}.payment label.disabled{opacity:.45}.refund-note{background:#f3f7fa;color:#526579;padding:12px 14px;border-radius:14px}.quote-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.btn:disabled{opacity:.5;cursor:not-allowed}@media(max-width:850px){.finder{grid-template-columns:1fr}.booking-head,.search-actions,.connection-title,.connection-foot{align-items:flex-start;flex-direction:column}.route-summary{text-align:left}.price-grid{grid-template-columns:1fr}.flight{grid-template-columns:1fr}.leg{grid-template-columns:70px 1fr}.quote-actions{flex-direction:column}.quote-actions .btn{width:100%}}
+    .finder{padding:18px;margin:18px 0;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end}.code-field{max-width:560px}.notice-error{background:#fff0f0;border:1px solid #f0caca;padding:12px 14px;border-radius:14px}.booking-card{padding:20px;margin-bottom:14px}.booking-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.booking-head h2{margin:10px 0 5px;color:#071b2e}.booking-head p{margin:0;color:#68778a}.route-summary{display:grid;grid-template-columns:auto auto;gap:5px 14px;text-align:right}.route-summary span{font-size:10px;text-transform:uppercase;color:#82909e;font-weight:800}.route-summary strong{color:#102b42}.direction-picker{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid #e8edf1}.direction-picker button{border:1px solid #d9e1e7;background:#fff;color:#44576a;border-radius:999px;padding:9px 14px;font-weight:800;cursor:pointer}.direction-picker button.active{background:#0a2540;color:#fff;border-color:#0a2540}.direction-picker button:disabled{opacity:.38;cursor:not-allowed}.contract-note{margin:11px 0 0;padding:10px 12px;border-radius:12px;background:#f6f8fa;color:#647588;font-size:12px}.search-card{padding:20px;margin:14px 0}.search-block+.with-divider{border-top:1px solid #e7edf1;margin-top:20px;padding-top:20px}.block-title{display:flex;gap:10px;align-items:center;margin-bottom:12px}.block-title b,.block-title small{display:block}.block-title b{color:#102b42}.block-title small{color:#7a8997;margin-top:2px}.route-locked{background:#f3f6f8;color:#586b7d;font-weight:800;cursor:not-allowed}.route-note{margin:10px 0 0;color:#738394;font-size:11px}.step{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#fff1bf;color:#735608;font-weight:900;font-size:12px}.search-actions{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:18px}.result-head{margin-top:28px}.flight{padding:18px;margin-top:12px;display:grid;grid-template-columns:1.4fr .7fr auto;gap:16px;align-items:center}.flight.chosen,.connection.chosen{border-color:#d6b35a;box-shadow:0 0 0 3px rgba(214,179,90,.12)}.flight small,.flight span{display:block;color:#68778a;margin-top:4px}.flight b,.flight strong{display:block;color:#071b2e}.connection{padding:20px;margin-top:12px}.connection-title,.connection-foot{display:flex;align-items:center;justify-content:space-between;gap:15px}.connection-title h3{margin:8px 0 0;color:#071b2e}.leg{display:grid;grid-template-columns:80px 1fr auto 1fr;gap:10px;padding:10px 0;border-top:1px dashed #dfe7ed;font-size:13px}.leg:first-of-type{margin-top:14px}.connection-foot{border-top:1px solid #edf1f4;padding-top:14px}.selection-progress{padding:16px 18px;margin-top:18px;background:#f4f8fb}.selection-progress b,.selection-progress span{display:block}.selection-progress b{color:#17324a}.selection-progress span{color:#718093;font-size:12px;margin-top:3px}.quote{padding:24px;margin-top:24px}.quote h2{margin:7px 0 18px;color:#071b2e}.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.price-grid>div{background:#f7f9fb;border-radius:16px;padding:15px}.price-grid span{display:block;color:#68778a;font-size:11px;text-transform:uppercase;font-weight:800}.price-grid strong{display:block;color:#071b2e;font-size:20px;margin-top:6px}.price-grid .difference{background:#fff7df}.price-grid .difference.refund{background:#eaf8f1}.payment{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0;font-weight:700;color:#435468}.payment label{display:flex;align-items:center;gap:10px;border:1px solid #d8e2e9;border-radius:14px;padding:12px 14px;background:#fff}.payment label:has(input:checked){border-color:#d6b35a;background:#fff8e5}.payment label span{display:grid;gap:2px}.payment label small{color:#718093;font-weight:500}.payment label.disabled{opacity:.45}.refund-note{background:#f3f7fa;color:#526579;padding:12px 14px;border-radius:14px;line-height:1.55}.quote-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.btn:disabled{opacity:.5;cursor:not-allowed}@media(max-width:850px){.finder{grid-template-columns:1fr}.booking-head,.search-actions,.connection-title,.connection-foot{align-items:flex-start;flex-direction:column}.route-summary{text-align:left}.price-grid{grid-template-columns:1fr}.flight{grid-template-columns:1fr}.leg{grid-template-columns:70px 1fr}.quote-actions{flex-direction:column}.quote-actions .btn{width:100%}}
   `]
 })
 export class RescheduleComponent {
@@ -202,7 +204,7 @@ export class RescheduleComponent {
   selectedOutbound: any = null;
   selectedReturn: any = null;
   quote: any = null;
-  payment = 'PROFILE_CARD';
+  payment = 'PAYPAL';
   paypalEnabled = false;
   busy = false;
   error = '';
@@ -230,6 +232,8 @@ export class RescheduleComponent {
     if (this.direction === 'BOTH') return 'Đổi cả chiều đi và chiều về';
     return this.direction === 'RETURN' ? 'Đổi chiều về' : 'Đổi chiều đi';
   }
+  bookingTypeLabel(value: string) { return ({ ONE_WAY: 'Một chiều', ROUND_TRIP: 'Khứ hồi', CONNECTING: 'Nối chuyến' } as any)[value] || value; }
+  statusLabel(value: string) { return ({ BLOCKED: 'Đang giữ chỗ', CONFIRMED: 'Đã xác nhận', RESCHEDULED: 'Đã đổi chuyến', CANCELLED: 'Đã hủy' } as any)[value] || value; }
 
   get coupons() { return this.tracked?.flight_coupons || this.booking?.ticket_coupons || []; }
   get outboundCoupons() { return this.coupons.filter((c: any) => this.isOutboundLeg(c.leg_type)); }
@@ -359,7 +363,8 @@ export class RescheduleComponent {
     this.busy = true;
     this.error = '';
     try {
-      if (this.priceDifference > 0 && !this.auth.staff() && this.payment === 'PAYPAL') {
+      if (this.priceDifference > 0 && !this.auth.staff()) {
+        if (!this.paypalEnabled) throw new Error('PayPal chưa được bật cho môi trường hiện tại.');
         let checkout = '';
         await this.paypal.pay(
           async () => {
@@ -369,8 +374,10 @@ export class RescheduleComponent {
           },
           async orderId => { await firstValueFrom(this.api.paypalRescheduleCapture(checkout, orderId)); }
         );
-      } else {
+      } else if (this.priceDifference > 0 && this.auth.staff()) {
         await firstValueFrom(this.api.reschedule({ ...payload, payment_method: 'PROFILE_CARD' }));
+      } else {
+        await firstValueFrom(this.api.reschedule(payload));
       }
       this.router.navigate(['/trips']);
     } catch (e: any) {

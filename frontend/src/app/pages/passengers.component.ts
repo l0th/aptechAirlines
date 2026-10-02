@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { AuthService } from '../core/auth.service';
 import { BookingStateService } from '../core/booking-state.service';
 
 @Component({
@@ -54,6 +55,7 @@ import { BookingStateService } from '../core/booking-state.service';
 })
 export class PassengersComponent {
   state = inject(BookingStateService);
+  auth = inject(AuthService);
   router = inject(Router);
   passengers: any[] = [];
   error = '';
@@ -80,6 +82,8 @@ export class PassengersComponent {
           nationality: 'Vietnam',
           date_of_birth: ''
         }));
+
+    if (!canRestore) this.prefillPrimaryPassenger();
   }
 
   typeLabel(type: string) {
@@ -127,6 +131,19 @@ export class PassengersComponent {
     for (let i = 0; i < Number(q?.children ?? 0); i++) result.push('CHILD');
     for (let i = 0; i < Number(q?.seniors ?? 0); i++) result.push('SENIOR');
     return result;
+  }
+
+  private prefillPrimaryPassenger() {
+    const customer = this.auth.staff() ? this.state.staffCustomer() : this.auth.user();
+    if (!customer) return;
+    const index = this.passengers.findIndex(p => p.passenger_type === 'ADULT');
+    if (index < 0) return;
+    this.passengers[index] = {
+      ...this.passengers[index],
+      first_name: String(customer.first_name || '').trim(),
+      last_name: String(customer.last_name || '').trim(),
+      nationality: this.passengers[index].nationality || 'Vietnam',
+    };
   }
 
   private localDate(date: Date) {

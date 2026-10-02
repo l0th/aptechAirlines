@@ -13,7 +13,7 @@ import { AuthService } from '../core/auth.service';
   <div class="container page">
     <div class="eyebrow">TICKET STATUS</div>
     <h1 class="title">Tra cứu vé</h1>
-    <p class="subtitle">Nhập mã giữ chỗ, confirmation number hoặc PNR để xem trạng thái và quyền xử lý hiện tại.</p>
+    <p class="subtitle">Nhập mã giữ chỗ, mã xác nhận hoặc PNR để xem trạng thái và thông tin hành trình.</p>
 
     <div class="card finder">
       <input class="control" [(ngModel)]="code" (keyup.enter)="search()" placeholder="BLK-... / CNF-... / PNR">
@@ -27,9 +27,9 @@ import { AuthService } from '../core/auth.service';
           <div>
             <div class="eyebrow">BOOKING</div>
             <h2>{{result.pnr_code||result.confirmation_number||result.blocking_number}}</h2>
-            <p>{{result.booking_type}} · {{result.passengers?.length||0}} hành khách</p>
+            <p>{{bookingTypeLabel(result.booking_type)}} · {{result.passengers?.length||0}} hành khách</p>
           </div>
-          <span class="status" [class.ok]="result.status==='CONFIRMED'||result.status==='RESCHEDULED'" [class.warn]="result.status==='BLOCKED'" [class.cancel]="result.status==='CANCELLED'">{{result.status}}</span>
+          <span class="status" [class.ok]="result.status==='CONFIRMED'||result.status==='RESCHEDULED'" [class.warn]="result.status==='BLOCKED'" [class.cancel]="result.status==='CANCELLED'">{{statusLabel(result.status)}}</span>
         </header>
 
         <div class="codes">
@@ -49,7 +49,7 @@ import { AuthService } from '../core/auth.service';
           <div>
             <h3>Hành khách</h3>
             @for(p of result.passengers||[];track $index){
-              <div class="person"><span>{{$index+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{p.passenger_type}} · {{p.nationality}}</small></div>
+              <div class="person"><span>{{$index+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{passengerTypeLabel(p.passenger_type)}} · {{p.nationality}}</small></div>
             }
           </div>
           <div>
@@ -65,14 +65,17 @@ import { AuthService } from '../core/auth.service';
 
         <footer class="ticket-actions">
           @if(result.status==='BLOCKED'){
-            <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard()">Xác nhận bằng thẻ</button>
-            @if(!auth.staff()){<button class="btn btn-outline" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal()">PayPal {{paypalEnabled?'':'(chưa bật)'}}</button>}
+            @if(auth.staff()){
+              <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard()">Xác nhận tại quầy</button>
+            }@else{
+              <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal()">Thanh toán PayPal {{paypalEnabled?'':'(chưa bật)'}}</button>
+            }
           }
           @if(result.status==='CONFIRMED'){
             <button class="btn btn-outline" (click)="router.navigate(['/reschedule'],{queryParams:{code:result.confirmation_number||result.pnr_code}})">Đổi chuyến</button>
           }
           @if(result.status!=='CANCELLED'){
-            <button class="btn btn-outline danger" [disabled]="busy" (click)="cancel()">Hủy booking</button>
+            <button class="btn btn-outline danger" [disabled]="busy" (click)="cancel()">Hủy vé</button>
           }
         </footer>
       </section>
@@ -104,7 +107,7 @@ export class TrackComponent{
     this.loading=true;this.error='';this.result=null;
     this.api.track(code).subscribe({
       next:r=>{this.tracked=r;this.result=r?.booking_info||r;this.loading=false},
-      error:e=>{this.tracked=null;this.error=this.msg(e,'Không tìm thấy vé hoặc bạn không có quyền xem booking này.');this.loading=false}
+      error:e=>{this.tracked=null;this.error=this.msg(e,'Không tìm thấy vé hoặc bạn không có quyền xem đặt chỗ này.');this.loading=false}
     })
   }
   async confirmHoldCard(){
@@ -140,7 +143,7 @@ export class TrackComponent{
     const percent=this.refundPercent();
     const question=this.result.status==='BLOCKED'
       ?'Hủy vé đang giữ sẽ giải phóng toàn bộ ghế và không phát sinh khoản hoàn tiền. Bạn muốn tiếp tục?'
-      :`Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Bạn muốn hủy booking này?`;
+      :`Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Bạn muốn hủy vé này?`;
     if(!confirm(question))return;
     const id=this.result.confirmation_number||this.result.blocking_number||this.result.pnr_code;
     this.busy=true;this.error='';this.message='';
@@ -148,7 +151,7 @@ export class TrackComponent{
       const r=await firstValueFrom(this.api.cancel(id));
       this.message=`Đã hủy vé. Mã hủy: ${r.cancellation_number}. Hoàn ${this.money(r.refund_amount)} (${r.refund_percentage}%).`;
       this.search();
-    }catch(e:any){this.error=this.msg(e,'Không hủy được booking.')}
+    }catch(e:any){this.error=this.msg(e,'Không hủy được vé.')}
     finally{this.busy=false}
   }
   refundPercent(){
@@ -159,6 +162,9 @@ export class TrackComponent{
     const matched=this.policies.filter(p=>days>=Number(p.min_days_before??0)&&days<=(p.max_days_before==null?Infinity:Number(p.max_days_before))).sort((a,b)=>Number(b.min_days_before)-Number(a.min_days_before))[0];
     return Number(matched?.refund_percentage||0)
   }
+  bookingTypeLabel(v:string){return({ONE_WAY:'Một chiều',ROUND_TRIP:'Khứ hồi',CONNECTING:'Nối chuyến'} as any)[v]||v||'Hành trình'}
+  statusLabel(v:string){return({BLOCKED:'Đang giữ chỗ',CONFIRMED:'Đã xác nhận',RESCHEDULED:'Đã đổi chuyến',CANCELLED:'Đã hủy'} as any)[v]||v}
+  passengerTypeLabel(v:string){return({ADULT:'Người lớn',CHILD:'Trẻ em',SENIOR:'Cao tuổi'} as any)[v]||v||'Hành khách'}
   legLabel(v:string){if(v==='OUTBOUND')return'Chiều đi';if(v==='INBOUND')return'Chiều về';if(v?.startsWith('CONNECTING_'))return`Đi · chặng ${v.split('_')[1]}`;if(v?.startsWith('INBOUND_'))return`Về · chặng ${v.split('_')[1]}`;return v||'Chặng bay'}
   dateTime(v:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat('vi-VN',{dateStyle:'medium',timeStyle:'short'}).format(d)}
   money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}

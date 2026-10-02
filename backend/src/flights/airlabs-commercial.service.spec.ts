@@ -23,6 +23,15 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
   let commercialService: AirlabsCommercialService;
   let generatorService: FlightGeneratorService;
 
+  beforeAll(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-30T00:00:00.000Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   // In-memory mock stores
   let mockRouteRefs: Map<string, any>;
   let mockTemplates: Map<string, any>;

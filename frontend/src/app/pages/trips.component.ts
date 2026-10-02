@@ -28,6 +28,24 @@ import { PaypalService } from '../core/paypal.service';
               </div>
               <h3>{{b.pnr_code}}</h3>
               <p class="reference">{{b.confirmation_number||b.blocking_number||b.cancellation_number||'Chưa có mã xử lý'}}</p>
+              @if(scheduleRows(b).length){
+                <div class="flight-schedule">
+                  @for(f of scheduleRows(b);track f.key){
+                    <div class="schedule-row">
+                      <div>
+                        <span>{{f.label}}</span>
+                        <strong>{{f.flight_number}} · {{f.origin_iata||'—'}} → {{f.dest_iata||'—'}}</strong>
+                      </div>
+                      <div class="departure">
+                        <span>Khởi hành</span>
+                        <strong>{{flightDateTime(f)}}</strong>
+                      </div>
+                    </div>
+                  }
+                </div>
+              } @else if(scheduleLoading.has(bookingKey(b))){
+                <div class="schedule-loading">Đang tải ngày giờ bay…</div>
+              }
               <div class="summary">
                 <span>{{b.passengers?.length||0}} hành khách</span>
                 <span>{{money(b.total_amount)}}</span>
@@ -37,8 +55,11 @@ import { PaypalService } from '../core/paypal.service';
             <div class="trip-actions">
               <button class="btn btn-outline" (click)="openDetails(b)" [disabled]="busy">Chi tiết</button>
               @if(b.status==='BLOCKED'){
-                <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard(b)">Xác nhận bằng thẻ</button>
-                @if(!auth.staff()){<button class="btn btn-outline" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal(b)">PayPal</button>}
+                @if(auth.staff()){
+                  <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard(b)">Xác nhận tại quầy</button>
+                }@else{
+                  <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal(b)">Thanh toán PayPal</button>
+                }
               }
               @if(b.status==='CONFIRMED'){
                 <button class="btn btn-outline" (click)="reschedule(b)">Đổi vé</button>
@@ -116,7 +137,7 @@ import { PaypalService } from '../core/paypal.service';
   </div>
   `,
   styles: [`
-    .trip-list{display:grid;gap:14px;margin-top:18px}.trip{padding:20px;display:flex;justify-content:space-between;gap:22px;align-items:center}.trip-top{display:flex;gap:9px;align-items:center}.type{font-size:11px;font-weight:800;color:#718093;text-transform:uppercase}.trip h3{margin:10px 0 3px;color:#071b2e;font-size:22px}.reference{margin:0;color:#647588;font-weight:700}.summary{display:flex;gap:15px;flex-wrap:wrap;margin-top:11px;color:#647588;font-size:12px}.summary span{padding-right:15px;border-right:1px solid #dde5eb}.summary span:last-child{border:0}.trip-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.trip-actions .btn:disabled{opacity:.45}.danger{color:#9d3030;border-color:#e4bebe}.notice{margin-top:14px;padding:11px 14px;border-radius:12px}.modal{position:fixed;inset:0;background:rgba(4,18,31,.58);display:grid;place-items:center;z-index:99;padding:20px}.modal-card{width:min(920px,100%);max-height:88vh;overflow:auto;padding:0;position:relative}.x{position:absolute;right:15px;top:12px;border:0;background:rgba(255,255,255,.12);color:#fff;width:34px;height:34px;border-radius:50%;font-size:25px;cursor:pointer;z-index:2}.modal-head{padding:24px 58px 22px 24px;background:linear-gradient(120deg,#071b2e,#123957);color:#fff;display:flex;justify-content:space-between;gap:20px}.modal-head h2{margin:5px 0;font-size:27px}.modal-head p{margin:0;color:#bfd0db}.codes{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e6edf2}.codes>div{background:#fff;padding:14px 16px}.codes span,.totals span{display:block;color:#768696;font-size:10px;font-weight:800;text-transform:uppercase}.codes strong,.totals strong{display:block;color:#102b42;margin-top:5px}.deadline{margin:16px 20px 0;padding:11px 13px;background:#fff7df;color:#72540d;border-radius:12px}.detail-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:28px;padding:22px 24px}.detail-grid h3{margin:0 0 10px;color:#0a2540}.row-item,.coupon{padding:10px 0;border-bottom:1px solid #edf1f4}.row-item strong,.row-item small{display:block}.row-item small,.coupon small{display:block;color:#758493;font-size:11px;margin-top:3px}.coupon{display:flex;justify-content:space-between;gap:15px}.coupon>div:last-child{text-align:right}.coupon b{display:block;color:#1f384d}.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e6edf2;border-top:1px solid #e6edf2}.totals>div{background:#fff;padding:15px 18px}.totals .grand{background:#fff8e5}.totals .grand strong{font-size:19px;color:#77580b}@media(max-width:760px){.trip{align-items:flex-start;flex-direction:column}.trip-actions{justify-content:flex-start}.codes,.totals{grid-template-columns:1fr 1fr}.detail-grid{grid-template-columns:1fr}.coupon{flex-direction:column}.coupon>div:last-child{text-align:left}.modal-head{flex-direction:column}.summary span{border:0;padding:0}}
+    .trip-list{display:grid;gap:14px;margin-top:18px}.trip{padding:20px;display:flex;justify-content:space-between;gap:22px;align-items:center}.trip-main{min-width:0;flex:1}.trip-top{display:flex;gap:9px;align-items:center}.type{font-size:11px;font-weight:800;color:#718093;text-transform:uppercase}.trip h3{margin:10px 0 3px;color:#071b2e;font-size:22px}.reference{margin:0;color:#647588;font-weight:700}.flight-schedule{display:grid;gap:8px;margin-top:14px;max-width:690px}.schedule-row{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:10px 12px;border:1px solid #e6ecf1;background:#f7f9fb;border-radius:12px}.schedule-row>div{display:grid;gap:3px}.schedule-row span{font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:#7c8a98;font-weight:900}.schedule-row strong{font-size:13px;color:#17324a}.schedule-row .departure{text-align:right;white-space:nowrap}.schedule-loading{margin-top:12px;color:#81909d;font-size:11px}.summary{display:flex;gap:15px;flex-wrap:wrap;margin-top:11px;color:#647588;font-size:12px}.summary span{padding-right:15px;border-right:1px solid #dde5eb}.summary span:last-child{border:0}.trip-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.trip-actions .btn:disabled{opacity:.45}.danger{color:#9d3030;border-color:#e4bebe}.notice{margin-top:14px;padding:11px 14px;border-radius:12px}.modal{position:fixed;inset:0;background:rgba(4,18,31,.58);display:grid;place-items:center;z-index:99;padding:20px}.modal-card{width:min(920px,100%);max-height:88vh;overflow:auto;padding:0;position:relative}.x{position:absolute;right:15px;top:12px;border:0;background:rgba(255,255,255,.12);color:#fff;width:34px;height:34px;border-radius:50%;font-size:25px;cursor:pointer;z-index:2}.modal-head{padding:24px 58px 22px 24px;background:linear-gradient(120deg,#071b2e,#123957);color:#fff;display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.modal-head>.pill{align-self:flex-start;flex:0 0 auto;padding:6px 11px;line-height:1;white-space:nowrap}.modal-head h2{margin:5px 0;font-size:27px}.modal-head p{margin:0;color:#bfd0db}.codes{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e6edf2}.codes>div{background:#fff;padding:14px 16px}.codes span,.totals span{display:block;color:#768696;font-size:10px;font-weight:800;text-transform:uppercase}.codes strong,.totals strong{display:block;color:#102b42;margin-top:5px}.deadline{margin:16px 20px 0;padding:11px 13px;background:#fff7df;color:#72540d;border-radius:12px}.detail-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:28px;padding:22px 24px}.detail-grid h3{margin:0 0 10px;color:#0a2540}.row-item,.coupon{padding:10px 0;border-bottom:1px solid #edf1f4}.row-item strong,.row-item small{display:block}.row-item small,.coupon small{display:block;color:#758493;font-size:11px;margin-top:3px}.coupon{display:flex;justify-content:space-between;gap:15px}.coupon>div:last-child{text-align:right}.coupon b{display:block;color:#1f384d}.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e6edf2;border-top:1px solid #e6edf2}.totals>div{background:#fff;padding:15px 18px}.totals .grand{background:#fff8e5}.totals .grand strong{font-size:19px;color:#77580b}@media(max-width:760px){.trip{align-items:flex-start;flex-direction:column}.trip-actions{justify-content:flex-start}.schedule-row{align-items:flex-start;flex-direction:column;gap:8px}.schedule-row .departure{text-align:left}.codes,.totals{grid-template-columns:1fr 1fr}.detail-grid{grid-template-columns:1fr}.coupon{flex-direction:column}.coupon>div:last-child{text-align:left}.modal-head{flex-direction:column}.summary span{border:0;padding:0}}
   `]
 })
 export class TripsComponent {
@@ -134,6 +155,8 @@ export class TripsComponent {
   paypalEnabled = false;
   message = '';
   error = '';
+  scheduleLoading = new Set<string>();
+  private scheduleCache = new Map<string, any[]>();
 
   constructor() {
     if (this.auth.authenticated()) this.load();
@@ -148,9 +171,84 @@ export class TripsComponent {
 
   load() {
     this.api.myTrips().subscribe({
-      next: r => { this.trips = r || []; this.loading = false; },
+      next: r => {
+        this.trips = r || [];
+        this.loading = false;
+        void this.loadSchedules(this.trips);
+      },
       error: e => { this.error = this.msg(e, 'Không tải được booking.'); this.loading = false; },
     });
+  }
+
+  private async loadSchedules(bookings: any[]) {
+    await Promise.allSettled((bookings || []).map(async booking => {
+      const key = this.bookingKey(booking);
+      const code = booking.confirmation_number || booking.blocking_number || booking.pnr_code;
+      if (!key || !code || this.scheduleCache.has(key)) return;
+      this.scheduleLoading.add(key);
+      try {
+        const tracked = await firstValueFrom(this.api.track(code));
+        this.scheduleCache.set(key, tracked?.flight_coupons || []);
+      } catch {
+        this.scheduleCache.set(key, []);
+      } finally {
+        this.scheduleLoading.delete(key);
+      }
+    }));
+  }
+
+  bookingKey(booking: any) {
+    return String(booking?._id || booking?.pnr_code || booking?.confirmation_number || '');
+  }
+
+  scheduleRows(booking: any) {
+    const coupons = this.scheduleCache.get(this.bookingKey(booking)) || [];
+    if (!coupons.length) return [];
+
+    const outbound = coupons.filter((c: any) => this.isOutboundLeg(c?.leg_type));
+    const inbound = coupons.filter((c: any) => this.isInboundLeg(c?.leg_type));
+    const rows: any[] = [];
+
+    if (outbound.length) {
+      const first = outbound[0];
+      const last = outbound[outbound.length - 1];
+      rows.push({
+        ...first,
+        key: 'OUTBOUND',
+        label: booking?.booking_type === 'ROUND_TRIP' ? 'Chiều đi' : 'Chuyến bay',
+        origin_iata: first.origin_iata,
+        dest_iata: last.dest_iata,
+      });
+    }
+    if (inbound.length) {
+      const first = inbound[0];
+      const last = inbound[inbound.length - 1];
+      rows.push({
+        ...first,
+        key: 'INBOUND',
+        label: 'Chiều về',
+        origin_iata: first.origin_iata,
+        dest_iata: last.dest_iata,
+      });
+    }
+    return rows;
+  }
+
+  flightDateTime(flight: any) {
+    const local = String(flight?.scheduled_departure_local || '').trim();
+    const match = local.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+    if (match) return `${match[3]}/${match[2]}/${match[1]} · ${match[4]}`;
+    return this.dateTime(flight?.scheduled_departure);
+  }
+
+  private isOutboundLeg(value: string) {
+    const leg = String(value || '').toUpperCase();
+    return leg === 'OUTBOUND' || leg.startsWith('CONNECTING_');
+  }
+
+  private isInboundLeg(value: string) {
+    const leg = String(value || '').toUpperCase();
+    return leg === 'INBOUND' || leg.startsWith('INBOUND_');
   }
 
   async openDetails(booking: any) {
@@ -238,7 +336,7 @@ export class TripsComponent {
       const percent = this.refundPercent(liveBooking, tracked?.flight_coupons || []);
       const question = liveBooking.status === 'BLOCKED'
         ? 'Hủy vé đang giữ sẽ giải phóng toàn bộ ghế và không phát sinh khoản hoàn tiền. Bạn muốn tiếp tục?'
-        : `Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Bạn muốn hủy booking này?`;
+        : `Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Tiền hoàn sẽ được trả về phương thức thanh toán gốc. Bạn muốn hủy booking này?`;
       if (!confirm(question)) return;
       const result = await firstValueFrom(this.api.cancel(code));
       this.message = `Đã hủy vé. Mã hủy: ${result.cancellation_number}. Hoàn ${moneyStatic(result.refund_amount)} (${result.refund_percentage}%).`;

@@ -6,6 +6,10 @@
  * req 3.3.4.2: the date menu must not offer dates too far in the future.
  */
 
+import { localDateKey } from './timezone.util';
+
+export const BOOKING_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+
 // a) earlyBirdQuote(daysUntilDeparture)
 export function earlyBirdQuote(daysUntilDeparture: number): { multiplier: number; percent: number; label: string; label_en: string } {
     const days = Math.floor(daysUntilDeparture < 0 ? 0 : daysUntilDeparture);
@@ -61,15 +65,22 @@ export interface BookingWindowLimits {
     max_advance_days: number;
     min_date: string; // YYYY-MM-DD
     max_date: string; // YYYY-MM-DD
+    current_date: string; // YYYY-MM-DD in booking timezone
+    time_zone: string;
+    server_time: string;
 }
 
 export function getBookingWindowLimits(refDate: Date = new Date()): BookingWindowLimits {
     const maxDays = maxAdvanceBookingDays();
-    const maxDate = new Date(refDate.getTime() + maxDays * 86400000);
+    const currentDate = localDateKey(refDate, BOOKING_TIME_ZONE);
+    const [year, month, day] = currentDate.split('-').map(Number);
+    const maxDate = new Date(Date.UTC(year, month - 1, day + maxDays));
     return {
         max_advance_days: maxDays,
-        min_date: refDate.toISOString().split('T')[0],
+        min_date: currentDate,
         max_date: maxDate.toISOString().split('T')[0],
+        current_date: currentDate,
+        time_zone: BOOKING_TIME_ZONE,
+        server_time: refDate.toISOString(),
     };
 }
-

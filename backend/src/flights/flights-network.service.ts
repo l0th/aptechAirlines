@@ -346,12 +346,45 @@ export class FlightsNetworkService extends FlightsServicePart {
       throw new BadRequestException(`Destination location '${destination}' could not be resolved to any supported airport.`);
     }
 
+    // Exact airport-to-airport searches should refresh that pair directly from
+    // AirLabs first. AirLabs /routes can contain hundreds of departures for one
+    // origin, so relying only on the origin-wide cache can miss a direct route
+    // that lives on a later provider page.
+    let directPairRefreshError = '';
+    if (
+      originNetScope.iata_codes.length === 1 &&
+      destNetScope.iata_codes.length === 1
+    ) {
+      try {
+        const pair = await this.referenceService.ensureRoutesForPair(
+          originNetScope.iata_codes[0],
+          destNetScope.iata_codes[0],
+        );
+        if (pair?.refresh_error) {
+          directPairRefreshError = pair.refresh_error;
+        }
+      } catch (err: any) {
+        directPairRefreshError = err?.message || 'AirLabs direct-route refresh failed.';
+        this.logger.warn(
+          `Direct AirLabs route refresh failed for ${originNetScope.iata_codes[0]} -> ${destNetScope.iata_codes[0]}: ${directPairRefreshError}`,
+        );
+      }
+    }
+
     const discovery = await this.discoverNetworkRoutes(
       originNetScope.iata_codes,
       destNetScope.iata_codes,
       departureDate,
       maxStops,
     );
+
+    if (directPairRefreshError && discovery.status === 'NO_ROUTE_FOUND') {
+      discovery.status = 'NETWORK_DATA_INCOMPLETE';
+      discovery.coverage = {
+        ...discovery.coverage,
+        complete: false,
+      };
+    }
 
     return {
       origin_scope: {

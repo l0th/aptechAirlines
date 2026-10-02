@@ -374,6 +374,9 @@ export class FlightsInventoryService extends FlightsServicePart {
           const seatCode = `${rConfig.row_number}${col}`;
           let isOccupied = occupiedSet.has(seatCode);
           let fee = 0;
+          let seatPosition: 'WINDOW' | 'AISLE' | 'MIDDLE' | null = null;
+          let isExtraLegroom = rConfig.is_extra_legroom ?? false;
+          let pricingDimensions: string[] = [];
           let type: 'SPECIAL' | 'EXIT_ROW' | 'STANDARD' = 'STANDARD';
           let typeLabel = 'Còn trống';
 
@@ -397,6 +400,9 @@ export class FlightsInventoryService extends FlightsServicePart {
                   if (enrichedSeat.seat_fee !== undefined) {
                     fee = enrichedSeat.seat_fee;
                   }
+                  seatPosition = enrichedSeat.position ?? null;
+                  isExtraLegroom = enrichedSeat.is_extra_legroom ?? isExtraLegroom;
+                  pricingDimensions = enrichedSeat.pricing_dimensions ?? [];
                 }
               }
             }
@@ -412,6 +418,9 @@ export class FlightsInventoryService extends FlightsServicePart {
             fee,
             is_occupied: isOccupied,
             is_exit_row: isExit,
+            is_extra_legroom: isExtraLegroom,
+            position: seatPosition,
+            pricing_dimensions: pricingDimensions,
             is_special: isSpecial,
           };
 

@@ -14,6 +14,15 @@ describe('FlightsService - Network Discovery Fallback (16 Mandatory Invariants)'
   let routeGraphService: any;
   let routeScheduleValidatorService: any;
 
+  beforeAll(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-09-30T00:00:00.000Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   beforeEach(() => {
     flightModel = {
       find: jest.fn().mockImplementation(() => ({
@@ -1084,4 +1093,3 @@ describe('FlightsService - Network Discovery Fallback (16 Mandatory Invariants)'
     );
   });
 });
-

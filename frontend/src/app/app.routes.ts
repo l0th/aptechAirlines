@@ -13,7 +13,10 @@ export const routes:Routes=[
   {path:'track',canActivate:[authGuard],loadComponent:()=>import('./pages/track.component').then(m=>m.TrackComponent)},
   {path:'lookup',loadComponent:()=>import('./pages/lookup.component').then(m=>m.LookupComponent)},
   {path:'profile',canActivate:[authGuard],loadComponent:()=>import('./pages/profile.component').then(m=>m.ProfileComponent)},
-  {path:'skymiles',loadComponent:()=>import('./pages/skymiles.component').then(m=>m.SkyMilesComponent)}
+  {path:'skymiles',loadComponent:()=>import('./pages/skymiles.component').then(m=>m.SkyMilesComponent)},
+  {path:'cancellation-refund',loadComponent:()=>import('./pages/cancellation-refund.component').then(m=>m.CancellationRefundComponent)},
+  {path:'reschedule-info',loadComponent:()=>import('./pages/reschedule-info.component').then(m=>m.RescheduleInfoComponent)},
+  {path:'seat-fees',loadComponent:()=>import('./pages/seat-fees-info.component').then(m=>m.SeatFeesInfoComponent)}
  ]},
  {path:'admin',canActivate:[staffGuard],loadComponent:()=>import('./admin/admin-shell.component').then(m=>m.AdminShellComponent),children:[
   {path:'',loadComponent:()=>import('./admin/dashboard.component').then(m=>m.DashboardComponent)},

@@ -1,4 +1,4 @@
-import { IsEmail, IsInt, IsNotEmpty, IsString, Matches, Min, MinLength } from 'class-validator';
+import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator';
 import {
   CREDIT_CARD_MESSAGE,
   CREDIT_CARD_REGEX,
@@ -54,9 +54,8 @@ export class RegisterDto {
   @Min(0)
   age: number;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
-  preferred_credit_card: string;
+  preferred_credit_card?: string;
 }
-

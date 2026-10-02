@@ -118,16 +118,15 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
       expect(ageError).toBeDefined();
     });
 
-    it('Case F: Missing preferred_credit_card rejects validation', async () => {
+    it('Case F: Missing preferred_credit_card is allowed', async () => {
       const payload: any = { ...validRegisterPayload };
       delete payload.preferred_credit_card;
 
       const dto = plainToInstance(RegisterDto, payload);
       const errors = await validate(dto);
 
-      expect(errors.length).toBeGreaterThan(0);
       const cardError = errors.find((e) => e.property === 'preferred_credit_card');
-      expect(cardError).toBeDefined();
+      expect(cardError).toBeUndefined();
     });
 
     it('Case F2: Invalid preferred_credit_card format rejects validation (< 12 digits, letters, or punctuation only)', async () => {
