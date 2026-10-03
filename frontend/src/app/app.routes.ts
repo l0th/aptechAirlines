@@ -29,6 +29,7 @@ export const routes:Routes=[
   {path:'policies',canActivate:[adminGuard],loadComponent:()=>import('./admin/policies.component').then(m=>m.PoliciesComponent)},
   {path:'commercial',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},
   {path:'commercial-flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},
+  {path:'fare-pricing',canActivate:[adminGuard],loadComponent:()=>import('./admin/fare-pricing.component').then(m=>m.FarePricingComponent)},
   {path:'seat-pricing',canActivate:[adminGuard],loadComponent:()=>import('./admin/seat-pricing.component').then(m=>m.SeatPricingComponent)},
   {path:'seat-operations',loadComponent:()=>import('./admin/seat-operations.component').then(m=>m.SeatOperationsComponent)},
   {path:'reservation-desk',loadComponent:()=>import('./admin/reservation-desk.component').then(m=>m.ReservationDeskComponent)}

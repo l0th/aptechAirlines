@@ -1,10 +1,11 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
+import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PaginationComponent],
   template: `
     <div class="container page">
       <div class="eyebrow">PUBLIC FLIGHT LOOKUP</div>
@@ -30,7 +31,7 @@ import { ApiService } from '../core/api.service';
         <div class="card empty"><h2>Không có chuyến phù hợp</h2><p class="muted">Kiểm tra lại số hiệu chuyến bay và ngày.</p></div>
       }
 
-      @for(f of results;track f._id||f.flight_id||$index){
+      @for(f of pagedResults;track f._id||f.flight_id||$index){
         <article class="card flight">
           <header class="flight-head">
             <div>
@@ -70,6 +71,7 @@ import { ApiService } from '../core/api.service';
           }
         </article>
       }
+      <app-pagination [total]="results.length" [(page)]="page" [(pageSize)]="pageSize" [pageSizeOptions]="[5,10,20,50]" />
     </div>
   `,
   styles: [`
@@ -84,11 +86,19 @@ export class LookupComponent {
   error = '';
   loading = false;
   searched = false;
+  page = 1;
+  pageSize = 10;
+
+  get pagedResults() {
+    const start = (this.page - 1) * this.pageSize;
+    return this.results.slice(start, start + this.pageSize);
+  }
 
   search() {
     const number = this.number.trim().toUpperCase();
     this.error = '';
     this.results = [];
+    this.page = 1;
     this.searched = true;
     if (!number || !this.date) {
       this.error = 'Vui lòng nhập đầy đủ số hiệu chuyến bay và ngày bay.';

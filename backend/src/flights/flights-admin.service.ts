@@ -233,6 +233,107 @@ export class FlightsAdminService extends FlightsServicePart {
     }
 
     if (updateFlightDto.distance_miles !== undefined) flight.distance_miles = updateFlightDto.distance_miles;
+
+    if (updateFlightDto.aircraft) {
+      const targetCode = updateFlightDto.aircraft.model_code.trim().toUpperCase();
+      const layout = FLEET_LAYOUT_CATALOG[targetCode];
+      if (!layout) {
+        throw new BadRequestException(`Aircraft ${targetCode} is not supported by the configured fleet layouts.`);
+      }
+
+      const currentCode = flight.aircraft?.model_code?.trim().toUpperCase();
+      if (currentCode !== targetCode && this.seatAllocationService) {
+        const hasCustomerSeats = await this.seatAllocationService.hasCustomerSeatAssignments(flight._id);
+        if (hasCustomerSeats) {
+          throw new BadRequestException(
+            'Không thể đổi máy bay khi chuyến đã có ghế HELD hoặc CONFIRMED. Hãy xử lý các giữ chỗ/đặt chỗ trước.',
+          );
+        }
+      }
+
+      const inventories = (updateFlightDto.inventories ?? flight.inventories ?? []) as any[];
+      for (const inventory of inventories) {
+        const physicalCapacity = Number(layout.cabin_capacities?.[inventory.cabin_class] || 0);
+        if (!physicalCapacity) {
+          throw new BadRequestException(
+            `Aircraft ${targetCode} does not support cabin ${inventory.cabin_class}.`,
+          );
+        }
+        if (Number(inventory.allocated_seats || 0) > physicalCapacity) {
+          throw new BadRequestException(
+            `Cabin ${inventory.cabin_class} allocates ${inventory.allocated_seats} seats but ${targetCode} supports only ${physicalCapacity}.`,
+          );
+        }
+        const currentInventory = (flight.inventories || []).find(
+          (item: any) => item.cabin_class === inventory.cabin_class,
+        );
+        const soldSeats = currentInventory
+          ? Math.max(
+              0,
+              Number(currentInventory.allocated_seats || 0) - Number(currentInventory.available_seats || 0),
+            )
+          : 0;
+        if (Number(inventory.allocated_seats || 0) < soldSeats) {
+          throw new BadRequestException(`Cabin ${inventory.cabin_class} cannot be reduced below ${soldSeats} sold seats.`);
+        }
+        if (updateFlightDto.inventories) {
+          // available_seats is derived server-side so callers cannot accidentally
+          // resurrect sold seats (or hide free seats on a newly-added cabin).
+          inventory.available_seats = Math.max(0, Number(inventory.allocated_seats || 0) - soldSeats);
+        }
+      }
+
+      flight.aircraft = {
+        model_code: targetCode,
+        model_name: layout.model_name,
+        total_capacity: layout.total_capacity,
+      } as any;
+
+      const seatProfile = (flight as any).seat_pricing_profile_snapshot;
+      if (
+        seatProfile?.aircraft_type &&
+        seatProfile.aircraft_type !== 'ALL' &&
+        seatProfile.aircraft_type !== targetCode
+      ) {
+        (flight as any).seat_pricing_profile_id = undefined;
+        (flight as any).seat_pricing_profile_snapshot = undefined;
+      }
+    } else if (updateFlightDto.inventories) {
+      const currentCode = flight.aircraft?.model_code?.trim().toUpperCase();
+      const layout = currentCode ? FLEET_LAYOUT_CATALOG[currentCode] : undefined;
+      if (!layout) {
+        throw new BadRequestException(
+          `Aircraft ${currentCode || 'UNKNOWN'} is not supported by the configured fleet layouts.`,
+        );
+      }
+
+      for (const inventory of updateFlightDto.inventories as any[]) {
+        const physicalCapacity = Number(layout.cabin_capacities?.[inventory.cabin_class] || 0);
+        if (!physicalCapacity) {
+          throw new BadRequestException(
+            `Aircraft ${currentCode} does not support cabin ${inventory.cabin_class}.`,
+          );
+        }
+        if (Number(inventory.allocated_seats || 0) > physicalCapacity) {
+          throw new BadRequestException(
+            `Cabin ${inventory.cabin_class} allocates ${inventory.allocated_seats} seats but ${currentCode} supports only ${physicalCapacity}.`,
+          );
+        }
+        const currentInventory = (flight.inventories || []).find(
+          (item: any) => item.cabin_class === inventory.cabin_class,
+        );
+        const soldSeats = currentInventory
+          ? Math.max(
+              0,
+              Number(currentInventory.allocated_seats || 0) - Number(currentInventory.available_seats || 0),
+            )
+          : 0;
+        if (Number(inventory.allocated_seats || 0) < soldSeats) {
+          throw new BadRequestException(`Cabin ${inventory.cabin_class} cannot be reduced below ${soldSeats} sold seats.`);
+        }
+        inventory.available_seats = Math.max(0, Number(inventory.allocated_seats || 0) - soldSeats);
+      }
+    }
     if (updateFlightDto.status) {
       flight.status = updateFlightDto.status;
     }

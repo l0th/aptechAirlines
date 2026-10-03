@@ -47,10 +47,20 @@ export class ApiService{
  deleteAirport(iata:string){return this.http.delete<any>(`${this.base}/airports/${encodeURIComponent(iata)}`)}
  analytics(){return this.http.get<any>(`${this.base}/analytics/overview`)}
  analyticsCapacity(){return this.http.get<any>(`${this.base}/analytics/capacity`)}
+ pricingProfiles(){return this.http.get<any[]>(`${this.base}/flights/pricing-profiles`)}
+ createPricingProfile(body:any){return this.http.post<any>(`${this.base}/flights/pricing-profiles`,body)}
+ updatePricingProfile(id:string,body:any){return this.http.patch<any>(`${this.base}/flights/pricing-profiles/${encodeURIComponent(id)}`,body)}
+ deletePricingProfile(id:string){return this.http.delete<any>(`${this.base}/flights/pricing-profiles/${encodeURIComponent(id)}`)}
+ assignPricingProfile(id:string,body:any){return this.http.post<any>(`${this.base}/flights/pricing-profiles/${encodeURIComponent(id)}/assign`,body)}
  getSeatPricingRules(){return this.http.get<any[]>(`${this.base}/seat-allocation/pricing-rules`)}
  createSeatPricingRule(body:any){return this.http.post<any>(`${this.base}/seat-allocation/pricing-rules`,body)}
  updateSeatPricingRule(id:string,body:any){return this.http.put<any>(`${this.base}/seat-allocation/pricing-rules/${encodeURIComponent(id)}`,body)}
  deleteSeatPricingRule(id:string){return this.http.delete<any>(`${this.base}/seat-allocation/pricing-rules/${id}`)}
+ seatPricingProfiles(){return this.http.get<any[]>(`${this.base}/seat-allocation/pricing-profiles`)}
+ createSeatPricingProfile(body:any){return this.http.post<any>(`${this.base}/seat-allocation/pricing-profiles`,body)}
+ updateSeatPricingProfile(id:string,body:any){return this.http.put<any>(`${this.base}/seat-allocation/pricing-profiles/${encodeURIComponent(id)}`,body)}
+ deleteSeatPricingProfile(id:string){return this.http.delete<any>(`${this.base}/seat-allocation/pricing-profiles/${encodeURIComponent(id)}`)}
+ assignSeatPricingProfile(id:string,body:any){return this.http.post<any>(`${this.base}/seat-allocation/pricing-profiles/${encodeURIComponent(id)}/assign`,body)}
  seatOperationsMap(flightId:string,aircraftType:string){return this.http.get<any>(`${this.base}/seat-allocation/flight/${encodeURIComponent(flightId)}/map`,{params:{aircraftType}})}
  blockSeat(flightId:string,body:any){return this.http.post<any>(`${this.base}/seat-allocation/flight/${encodeURIComponent(flightId)}/block`,body)}
  unblockSeat(flightId:string,seat_code:string){return this.http.post<any>(`${this.base}/seat-allocation/flight/${encodeURIComponent(flightId)}/unblock`,{seat_code})}

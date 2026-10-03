@@ -55,12 +55,16 @@ Test theo thứ tự: **Guest -> Customer -> Clerk -> Admin -> quay lại Custom
 
 - [ ] CLERK login và vào Reservation Desk.
 - [ ] CLERK đặt vé thay một CUSTOMER; booking phải thuộc `user_id` của Customer, không phải Clerk.
-- [ ] ADMIN login và mở Dashboard/Analytics, Users, Flights, Airports, Policies, Commercial, Seat Pricing, Seat Operations.
+- [ ] ADMIN login và mở Dashboard/Analytics, Users, Flights, Airports, Policies, Commercial, Fare Pricing, Seat Pricing, Seat Operations.
 - [ ] ADMIN/CLERK kiểm tra Seat Operations: block/unblock ghế và override phí ghế.
 - [ ] ADMIN đổi trạng thái một chuyến sang `DELAYED` kèm lý do; Customer phải thấy cảnh báo.
 - [ ] ADMIN đổi một chuyến test sang `CANCELLED`; booking liên quan phải phản ánh hủy/hoàn tiền theo logic hệ thống.
 - [ ] Kiểm tra inventory không overbooking và số ghế thay đổi đúng sau Hold/Buy/Cancel/Reschedule.
-- [ ] Kiểm tra dynamic pricing: chuyến gần ngày và xa ngày cho giá khác theo rule hiện hành.
+- [ ] Vào `Admin -> Fare Pricing`, tạo profile A với các mốc ngày trước bay và load factor, sau đó gán cho nhiều chuyến hoặc commercial template.
+- [ ] Kiểm tra 1.2.4.3: cùng base fare nhưng ngày mua khác mốc phải ra giá khác theo profile đã gán.
+- [ ] Kiểm tra 1.2.4.2: thay đổi tỷ lệ ghế còn lại để load factor đi qua mốc LOW/NORMAL/HIGH; giá phải áp dụng đúng % điều chỉnh của profile.
+- [ ] Sửa profile A rồi kiểm tra các chuyến/template đang dùng được đồng bộ version mới; tạo profile B và gán riêng cho nhóm chuyến cần chính sách khác.
+- [ ] Commercial template đã gán profile phải truyền profile đó cho các dated flight được sinh mới.
 
 ### 1.3 Customer objectives
 

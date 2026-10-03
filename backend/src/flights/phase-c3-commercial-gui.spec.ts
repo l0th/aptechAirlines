@@ -34,6 +34,7 @@ describe('Phase C3.1: AirLabs Commercial Operations GUI Backend Contracts', () =
       {} as any, // flightModel
       {} as any, // airportModel
       {} as any, // flightGeneratorService
+      {} as any, // airportsService
     );
     controller = new FlightsController(
       {} as any, // flightsService
@@ -424,6 +425,7 @@ describe('Phase C3.1: AirLabs Commercial Operations GUI Backend Contracts', () =
       const testCommercialService = new AirlabsCommercialService(
         {} as any,
         mockTemplateModel,
+        {} as any,
         {} as any,
         {} as any,
         {} as any,

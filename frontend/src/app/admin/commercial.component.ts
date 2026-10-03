@@ -2,12 +2,13 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { PaginationComponent } from '../shared/pagination.component';
 
 type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
 
 @Component({
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, PaginationComponent],
   template: `
     <div class="eyebrow">AIRLABS → APTECH AIRLINES</div>
     <div class="section-head hero-head">
@@ -114,14 +115,14 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
 
     <div class="section-head catalog-head">
       <div><div class="eyebrow">DANH MỤC THƯƠNG MẠI</div><h2>Các mẫu đang quản lý</h2></div>
-      <div class="catalog-search"><input class="control" [(ngModel)]="query" placeholder="APT, SGN, HAN, aircraft..."><span class="pill pill-gold">{{filtered.length}} / {{templates.length}}</span></div>
+      <div class="catalog-search"><input class="control" [(ngModel)]="query" (ngModelChange)="page=1" placeholder="APT, SGN, HAN, aircraft..."><span class="pill pill-gold">{{filtered.length}} / {{templates.length}}</span></div>
     </div>
 
     <div class="card table-wrap">
       <table class="table">
         <thead><tr><th>Chuyến bay</th><th>Tuyến</th><th>Máy bay</th><th>Hạng ghế / tồn chỗ</th><th>Giá cơ bản</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
         <tbody>
-          @for(t of filtered;track t._id||t.template_id){
+          @for(t of pagedTemplates;track t._id||t.template_id){
             <tr>
               <td><strong>{{t.flight_number}}</strong><small class="subline">{{t.template_id}}</small></td>
               <td><b>{{t.origin_iata}}</b> → <b>{{t.dest_iata}}</b><small class="subline">{{t.source_flight_iata||t.source_flight_number||'Nguồn AirLabs'}}</small></td>
@@ -136,6 +137,7 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
         </tbody>
       </table>
     </div>
+    <app-pagination [total]="filtered.length" [(page)]="page" [(pageSize)]="pageSize" />
 
     @if(commercializingLeg){
       <div class="modal" (click)="closeModal($event)">
@@ -210,6 +212,8 @@ export class CommercialComponent {
   publishDone = false;
   publishProgress: Array<{flight:string;status:string;detail:string}> = [];
   query = '';
+  page = 1;
+  pageSize = 20;
   origin = 'SGN';
   destination = 'HAN';
   departureDate = this.localDate(new Date());
@@ -245,6 +249,7 @@ export class CommercialComponent {
     if(!q)return this.templates;
     return this.templates.filter(t=>[t.template_id,t.flight_number,t.origin_iata,t.dest_iata,t.aircraft_type,t.source_flight_iata,t.source_flight_number].some(v=>String(v||'').toLowerCase().includes(q)));
   }
+  get pagedTemplates(){ const start=(this.page-1)*this.pageSize;return this.filtered.slice(start,start+this.pageSize); }
   get allLegsCommercialized(){ return !!this.selectedItinerary?.legs?.length && this.selectedItinerary.legs.every((l:any)=>!!this.templateFor(l)); }
   get commercializedCount(){ return (this.selectedItinerary?.legs||[]).filter((l:any)=>!!this.templateFor(l)).length; }
   get selectedLayout(){ return this.layouts.find(a=>a.aircraft_type===this.formAircraft)||null; }
@@ -253,7 +258,7 @@ export class CommercialComponent {
   reloadAll(){ this.loadTemplates(); this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,'Không tải được aircraft layouts.')}); }
   loadTemplates(){
     this.loadingTemplates=true;
-    this.api.commercialTemplates({limit:200}).subscribe({next:(r:any)=>{this.templates=Array.isArray(r)?r:(r.items||[]);this.loadingTemplates=false},error:e=>{this.loadingTemplates=false;this.error=this.msg(e,'Không tải được commercial templates.')}});
+    this.api.commercialTemplates({limit:200}).subscribe({next:(r:any)=>{this.templates=Array.isArray(r)?r:(r.items||[]);this.page=1;this.loadingTemplates=false},error:e=>{this.loadingTemplates=false;this.error=this.msg(e,'Không tải được commercial templates.')}});
   }
 
   discover(){

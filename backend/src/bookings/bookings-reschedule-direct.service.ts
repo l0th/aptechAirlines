@@ -10,7 +10,7 @@ import {
 } from './bookings.schema';
 import { RescheduleTicketDto } from './bookings.dto';
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
-import { applyPricing } from '../common/pricing.util';
+import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
 import {
   BookingSeatSagaOperationDocument,
   SagaOperationType,
@@ -472,7 +472,13 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
       const outDaysUntil = Math.max(0,
         (new Date(newFlight.scheduled_departure).getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
       );
-      const outPricing = applyPricing(newInventory.base_price, outDaysUntil, user.sky_miles || 0);
+      const outPricing = applyPricing(
+        newInventory.base_price,
+        outDaysUntil,
+        user.sky_miles || 0,
+        (newFlight as any).pricing_profile_snapshot,
+        inventoryLoadFactor(newInventory.allocated_seats, newInventory.available_seats),
+      );
 
       let newTotalFare = 0;
       const newOutboundCoupons = booking.passengers.map((p) => {
@@ -488,7 +494,13 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
         const retDaysUntil = Math.max(0,
           (new Date(newReturnFlight!.scheduled_departure).getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
         );
-        const retPricing = applyPricing(newReturnInventory.base_price, retDaysUntil, user.sky_miles || 0);
+        const retPricing = applyPricing(
+          newReturnInventory.base_price,
+          retDaysUntil,
+          user.sky_miles || 0,
+          (newReturnFlight as any)?.pricing_profile_snapshot,
+          inventoryLoadFactor(newReturnInventory.allocated_seats, newReturnInventory.available_seats),
+        );
 
         newInboundCouponsResult = booking.passengers.map((p) => {
           let fare = retPricing.final_price;
@@ -724,6 +736,11 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
       booking.early_bird_percent = outPricing.early_bird_percent;
       booking.early_bird_label = outPricing.early_bird_label;
       booking.early_bird_label_en = outPricing.early_bird_label_en;
+      booking.load_factor_percent = outPricing.load_factor_percent;
+      booking.load_adjustment_percent = outPricing.load_adjustment_percent;
+      booking.load_adjustment_label = outPricing.load_adjustment_label;
+      booking.pricing_profile_id = outPricing.pricing_profile_id;
+      booking.pricing_profile_name = outPricing.pricing_profile_name;
       booking.ff_tier = outPricing.ff_tier;
       booking.ff_discount_percent = outPricing.ff_percent;
       booking.ticket_coupons = [...newOutboundCoupons, ...newInboundCouponsResult] as any;

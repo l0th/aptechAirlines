@@ -1,2 +1,2 @@
-import { Component, inject } from '@angular/core';import { RouterOutlet } from '@angular/router';import { AuthService } from './core/auth.service';
-@Component({selector:'app-root',standalone:true,imports:[RouterOutlet],template:`<router-outlet/>`})export class AppComponent{constructor(){inject(AuthService).refresh()}}
+import { Component, inject } from '@angular/core';import { RouterOutlet } from '@angular/router';import { AuthService } from './core/auth.service';import { ToastHostComponent } from './shared/toast-host.component';
+@Component({selector:'app-root',standalone:true,imports:[RouterOutlet,ToastHostComponent],template:`<router-outlet/><app-toast-host/>`})export class AppComponent{constructor(){inject(AuthService).refresh()}}

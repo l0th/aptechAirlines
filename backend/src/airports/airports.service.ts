@@ -8,6 +8,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Airport, AirportDocument } from './airports.schema';
 import { CreateAirportDto, UpdateAirportDto } from './airports.dto';
+import { AIRPORT_REFERENCE_DATA, AirportReferenceItem } from './airports-reference.data';
+import { buildAccentInsensitivePattern } from '../common/search-normalization';
 
 @Injectable()
 export class AirportsService {
@@ -33,6 +35,97 @@ export class AirportsService {
       throw new NotFoundException(`Airport with IATA code ${iata} not found`);
     }
     return airport;
+  }
+
+  /**
+   * Ensure an airport required by the AirLabs commercial pipeline exists in MongoDB
+   * with authoritative reference metadata, especially an IANA timezone.
+   *
+   * Existing operator-managed values are preserved. Curated reference data only fills
+   * missing fields (and replaces the schema's generic UTC default when a more precise
+   * curated timezone is available).
+   */
+  async ensureAirportReference(iataCode: string): Promise<AirportDocument> {
+    const cleanIata = (iataCode || '').trim().toUpperCase();
+    if (!cleanIata) {
+      throw new BadRequestException('Airport IATA code is required');
+    }
+
+    const curated = AIRPORT_REFERENCE_DATA.find((item) => item.iata_code === cleanIata);
+    const existing = await this.airportModel.findOne({ iata_code: cleanIata }).exec();
+
+    if (existing) {
+      const currentTimeZone = (existing.time_zone || '').trim();
+      const hasUsableTimeZone = Boolean(currentTimeZone && currentTimeZone !== 'UTC');
+
+      if (!curated) {
+        if (!hasUsableTimeZone) {
+          throw new BadRequestException(
+            `Airport "${cleanIata}" exists but has no authoritative IANA timezone and is not present in curated airport reference data`,
+          );
+        }
+        return existing;
+      }
+
+      const patch: Partial<AirportReferenceItem> = {};
+      const fillString = (key: keyof AirportReferenceItem) => {
+        const current = (existing as any)[key];
+        const reference = (curated as any)[key];
+        if ((current === undefined || current === null || current === '') && reference !== undefined) {
+          (patch as any)[key] = reference;
+        }
+      };
+
+      fillString('airport_name');
+      fillString('city_name');
+      fillString('icao_code');
+      fillString('country_code');
+      fillString('city_code');
+
+      if (existing.lat === undefined || existing.lat === null) patch.lat = curated.lat;
+      if (existing.lng === undefined || existing.lng === null) patch.lng = curated.lng;
+      if (!hasUsableTimeZone && curated.time_zone) patch.time_zone = curated.time_zone;
+
+      if (Object.keys(patch).length === 0) {
+        return existing;
+      }
+
+      const repaired = await this.airportModel
+        .findOneAndUpdate(
+          { iata_code: cleanIata },
+          { $set: patch },
+          { new: true },
+        )
+        .exec();
+      if (!repaired) {
+        throw new NotFoundException(`Airport with IATA code ${cleanIata} disappeared during repair`);
+      }
+      return repaired;
+    }
+
+    if (!curated) {
+      throw new BadRequestException(
+        `Airport "${cleanIata}" is missing from MongoDB and curated airport reference data; refusing to invent timezone data`,
+      );
+    }
+
+    const created = await this.airportModel
+      .findOneAndUpdate(
+        { iata_code: cleanIata },
+        {
+          $setOnInsert: {
+            ...curated,
+            data_source: 'curated_reference',
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      )
+      .exec();
+
+    if (!created) {
+      throw new BadRequestException(`Unable to provision airport reference data for "${cleanIata}"`);
+    }
+    return created;
   }
 
   private escapeRegex(str: string): string {
@@ -91,7 +184,7 @@ export class AirportsService {
       return { exactMatches: [] };
     }
 
-    const escaped = this.escapeRegex(cleanQuery);
+    const escaped = buildAccentInsensitivePattern(cleanQuery);
 
     // Ưu tiên 1: Khớp chính xác mã IATA (case-insensitive, trimmed)
     // Lý do: Người dùng nhập mã sân bay (như HAN, SGN) là chỉ định rõ ràng, cần trả về ngay 1 sân bay duy nhất,

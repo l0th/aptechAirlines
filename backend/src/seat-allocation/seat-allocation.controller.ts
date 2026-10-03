@@ -13,6 +13,11 @@ import {
 } from '@nestjs/common';
 import { SeatAllocationService } from './seat-allocation.service';
 import { SeatPricingService, CreateSeatPricingRuleDto, UpdateSeatPricingRuleDto } from './seat-pricing.service';
+import {
+  AssignSeatPricingProfileDto,
+  CreateSeatPricingProfileDto,
+  UpdateSeatPricingProfileDto,
+} from './seat-pricing-profile.dto';
 import { SeatAllocationStatus } from './seat-allocation.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -117,6 +122,51 @@ export class SeatAllocationController {
   // ---------------------------------------------------------------------------
   // Admin Global Seat Pricing Rules (Admin, SuperAdmin)
   // ---------------------------------------------------------------------------
+
+  @Get('pricing-profiles')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async getPricingProfiles() {
+    return this.pricingService.listProfiles();
+  }
+
+  @Post('pricing-profiles')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async createPricingProfile(
+    @Body() dto: CreateSeatPricingProfileDto,
+    @Request() req: any,
+  ) {
+    const userId = req.user?._id || req.user?.userId;
+    return this.pricingService.createProfile(dto, userId);
+  }
+
+  @Put('pricing-profiles/:profileId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async updatePricingProfile(
+    @Param('profileId') profileId: string,
+    @Body() dto: UpdateSeatPricingProfileDto,
+  ) {
+    return this.pricingService.updateProfile(profileId, dto);
+  }
+
+  @Post('pricing-profiles/:profileId/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async assignPricingProfile(
+    @Param('profileId') profileId: string,
+    @Body() dto: AssignSeatPricingProfileDto,
+  ) {
+    return this.pricingService.assignProfile(profileId, dto);
+  }
+
+  @Delete('pricing-profiles/:profileId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async deletePricingProfile(@Param('profileId') profileId: string) {
+    return this.pricingService.deleteProfile(profileId);
+  }
 
   @Get('pricing-rules')
   @UseGuards(JwtAuthGuard, RolesGuard)

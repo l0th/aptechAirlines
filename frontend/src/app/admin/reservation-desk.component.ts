@@ -3,10 +3,11 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { BookingStateService } from '../core/booking-state.service';
+import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
   standalone:true,
-  imports:[FormsModule],
+  imports:[FormsModule,PaginationComponent],
   template:`
     <div class="eyebrow">CLERK / ADMIN</div>
     <h1 class="title">Reservation Desk</h1>
@@ -19,7 +20,7 @@ import { BookingStateService } from '../core/booking-state.service';
           <span class="pill pill-gold">{{customers.length}} khách hàng</span>
         </div>
         <div class="search-row">
-          <input class="control" [(ngModel)]="query" placeholder="Tên, tên đăng nhập, email, điện thoại">
+          <input class="control" [(ngModel)]="query" (ngModelChange)="page=1" placeholder="Tên, tên đăng nhập, email, điện thoại">
           <button class="btn btn-outline" (click)="load()" [disabled]="loading">Làm mới</button>
         </div>
 
@@ -27,7 +28,7 @@ import { BookingStateService } from '../core/booking-state.service';
         @if(loading){<div class="empty muted">Đang tải khách hàng…</div>}
         @else{
           <div class="customers">
-            @for(c of filtered;track c._id){
+            @for(c of paged;track c._id){
               <button class="customer" [class.selected]="selected?._id===c._id" (click)="selected=c">
                 <span class="avatar">{{initials(c)}}</span>
                 <span class="identity"><strong>{{c.first_name}} {{c.last_name}}</strong><small>@{{c.username}} · {{c.email}}</small></span>
@@ -36,6 +37,7 @@ import { BookingStateService } from '../core/booking-state.service';
             }
             @if(!filtered.length){<div class="empty muted">Không tìm thấy CUSTOMER phù hợp.</div>}
           </div>
+          <app-pagination [total]="filtered.length" [(page)]="page" [(pageSize)]="pageSize" />
         }
       </section>
 
@@ -78,7 +80,7 @@ export class ReservationDeskComponent{
   api=inject(ApiService);
   state=inject(BookingStateService);
   router=inject(Router);
-  customers:any[]=[]; selected:any=null; query=''; bookingCode=''; loading=true; error='';
+  customers:any[]=[]; selected:any=null; query=''; bookingCode=''; loading=true; error='';page=1;pageSize=20;
 
   constructor(){this.load()}
   get filtered(){
@@ -86,10 +88,11 @@ export class ReservationDeskComponent{
     if(!q)return this.customers;
     return this.customers.filter(c=>[c.first_name,c.last_name,c.username,c.email,c.phone_number].some(v=>String(v||'').toLowerCase().includes(q)));
   }
+  get paged(){const start=(this.page-1)*this.pageSize;return this.filtered.slice(start,start+this.pageSize)}
   load(){
     this.loading=true;this.error='';
     this.api.users().subscribe({
-      next:r=>{this.customers=(r||[]).filter((u:any)=>u.role==='CUSTOMER');this.loading=false},
+      next:r=>{this.customers=(r||[]).filter((u:any)=>u.role==='CUSTOMER');this.page=1;this.loading=false},
       error:e=>{this.error=this.msg(e,'Không tải được danh sách khách hàng.');this.loading=false}
     })
   }

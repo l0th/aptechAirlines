@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength, ValidateIf } from 'class-validator';
 import { UserRole } from './users.schema';
 import {
   CREDIT_CARD_MESSAGE,
@@ -32,6 +32,7 @@ export class CreateUserDto {
   address?: string;
 
   @IsOptional()
+  @ValidateIf((_, value) => value !== '')
   @IsString()
   @Matches(PHONE_NUMBER_REGEX, { message: PHONE_NUMBER_MESSAGE })
   phone_number?: string;
@@ -77,6 +78,7 @@ export class UpdateUserDto {
   address?: string;
 
   @IsOptional()
+  @ValidateIf((_, value) => value !== '')
   @IsString()
   @Matches(PHONE_NUMBER_REGEX, { message: PHONE_NUMBER_MESSAGE })
   phone_number?: string;

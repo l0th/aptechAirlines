@@ -1,110 +1,156 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { ToastService } from '../core/toast.service';
+import { PaginationComponent } from '../shared/pagination.component';
+
+type SeatRule={cabin_class:string;pricing_dimension:string;amount:number;priority:number};
 
 @Component({
   standalone:true,
-  imports:[FormsModule],
+  imports:[FormsModule,PaginationComponent],
   template:`
     <div class="eyebrow">DOANH THU GHẾ</div>
     <div class="section-head">
-      <div>
-        <h1 class="title">Quy tắc giá ghế</h1>
-        <p class="subtitle">Phụ phí ghế theo hạng và thuộc tính vật lý. Ghế tự động luôn 0 ₫ theo máy chủ.</p>
-      </div>
-      <button class="btn btn-outline" (click)="load()">Làm mới</button>
+      <div><h1 class="title">Hồ sơ giá ghế</h1><p class="subtitle">Cấu hình phụ phí theo loại máy bay. Template và chuyến bay cụ thể có thể dùng profile riêng; chuyến chưa gán profile vẫn dùng rule global cũ.</p></div>
+      <div class="head-actions"><button class="btn btn-primary" (click)="openNewProfile()">+ Tạo profile</button><button class="btn btn-outline" (click)="reload()">Làm mới</button></div>
     </div>
 
-    <section class="card form">
-      <div class="field"><span>Mã quy tắc</span><input class="control" [(ngModel)]="rule.rule_id" placeholder="ECON-WINDOW-CUSTOM"></div>
-      <div class="field"><span>Hạng ghế</span><select class="control" [(ngModel)]="rule.cabin_class"><option>ALL</option><option>ECONOMY</option><option>CLUB</option><option>BUSINESS</option><option>FIRST</option></select></div>
-      <div class="field"><span>Thuộc tính giá</span><select class="control" [(ngModel)]="rule.pricing_dimension">@for(d of dimensions;track d){<option [value]="d">{{d}}</option>}</select></div>
-      <div class="field"><span>Phụ phí VND</span><input class="control" type="number" min="0" step="10000" [(ngModel)]="rule.amount"></div>
-      <div class="field"><span>Độ ưu tiên</span><input class="control" type="number" [(ngModel)]="rule.priority"></div>
-      <button class="btn btn-primary" (click)="create()" [disabled]="busy">Tạo quy tắc</button>
-    </section>
+    @if(error){<div class="notice error-box">{{error}}</div>}
+    @if(message){<div class="notice success-box">{{message}}</div>}
 
-    @if(error){<p class="error notice">{{error}}</p>}
-    @if(message){<p class="success notice">{{message}}</p>}
+    <section class="card toolbar">
+      <input class="control" [(ngModel)]="query" (ngModelChange)="profilePage=1" placeholder="Tìm mã profile, tên, aircraft...">
+      <span class="pill pill-gold">{{filteredProfiles.length}} profile</span>
+    </section>
 
     <div class="card table-wrap">
       <table class="table">
-        <thead><tr><th>Mã quy tắc</th><th>Hạng ghế</th><th>Thuộc tính giá</th><th>Số tiền</th><th>Độ ưu tiên</th><th>Trạng thái</th><th></th></tr></thead>
+        <thead><tr><th>Profile</th><th>Máy bay</th><th>Quy tắc</th><th>Đang dùng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
         <tbody>
-          @for(r of rows;track r._id||r.rule_id){
+          @for(p of pagedProfiles;track p._id){
             <tr>
-              <td><strong>{{r.rule_id}}</strong><small>v{{r.version||1}}</small></td>
-              <td>{{r.cabin_class}}</td>
-              <td>{{r.pricing_dimension}}</td>
-              <td>{{money(r.amount)}}</td>
-              <td>{{r.priority}}</td>
-              <td><span class="pill" [class.pill-success]="r.is_active" [class.pill-danger]="!r.is_active">{{r.is_active?'ACTIVE':'INACTIVE'}}</span></td>
-              <td>
-                @if(r.is_active){
-                  <div class="row-actions">
-                    <button class="btn btn-outline" (click)="edit(r)">Sửa</button>
-                    <button class="btn btn-outline" (click)="remove(r.rule_id)">Tắt</button>
-                  </div>
-                }
-              </td>
+              <td><strong>{{p.code}}</strong><small>{{p.name}}</small></td>
+              <td><span class="pill">{{p.aircraft_type||'ALL'}}</span></td>
+              <td>{{p.rules?.length||0}} rule<small>v{{p.version||1}}</small></td>
+              <td>{{p.assigned_flights||0}} chuyến<small>{{p.assigned_templates||0}} template</small></td>
+              <td><span class="pill" [class.pill-success]="p.is_active" [class.pill-danger]="!p.is_active">{{p.is_active?'ACTIVE':'INACTIVE'}}</span></td>
+              <td><div class="row-actions"><button class="btn btn-outline compact" (click)="openProfile(p)">Chi tiết / Sửa</button><button class="btn btn-dark compact" (click)="openAssign(p)" [disabled]="!p.is_active">Gán</button></div></td>
             </tr>
           }
+          @if(!filteredProfiles.length){<tr><td colspan="6"><div class="empty">Chưa có Seat Pricing Profile. Rule global bên dưới vẫn đang là fallback.</div></td></tr>}
         </tbody>
       </table>
     </div>
+    <app-pagination [total]="filteredProfiles.length" [(page)]="profilePage" [(pageSize)]="profilePageSize" [pageSizeOptions]="[10,20,50]" />
 
-    @if(editing){
-      <div class="modal">
-        <section class="card edit-card">
-          <button class="close" (click)="editing=null">×</button>
-          <div class="eyebrow">PHIÊN BẢN BẤT BIẾN MỚI</div>
-          <h2>{{editing.rule_id}}</h2>
-          <p class="muted">Máy chủ sẽ tắt phiên bản hiện tại và tạo phiên bản mới có lịch sử kiểm toán.</p>
-          <div class="grid grid-2">
-            <div class="field"><span>Số tiền</span><input class="control" type="number" min="0" [(ngModel)]="editForm.amount"></div>
-            <div class="field"><span>Độ ưu tiên</span><input class="control" type="number" [(ngModel)]="editForm.priority"></div>
-          </div>
-          <button class="btn btn-primary save" (click)="saveEdit()" [disabled]="busy">Lưu phiên bản mới</button>
-        </section>
-      </div>
+    <section class="fallback-head">
+      <div><div class="eyebrow">FALLBACK</div><h2>Quy tắc giá ghế global</h2><p>Chỉ dùng khi chuyến bay chưa được gán Seat Pricing Profile.</p></div>
+      <button class="btn btn-outline" (click)="openNewGlobalRule()">+ Thêm rule global</button>
+    </section>
+    <div class="card table-wrap">
+      <table class="table">
+        <thead><tr><th>Mã rule</th><th>Hạng</th><th>Thuộc tính</th><th>Phụ phí</th><th>Priority</th><th>Trạng thái</th><th></th></tr></thead>
+        <tbody>@for(r of pagedGlobalRules;track r._id||r.rule_id){<tr>
+          <td><strong>{{r.rule_id}}</strong><small>v{{r.version||1}}</small></td><td>{{r.cabin_class}}</td><td>{{r.pricing_dimension}}</td><td>{{money(r.amount)}}</td><td>{{r.priority}}</td>
+          <td><span class="pill" [class.pill-success]="r.is_active">{{r.is_active?'ACTIVE':'INACTIVE'}}</span></td>
+          <td>@if(r.is_active){<div class="row-actions"><button class="btn btn-outline compact" (click)="openGlobalRule(r)">Sửa</button><button class="btn btn-outline compact danger" (click)="deactivateGlobalRule(r)">Tắt</button></div>}</td>
+        </tr>}</tbody>
+      </table>
+    </div>
+    <app-pagination [total]="globalRules.length" [(page)]="rulePage" [(pageSize)]="rulePageSize" [pageSizeOptions]="[10,20,50]" />
+
+    @if(profileEditor){
+      <div class="modal" (click)="closeProfile()"><section class="card modal-card wide" (click)="$event.stopPropagation()">
+        <button class="close" (click)="closeProfile()">×</button>
+        <div class="modal-title"><div><div class="eyebrow">{{editingProfileId?'SEAT PROFILE DETAIL':'NEW SEAT PROFILE'}}</div><h2>{{profileEditor.name||'Hồ sơ giá ghế mới'}}</h2></div>@if(editingProfileId){<span class="pill">v{{profileEditor.version||1}}</span>}</div>
+        <div class="grid grid-2">
+          <label class="field"><span>Mã profile</span><input class="control" [(ngModel)]="profileEditor.code" [disabled]="!!editingProfileId" placeholder="A20N_STANDARD"></label>
+          <label class="field"><span>Máy bay áp dụng</span><select class="control" [(ngModel)]="profileEditor.aircraft_type"><option value="ALL">ALL · mọi loại máy bay</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}}</option>}</select></label>
+        </div>
+        <label class="field"><span>Tên profile</span><input class="control" [(ngModel)]="profileEditor.name" placeholder="A320neo tiêu chuẩn"></label>
+        <label class="field"><span>Mô tả</span><input class="control" [(ngModel)]="profileEditor.description" placeholder="Phụ phí ghế cho đội bay A320neo"></label>
+        <label class="check"><input type="checkbox" [(ngModel)]="profileEditor.is_active"> Cho phép gán profile</label>
+
+        <div class="rules-head"><div><h3>Quy tắc trong profile</h3><p>Các thuộc tính khác nhau được cộng dồn. Trong cùng cabin + thuộc tính chỉ tạo một rule.</p></div><button class="btn btn-outline compact" (click)="addProfileRule()">+ Thêm rule</button></div>
+        <div class="table-wrap inner"><table class="table rules-table"><thead><tr><th>Cabin</th><th>Thuộc tính</th><th>Phụ phí VND</th><th>Priority</th><th></th></tr></thead><tbody>
+          @for(r of profileEditor.rules;track $index;let i=$index){<tr>
+            <td><select class="mini-select" [(ngModel)]="r.cabin_class">@for(c of cabins;track c){<option [value]="c">{{c}}</option>}</select></td>
+            <td><select class="mini-select dimension" [(ngModel)]="r.pricing_dimension">@for(d of dimensions;track d){<option [value]="d">{{d}}</option>}</select></td>
+            <td><input class="mini-input" type="number" min="0" step="10000" [(ngModel)]="r.amount"></td>
+            <td><input class="priority" type="number" [(ngModel)]="r.priority"></td>
+            <td><button class="icon-btn" (click)="profileEditor.rules.splice(i,1)">×</button></td>
+          </tr>}
+        </tbody></table></div>
+        <div class="modal-actions">@if(editingProfileId){<button class="btn btn-outline danger" (click)="removeProfile()" [disabled]="busy">Xóa profile</button>}<span class="spacer"></span><button class="btn btn-outline" (click)="closeProfile()">Đóng</button><button class="btn btn-primary" (click)="saveProfile()" [disabled]="busy">{{busy?'Đang lưu…':'Lưu profile'}}</button></div>
+      </section></div>
+    }
+
+    @if(assignEditor){
+      <div class="modal" (click)="assignEditor=null"><section class="card modal-card" (click)="$event.stopPropagation()">
+        <button class="close" (click)="assignEditor=null">×</button><div class="eyebrow">GÁN PROFILE</div><h2>{{assignEditor.code}} · {{assignEditor.aircraft_type}}</h2>
+        <p class="muted">Chỉ hiển thị target tương thích với loại máy bay của profile. Gán template sẽ đồng bộ profile cho các dated flight đã sinh từ template đó.</p>
+        <label class="field"><span>Chuyến bay cụ thể</span><select class="control multi" multiple [(ngModel)]="selectedFlightIds">@for(f of compatibleFlights;track f._id){<option [value]="f._id">{{f.flight_number}} · {{f.departure_date}} · {{f.origin_iata}}→{{f.dest_iata}} · {{seatProfileCode(f)}}</option>}</select></label>
+        <label class="field"><span>Commercial template</span><select class="control multi" multiple [(ngModel)]="selectedTemplateIds">@for(t of compatibleTemplates;track t._id){<option [value]="t._id">{{t.flight_number}} · {{t.origin_iata}}→{{t.dest_iata}} · {{seatProfileCode(t)}}</option>}</select></label>
+        <div class="modal-actions"><span class="spacer"></span><button class="btn btn-outline" (click)="assignEditor=null">Đóng</button><button class="btn btn-primary" (click)="assignProfile()" [disabled]="busy||(!selectedFlightIds.length&&!selectedTemplateIds.length)">Áp dụng</button></div>
+      </section></div>
+    }
+
+    @if(globalRuleEditor){
+      <div class="modal" (click)="globalRuleEditor=null"><section class="card modal-card small-card" (click)="$event.stopPropagation()">
+        <button class="close" (click)="globalRuleEditor=null">×</button><div class="eyebrow">GLOBAL FALLBACK RULE</div><h2>{{editingGlobalRule?'Tạo version mới':'Tạo rule mới'}}</h2>
+        @if(!editingGlobalRule){<label class="field"><span>Mã rule</span><input class="control" [(ngModel)]="globalRuleEditor.rule_id" placeholder="R-ECO-WINDOW-CUSTOM"></label>}
+        <div class="grid grid-2"><label class="field"><span>Cabin</span><select class="control" [(ngModel)]="globalRuleEditor.cabin_class" [disabled]="!!editingGlobalRule">@for(c of cabins;track c){<option [value]="c">{{c}}</option>}</select></label><label class="field"><span>Thuộc tính</span><select class="control" [(ngModel)]="globalRuleEditor.pricing_dimension" [disabled]="!!editingGlobalRule">@for(d of dimensions;track d){<option [value]="d">{{d}}</option>}</select></label></div>
+        <div class="grid grid-2"><label class="field"><span>Phụ phí VND</span><input class="control" type="number" min="0" [(ngModel)]="globalRuleEditor.amount"></label><label class="field"><span>Priority</span><input class="control" type="number" [(ngModel)]="globalRuleEditor.priority"></label></div>
+        <button class="btn btn-primary full" (click)="saveGlobalRule()" [disabled]="busy">Lưu</button>
+      </section></div>
     }
   `,
   styles:[`
-    .form{padding:18px;display:grid;grid-template-columns:1.35fr 1fr 1.25fr .8fr .65fr auto;gap:12px;align-items:end;margin:18px 0}.notice{padding:11px 14px;border-radius:12px;background:#fff}.table td small{display:block;color:#7d8b99;margin-top:3px}.row-actions{display:flex;gap:7px}.modal{position:fixed;inset:0;background:rgba(3,17,30,.55);display:grid;place-items:center;padding:20px;z-index:90}.edit-card{width:min(560px,100%);padding:24px;position:relative}.edit-card h2{color:#071b2e}.close{position:absolute;right:14px;top:10px;border:0;background:transparent;font-size:28px}.save{width:100%;margin-top:18px}.btn:disabled{opacity:.5}@media(max-width:1100px){.form{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.form{grid-template-columns:1fr}.row-actions{flex-direction:column}}
+    .head-actions,.row-actions,.modal-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar{display:flex;gap:12px;align-items:center;padding:14px 16px;margin:18px 0}.toolbar .control{flex:1}.table td small{display:block;color:#788897;margin-top:4px}.compact{padding:8px 10px;font-size:10px}.notice{padding:11px 14px;border-radius:12px;margin:12px 0}.error-box{background:#fff0f0;color:#a32d2d}.success-box{background:#ecf8f2;color:#176b4a}.empty{padding:20px;text-align:center;color:#718093}.fallback-head{display:flex;justify-content:space-between;align-items:end;gap:15px;margin:34px 0 12px}.fallback-head h2{margin:4px 0;color:#0a2540}.fallback-head p{margin:0;color:#718093;font-size:12px}.danger{color:#9b3030;border-color:#e1bcbc}.modal{position:fixed;inset:0;background:rgba(4,18,31,.62);display:grid;place-items:center;padding:20px;z-index:120}.modal-card{width:min(780px,100%);max-height:92vh;overflow:auto;padding:24px;position:relative}.modal-card.wide{width:min(1050px,100%)}.small-card{width:min(570px,100%)}.close{position:absolute;right:14px;top:9px;border:0;background:transparent;font-size:28px}.modal-title{display:flex;justify-content:space-between;gap:15px;align-items:center}.modal-card h2{color:#0a2540;margin:6px 0 18px}.check{display:flex;gap:8px;align-items:center;padding:8px 0 16px;color:#40566a}.rules-head{display:flex;justify-content:space-between;align-items:end;gap:12px;margin:18px 0 10px}.rules-head h3{margin:0;color:#0a2540}.rules-head p,.muted{font-size:11px;color:#718093;margin:5px 0 0}.inner{border:1px solid #e3e9ee;border-radius:12px}.rules-table{min-width:700px}.mini-select,.mini-input,.priority{border:1px solid #d8e1e8;border-radius:8px;padding:8px;background:#fff}.mini-select.dimension{min-width:170px}.mini-input{width:150px}.priority{width:75px}.icon-btn{width:29px;height:29px;border:0;border-radius:50%;background:#f7eaea;color:#9b3030;font-size:18px}.modal-actions{margin-top:18px}.spacer{flex:1}.multi{min-height:150px;padding:7px}.full{width:100%}@media(max-width:720px){.section-head,.fallback-head{align-items:flex-start;flex-direction:column}.toolbar{align-items:stretch;flex-direction:column}.grid-2{grid-template-columns:1fr}.rules-head{align-items:flex-start;flex-direction:column}.modal-actions .spacer{display:none}.modal-actions .btn{flex:1}}
   `]
 })
 export class SeatPricingComponent{
-  api=inject(ApiService);
-  rows:any[]=[]; error=''; message=''; busy=false; editing:any=null;
-  dimensions=['CABIN_BASE','WINDOW','AISLE','MIDDLE','FRONT_ZONE','EXIT_ROW','EXTRA_LEGROOM','BULKHEAD'];
-  rule:any=this.blank();
-  editForm:any={amount:0,priority:0};
+  private api=inject(ApiService);
+  private toast=inject(ToastService);
+  profiles:any[]=[];globalRules:any[]=[];flights:any[]=[];templates:any[]=[];layouts:any[]=[];
+  query='';profilePage=1;profilePageSize=20;rulePage=1;rulePageSize=20;busy=false;error='';message='';
+  profileEditor:any=null;editingProfileId='';assignEditor:any=null;selectedFlightIds:string[]=[];selectedTemplateIds:string[]=[];
+  globalRuleEditor:any=null;editingGlobalRule:any=null;
+  readonly cabins=['ALL','ECONOMY','CLUB','BUSINESS','FIRST'];
+  readonly dimensions=['CABIN_BASE','WINDOW','AISLE','MIDDLE','FRONT_ZONE','EXIT_ROW','EXTRA_LEGROOM','BULKHEAD'];
 
-  constructor(){this.load()}
-  blank(){return{rule_id:'',cabin_class:'ALL',pricing_dimension:'CABIN_BASE',amount:0,priority:0}}
-  load(){this.error='';this.api.getSeatPricingRules().subscribe({next:r=>this.rows=r,error:e=>this.error=this.msg(e,'Không tải được seat pricing.')})}
-  create(){
-    this.error='';this.message='';
-    if(!this.rule.rule_id.trim()){this.error='Mã quy tắc là bắt buộc.';return}
-    this.busy=true;
-    this.api.createSeatPricingRule({...this.rule,rule_id:this.rule.rule_id.trim().toUpperCase(),amount:Number(this.rule.amount),priority:Number(this.rule.priority)}).subscribe({
-      next:()=>{this.busy=false;this.message='Đã tạo seat pricing rule.';this.rule=this.blank();this.load()},
-      error:e=>{this.busy=false;this.error=this.msg(e,'Không tạo được rule.')}
-    })
-  }
-  edit(r:any){this.editing=r;this.editForm={amount:Number(r.amount||0),priority:Number(r.priority||0)}}
-  saveEdit(){
-    if(!this.editing)return;
-    this.busy=true;this.error='';this.message='';
-    this.api.updateSeatPricingRule(this.editing.rule_id,{amount:Number(this.editForm.amount),priority:Number(this.editForm.priority)}).subscribe({
-      next:r=>{this.busy=false;this.message=`Đã tạo version mới ${r.rule_id||''}.`;this.editing=null;this.load()},
-      error:e=>{this.busy=false;this.error=this.msg(e,'Không cập nhật được rule.')}
-    })
-  }
-  remove(id:string){
-    if(!confirm(`Deactivate rule ${id}?`))return;
-    this.api.deleteSeatPricingRule(id).subscribe({next:()=>{this.message='Đã deactivate rule.';this.load()},error:e=>this.error=this.msg(e,'Không deactivate được rule.')})
-  }
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
-  msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
+  constructor(){this.reload()}
+  get filteredProfiles(){const q=this.query.trim().toLowerCase();if(!q)return this.profiles;return this.profiles.filter(p=>[p.code,p.name,p.description,p.aircraft_type].some(v=>String(v||'').toLowerCase().includes(q)))}
+  get pagedProfiles(){const s=(this.profilePage-1)*this.profilePageSize;return this.filteredProfiles.slice(s,s+this.profilePageSize)}
+  get pagedGlobalRules(){const s=(this.rulePage-1)*this.rulePageSize;return this.globalRules.slice(s,s+this.rulePageSize)}
+  get compatibleFlights(){if(!this.assignEditor)return[];const a=this.assignEditor.aircraft_type;return this.flights.filter(f=>a==='ALL'||String(f.aircraft?.model_code||'').toUpperCase()===a)}
+  get compatibleTemplates(){if(!this.assignEditor)return[];const a=this.assignEditor.aircraft_type;return this.templates.filter(t=>a==='ALL'||String(t.aircraft_type||'').toUpperCase()===a)}
+
+  async reload(){this.error='';try{const [p,r,f,t,l]=await Promise.all([firstValueFrom(this.api.seatPricingProfiles()),firstValueFrom(this.api.getSeatPricingRules()),firstValueFrom(this.api.flights()),firstValueFrom(this.api.commercialTemplates({limit:200})),firstValueFrom(this.api.commercialAircraftLayouts())]);this.profiles=Array.isArray(p)?p:[];this.globalRules=Array.isArray(r)?r:[];this.flights=Array.isArray(f)?f:[];this.templates=Array.isArray(t)?t:(t?.items||[]);this.layouts=Array.isArray(l)?l:[];this.profilePage=1;this.rulePage=1}catch(e:any){this.error=this.msg(e,'Không tải được dữ liệu seat pricing.')}}
+  defaultRules():SeatRule[]{return[
+    {cabin_class:'ECONOMY',pricing_dimension:'CABIN_BASE',amount:0,priority:1},
+    {cabin_class:'ECONOMY',pricing_dimension:'WINDOW',amount:50000,priority:5},
+    {cabin_class:'ECONOMY',pricing_dimension:'AISLE',amount:30000,priority:5},
+    {cabin_class:'ECONOMY',pricing_dimension:'FRONT_ZONE',amount:80000,priority:8},
+    {cabin_class:'ECONOMY',pricing_dimension:'EXIT_ROW',amount:150000,priority:10},
+    {cabin_class:'ECONOMY',pricing_dimension:'EXTRA_LEGROOM',amount:100000,priority:10},
+  ]}
+  openNewProfile(){this.editingProfileId='';this.profileEditor={code:'',name:'',description:'',aircraft_type:'A20N',is_active:true,version:1,rules:this.defaultRules()};this.error='';this.message=''}
+  openProfile(p:any){this.editingProfileId=p._id;this.profileEditor={code:p.code,name:p.name,description:p.description||'',aircraft_type:p.aircraft_type||'ALL',is_active:!!p.is_active,version:p.version||1,rules:(p.rules||[]).map((r:any)=>({...r}))};this.error='';this.message=''}
+  closeProfile(){this.profileEditor=null;this.editingProfileId=''}
+  addProfileRule(){this.profileEditor?.rules.push({cabin_class:'ECONOMY',pricing_dimension:'WINDOW',amount:0,priority:0})}
+  async saveProfile(){if(!this.profileEditor)return;const e=this.profileEditor;if(!e.code?.trim()||!e.name?.trim()||!e.rules?.length){this.error='Mã, tên và ít nhất một rule là bắt buộc.';return}this.busy=true;this.error='';try{const payload={code:e.code.trim().toUpperCase(),name:e.name.trim(),description:e.description?.trim()||'',aircraft_type:String(e.aircraft_type||'ALL').toUpperCase(),is_active:!!e.is_active,rules:e.rules.map((r:any)=>({cabin_class:r.cabin_class,pricing_dimension:r.pricing_dimension,amount:Number(r.amount),priority:Number(r.priority||0)}))};if(this.editingProfileId){const {code,...body}=payload;await firstValueFrom(this.api.updateSeatPricingProfile(this.editingProfileId,body));this.message='Đã cập nhật Seat Pricing Profile và đồng bộ snapshot cho các target đang dùng.'}else{await firstValueFrom(this.api.createSeatPricingProfile(payload));this.message='Đã tạo Seat Pricing Profile.'}this.closeProfile();await this.reload()}catch(err:any){this.error=this.msg(err,'Không lưu được Seat Pricing Profile.')}finally{this.busy=false}}
+  async removeProfile(){if(!this.editingProfileId)return;const confirmed=await this.toast.confirm({titleVi:'Xóa Seat Pricing Profile?',titleEn:'Delete Seat Pricing Profile?',messageVi:'Profile giá ghế này sẽ bị xóa khỏi hệ thống.',messageEn:'This seat pricing profile will be deleted from the system.',confirmVi:'Xóa',confirmEn:'Delete'});if(!confirmed)return;this.busy=true;this.error='';try{await firstValueFrom(this.api.deleteSeatPricingProfile(this.editingProfileId));this.message='Đã xóa Seat Pricing Profile.';this.closeProfile();await this.reload()}catch(e:any){this.error=this.msg(e,'Không thể xóa profile đang được sử dụng.')}finally{this.busy=false}}
+  openAssign(p:any){this.assignEditor=p;this.selectedFlightIds=[];this.selectedTemplateIds=[];this.error='';this.message=''}
+  async assignProfile(){if(!this.assignEditor)return;this.busy=true;this.error='';try{const r=await firstValueFrom(this.api.assignSeatPricingProfile(this.assignEditor._id,{flight_ids:this.selectedFlightIds,template_ids:this.selectedTemplateIds}));const extra=r.inherited_flights_updated?(' và đồng bộ '+r.inherited_flights_updated+' dated flight'):'';this.message='Đã gán '+(r.flights_updated||0)+' chuyến, '+(r.templates_updated||0)+' template'+extra+'.';this.assignEditor=null;await this.reload()}catch(e:any){this.error=this.msg(e,'Không gán được Seat Pricing Profile.')}finally{this.busy=false}}
+  seatProfileCode(x:any){return x?.seat_pricing_profile_snapshot?.code||'fallback global'}
+
+  openNewGlobalRule(){this.editingGlobalRule=null;this.globalRuleEditor={rule_id:'',cabin_class:'ECONOMY',pricing_dimension:'WINDOW',amount:0,priority:0};this.error=''}
+  openGlobalRule(r:any){this.editingGlobalRule=r;this.globalRuleEditor={rule_id:r.rule_id,cabin_class:r.cabin_class,pricing_dimension:r.pricing_dimension,amount:Number(r.amount||0),priority:Number(r.priority||0)};this.error=''}
+  async saveGlobalRule(){const e=this.globalRuleEditor;if(!e)return;if(!this.editingGlobalRule&&!e.rule_id?.trim()){this.error='Mã rule là bắt buộc.';return}this.busy=true;this.error='';try{if(this.editingGlobalRule)await firstValueFrom(this.api.updateSeatPricingRule(this.editingGlobalRule.rule_id,{amount:Number(e.amount),priority:Number(e.priority)}));else await firstValueFrom(this.api.createSeatPricingRule({rule_id:e.rule_id.trim().toUpperCase(),cabin_class:e.cabin_class,pricing_dimension:e.pricing_dimension,amount:Number(e.amount),priority:Number(e.priority)}));this.message=this.editingGlobalRule?'Đã tạo version mới cho global rule.':'Đã tạo global rule.';this.globalRuleEditor=null;this.editingGlobalRule=null;await this.reload()}catch(err:any){this.error=this.msg(err,'Không lưu được global rule.')}finally{this.busy=false}}
+  async deactivateGlobalRule(r:any){const confirmed=await this.toast.confirm({titleVi:'Tắt quy tắc?',titleEn:'Deactivate rule?',messageVi:'Tắt '+r.rule_id+'?',messageEn:'Deactivate '+r.rule_id+'?',confirmVi:'Tắt',confirmEn:'Deactivate'});if(!confirmed)return;this.busy=true;this.error='';try{await firstValueFrom(this.api.deleteSeatPricingRule(r.rule_id));this.message='Đã tắt '+r.rule_id+'.';await this.reload()}catch(e:any){this.error=this.msg(e,'Không tắt được rule.')}finally{this.busy=false}}
+  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(Number(v||0))}
+  msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||e?.message||f}
 }

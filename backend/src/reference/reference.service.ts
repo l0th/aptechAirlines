@@ -5,6 +5,7 @@ import { Country, CountryDocument, City, CityDocument, RouteRef, RouteRefDocumen
 import { Airport, AirportDocument } from '../airports/airports.schema';
 import { AirportsService } from '../airports/airports.service';
 import { AIRPORT_REFERENCE_DATA } from '../airports/airports-reference.data';
+import { buildAccentInsensitivePattern } from '../common/search-normalization';
 
 const VI_NAMES: Record<string, string> = {
   VN: 'Việt Nam', SG: 'Singapore', TH: 'Thái Lan', MY: 'Malaysia', JP: 'Nhật Bản', KR: 'Hàn Quốc', HK: 'Hồng Kông', CN: 'Trung Quốc', TW: 'Đài Loan', PH: 'Philippines', ID: 'Indonesia', IN: 'Ấn Độ', AE: 'Các Tiểu vương quốc Ả Rập Thống nhất', QA: 'Qatar', GB: 'Vương quốc Anh', FR: 'Pháp', DE: 'Đức', AU: 'Úc', US: 'Hoa Kỳ', KH: 'Campuchia', LA: 'Lào', MM: 'Myanmar', BN: 'Brunei', NZ: 'New Zealand', CA: 'Canada'
@@ -761,7 +762,7 @@ export class ReferenceService {
       return { countries: [], cities: [], airports: [] };
     }
     const cleanQ = q.trim();
-    const regex = new RegExp(this.escapeRegex(cleanQ), 'i');
+    const regex = new RegExp(buildAccentInsensitivePattern(cleanQ), 'i');
 
     const countries = await this.countryModel.find({
       $or: [{ name: regex }, { name_vi: regex }, { code: regex }]

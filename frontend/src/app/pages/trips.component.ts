@@ -4,9 +4,12 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { PaypalService } from '../core/paypal.service';
+import { ToastService } from '../core/toast.service';
+import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
   standalone: true,
+  imports: [PaginationComponent],
   template: `
   <div class="container page">
     <div class="eyebrow">MY TRIPS</div>
@@ -19,7 +22,7 @@ import { PaypalService } from '../core/paypal.service';
       <div class="card empty">Đang tải chuyến đi…</div>
     } @else {
       <div class="trip-list">
-        @for(b of trips;track b._id){
+        @for(b of pagedTrips;track b._id){
           <article class="card trip">
             <div class="trip-main">
               <div class="trip-top">
@@ -71,6 +74,7 @@ import { PaypalService } from '../core/paypal.service';
           </article>
         }
       </div>
+      <app-pagination [total]="trips.length" [(page)]="page" [(pageSize)]="pageSize" [pageSizeOptions]="[5,10,20,50]" />
       @if(!trips.length){<div class="card empty">Bạn chưa có booking nào.</div>}
     }
 
@@ -145,6 +149,7 @@ export class TripsComponent {
   auth = inject(AuthService);
   paypal = inject(PaypalService);
   router = inject(Router);
+  toast = inject(ToastService);
 
   trips: any[] = [];
   policies: any[] = [];
@@ -155,6 +160,8 @@ export class TripsComponent {
   paypalEnabled = false;
   message = '';
   error = '';
+  page = 1;
+  pageSize = 10;
   scheduleLoading = new Set<string>();
   private scheduleCache = new Map<string, any[]>();
 
@@ -169,10 +176,16 @@ export class TripsComponent {
     return this.selectedTracked?.flight_coupons || this.selected?.ticket_coupons || [];
   }
 
+  get pagedTrips() {
+    const start = (this.page - 1) * this.pageSize;
+    return this.trips.slice(start, start + this.pageSize);
+  }
+
   load() {
     this.api.myTrips().subscribe({
       next: r => {
         this.trips = r || [];
+        this.page = 1;
         this.loading = false;
         void this.loadSchedules(this.trips);
       },
@@ -337,7 +350,18 @@ export class TripsComponent {
       const question = liveBooking.status === 'BLOCKED'
         ? 'Hủy vé đang giữ sẽ giải phóng toàn bộ ghế và không phát sinh khoản hoàn tiền. Bạn muốn tiếp tục?'
         : `Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Tiền hoàn sẽ được trả về phương thức thanh toán gốc. Bạn muốn hủy booking này?`;
-      if (!confirm(question)) return;
+      const questionEn = liveBooking.status === 'BLOCKED'
+        ? 'Cancelling this hold will release all seats and no refund will be issued. Do you want to continue?'
+        : `The current policy estimates a ${percent}% refund to the original payment method. Do you want to cancel this booking?`;
+      const confirmed = await this.toast.confirm({
+        titleVi:'Xác nhận hủy vé',
+        titleEn:'Confirm cancellation',
+        messageVi:question,
+        messageEn:questionEn,
+        confirmVi:'Hủy vé',
+        confirmEn:'Cancel booking',
+      });
+      if (!confirmed) return;
       const result = await firstValueFrom(this.api.cancel(code));
       this.message = `Đã hủy vé. Mã hủy: ${result.cancellation_number}. Hoàn ${moneyStatic(result.refund_amount)} (${result.refund_percentage}%).`;
       this.closeDetails();

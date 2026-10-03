@@ -260,6 +260,21 @@ export class Booking {
   early_bird_label_en?: string;
 
   @Prop()
+  load_factor_percent?: number;
+
+  @Prop()
+  load_adjustment_percent?: number;
+
+  @Prop()
+  load_adjustment_label?: string;
+
+  @Prop()
+  pricing_profile_id?: string;
+
+  @Prop()
+  pricing_profile_name?: string;
+
+  @Prop()
   ff_tier?: string;
 
   @Prop()

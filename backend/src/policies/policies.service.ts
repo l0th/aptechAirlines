@@ -16,7 +16,8 @@ export class PoliciesService {
   ) {}
 
   async findAll(): Promise<CancellationPolicy[]> {
-    return this.policyModel.find().sort({ min_days_before: -1 }).exec();
+    const policies = await this.policyModel.find().sort({ min_days_before: -1 }).exec();
+    return policies.map((policy) => this.applyGeneratedDescriptions(policy));
   }
 
   async findById(id: string): Promise<PolicyDocument> {
@@ -27,7 +28,7 @@ export class PoliciesService {
     if (!policy) {
       throw new NotFoundException(`Policy with ID ${id} not found`);
     }
-    return policy;
+    return this.applyGeneratedDescriptions(policy);
   }
 
   // Calculate applicable refund percentage based on how many days before departure
@@ -50,20 +51,86 @@ export class PoliciesService {
   }
 
   async create(createPolicyDto: CreatePolicyDto): Promise<PolicyDocument> {
-    const created = new this.policyModel(createPolicyDto);
+    const minDays = createPolicyDto.min_days_before;
+    const maxDays = createPolicyDto.max_days_before ?? null;
+    const refundPercentage = createPolicyDto.refund_percentage;
+
+    this.validateRange(minDays, maxDays);
+    const descriptions = this.buildDescriptions(minDays, maxDays, refundPercentage);
+    const created = new this.policyModel({
+      min_days_before: minDays,
+      max_days_before: maxDays,
+      refund_percentage: refundPercentage,
+      ...descriptions,
+    });
     return created.save();
   }
 
   async update(id: string, updatePolicyDto: UpdatePolicyDto): Promise<PolicyDocument> {
     const policy = await this.findById(id);
 
-    if (updatePolicyDto.min_days_before !== undefined) policy.min_days_before = updatePolicyDto.min_days_before;
-    if (updatePolicyDto.max_days_before !== undefined) policy.max_days_before = updatePolicyDto.max_days_before;
-    if (updatePolicyDto.refund_percentage !== undefined) policy.refund_percentage = updatePolicyDto.refund_percentage;
-    if (updatePolicyDto.description !== undefined) policy.description = updatePolicyDto.description;
-    if (updatePolicyDto.description_en !== undefined) policy.description_en = updatePolicyDto.description_en;
+    const hasMaxDays = Object.prototype.hasOwnProperty.call(updatePolicyDto, 'max_days_before');
+    const minDays = updatePolicyDto.min_days_before ?? policy.min_days_before;
+    const maxDays = hasMaxDays
+      ? (updatePolicyDto.max_days_before ?? null)
+      : (policy.max_days_before ?? null);
+    const refundPercentage = updatePolicyDto.refund_percentage ?? policy.refund_percentage;
+
+    this.validateRange(minDays, maxDays);
+    const descriptions = this.buildDescriptions(minDays, maxDays, refundPercentage);
+
+    policy.min_days_before = minDays;
+    policy.max_days_before = maxDays;
+    policy.refund_percentage = refundPercentage;
+    policy.description = descriptions.description;
+    policy.description_en = descriptions.description_en;
 
     return policy.save();
+  }
+
+  private validateRange(minDays: number, maxDays: number | null): void {
+    if (maxDays !== null && maxDays < minDays) {
+      throw new BadRequestException('max_days_before must be greater than or equal to min_days_before');
+    }
+  }
+
+  private buildDescriptions(
+    minDays: number,
+    maxDays: number | null,
+    refundPercentage: number,
+  ): { description: string; description_en: string } {
+    const noRefund = refundPercentage === 0;
+
+    if (maxDays === null) {
+      return {
+        description: noRefund
+          ? `Hủy từ ${minDays} ngày trước bay: không hoàn tiền.`
+          : `Hủy từ ${minDays} ngày trước bay: hoàn ${refundPercentage}%.`,
+        description_en: noRefund
+          ? `Cancel ${minDays}+ days before departure: no refund.`
+          : `Cancel ${minDays}+ days before departure: ${refundPercentage}% refund.`,
+      };
+    }
+
+    return {
+      description: noRefund
+        ? `Hủy ${minDays}-${maxDays} ngày trước bay: không hoàn tiền.`
+        : `Hủy ${minDays}-${maxDays} ngày trước bay: hoàn ${refundPercentage}%.`,
+      description_en: noRefund
+        ? `Cancel ${minDays}-${maxDays} days before departure: no refund.`
+        : `Cancel ${minDays}-${maxDays} days before departure: ${refundPercentage}% refund.`,
+    };
+  }
+
+  private applyGeneratedDescriptions<T extends CancellationPolicy>(policy: T): T {
+    const descriptions = this.buildDescriptions(
+      policy.min_days_before,
+      policy.max_days_before ?? null,
+      policy.refund_percentage,
+    );
+    policy.description = descriptions.description;
+    policy.description_en = descriptions.description_en;
+    return policy;
   }
 
   async delete(id: string): Promise<{ message: string }> {

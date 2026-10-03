@@ -16,6 +16,8 @@ import { AirlabsCommercialService } from './airlabs-commercial.service';
 import { SeatAllocationModule } from '../seat-allocation/seat-allocation.module';
 import { MailModule } from '../mail/mail.module';
 import { PaypalModule } from '../paypal/paypal.module';
+import { PricingProfile, PricingProfileSchema } from './schemas/pricing-profile.schema';
+import { RevenuePricingService } from './revenue-pricing.service';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { PaypalModule } from '../paypal/paypal.module';
       { name: Airport.name, schema: AirportSchema },
       { name: Booking.name, schema: BookingSchema },
       { name: RouteRef.name, schema: RouteRefSchema },
+      { name: PricingProfile.name, schema: PricingProfileSchema },
     ]),
     AirportsModule,
     ReferenceModule,
@@ -39,12 +42,14 @@ import { PaypalModule } from '../paypal/paypal.module';
     FlightGeneratorService,
     FlightsScheduler,
     AirlabsCommercialService,
+    RevenuePricingService,
   ],
   exports: [
     FlightsService,
     FlightGeneratorService,
     FlightsScheduler,
     AirlabsCommercialService,
+    RevenuePricingService,
     MongooseModule,
   ],
 })

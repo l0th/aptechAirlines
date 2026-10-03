@@ -94,7 +94,6 @@ type LocationSuggestion = {
             <div class="field"><span>Ngày đi</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
             @if(flexibleDates){<div class="field"><span>Đến ngày</span><input class="control" type="date" [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"></div>}
             @if(roundTrip){<div class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"></div>}
-            <div class="field"><span>Hạng vé</span><select class="control" [(ngModel)]="cabin"><option value="ECONOMY">Phổ thông</option><option value="CLUB">Club</option><option value="BUSINESS">Thương gia</option><option value="FIRST">Hạng nhất</option></select></div>
           </div>
 
           <div class="travellers">
@@ -116,7 +115,7 @@ type LocationSuggestion = {
         <p>Từ lúc tìm chuyến đến sau khi đặt vé, các thao tác quan trọng đều được thiết kế để khách hàng dễ theo dõi và tự quản lý.</p>
       </div>
       <div class="grid grid-3 feature">
-        <article class="card"><span class="feature-icon"><app-icon name="search" [size]="26"/></span><h3>Tìm chuyến dễ dàng</h3><p>Tra cứu chuyến thẳng và nối chuyến theo ngày, hạng vé và số hành khách trong cửa sổ đặt vé 330 ngày.</p></article>
+        <article class="card"><span class="feature-icon"><app-icon name="search" [size]="26"/></span><h3>Tìm chuyến dễ dàng</h3><p>Tra cứu chuyến thẳng và nối chuyến theo ngày, số hành khách và so sánh giá các hạng vé ngay trong kết quả.</p></article>
         <article class="card"><span class="feature-icon"><app-icon name="seat" [size]="26"/></span><h3>Chọn chỗ ngồi theo ý bạn</h3><p>Xem sơ đồ ghế, vị trí ngồi và phụ phí trước khi hoàn tất đặt vé.</p></article>
         <article class="card"><span class="feature-icon"><app-icon name="swap" [size]="26"/></span><h3>Quản lý chuyến đi trực tuyến</h3><p>Tra cứu vé, đổi chuyến hoặc hủy vé theo chính sách ngay trong tài khoản của bạn.</p></article>
       </div>
@@ -142,7 +141,7 @@ type LocationSuggestion = {
       <div class="seo-copy">
         <div class="eyebrow">APTECH AIRLINES</div>
         <h2 id="booking-heading">Đặt vé máy bay và quản lý hành trình trong một nơi</h2>
-        <p>Aptech Airlines giúp bạn tìm chuyến bay theo điểm đi, điểm đến và ngày khởi hành; xem lựa chọn chuyến thẳng hoặc nối chuyến; chọn hạng vé và kiểm tra chỗ ngồi trước khi đặt vé.</p>
+        <p>Aptech Airlines giúp bạn tìm chuyến bay theo điểm đi, điểm đến và ngày khởi hành; xem lựa chọn chuyến thẳng hoặc nối chuyến; so sánh hạng vé và kiểm tra chỗ ngồi trước khi đặt vé.</p>
         <p>Sau khi có vé, bạn có thể theo dõi hành trình, tra cứu lịch bay, chọn ghế, đổi chuyến và xem chính sách hủy vé trực tuyến.</p>
       </div>
       <a class="btn btn-dark seo-cta" routerLink="/lookup">Xem lịch bay <app-icon name="arrow" [size]="17"/></a>
@@ -166,7 +165,6 @@ export class HomeComponent {
   departureEnd = '';
   flexibleDates = false;
   returnDate = '';
-  cabin = 'ECONOMY';
   roundTrip = false;
   adults = 1;
   children = 0;
@@ -256,7 +254,6 @@ export class HomeComponent {
       departure_date: this.departure,
       departure_date_end: this.flexibleDates ? this.departureEnd : undefined,
       return_date: this.roundTrip ? this.returnDate : undefined,
-      cabin_class: this.cabin,
       adults: this.adults,
       children: this.children,
       seniors: this.seniors,

@@ -8,8 +8,8 @@ export class CancellationPolicy {
   @Prop({ required: true })
   min_days_before: number;
 
-  @Prop({ default: null })
-  max_days_before: number; // null means no upper limit (e.g. >= min_days_before)
+  @Prop({ type: Number, default: null })
+  max_days_before: number | null; // null means no upper limit (e.g. >= min_days_before)
 
   @Prop({ required: true, min: 0, max: 100 })
   refund_percentage: number;

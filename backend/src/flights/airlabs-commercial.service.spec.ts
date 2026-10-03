@@ -9,6 +9,7 @@ import { RouteRef } from '../reference/reference.schema';
 import { ScheduleTemplate } from './schemas/schedule-template.schema';
 import { Flight, CabinClass, FlightStatus } from './flights.schema';
 import { Airport } from '../airports/airports.schema';
+import { AirportsService } from '../airports/airports.service';
 import { FLEET_LAYOUT_CATALOG } from '../seat-allocation/fleet-layout.catalog';
 import { ReferenceService } from '../reference/reference.service';
 import { FlightsService } from './flights.service';
@@ -37,6 +38,15 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
   let mockTemplates: Map<string, any>;
   let mockFlights: Map<string, any>;
   let mockAirports: Map<string, any>;
+  const mockAirportsService = {
+    ensureAirportReference: jest.fn(async (iataCode: string) => {
+      const airport = mockAirports.get(iataCode);
+      if (!airport) {
+        throw new BadRequestException(`Missing airport reference: ${iataCode}`);
+      }
+      return airport;
+    }),
+  };
 
   const mockRouteRefModel: any = {
     findOne: jest.fn((filter: any) => {
@@ -255,6 +265,7 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
     mockTemplates = new Map();
     mockFlights = new Map();
     mockAirports = new Map();
+    mockAirportsService.ensureAirportReference.mockClear();
 
     // Populate reference airports
     mockAirports.set('SGN', {
@@ -298,6 +309,7 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
         { provide: getModelToken(ScheduleTemplate.name), useValue: mockTemplateModel },
         { provide: getModelToken(Flight.name), useValue: mockFlightModel },
         { provide: getModelToken(Airport.name), useValue: mockAirportModel },
+        { provide: AirportsService, useValue: mockAirportsService },
       ],
     }).compile();
 
@@ -577,7 +589,7 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
       await expect(generatorService.generateForTemplate(template, '2026-10-01', 1)).rejects.toThrow(BadRequestException);
     });
 
-    it('Defect 3: Rejects AirLabs materialization when airport or timezone data is missing', async () => {
+    it('Defect 3: rejects commercialization when an unknown airport cannot be provisioned safely', async () => {
       mockRouteRefs.set('airlabs_MISSING_APT', {
         source_key: 'airlabs_MISSING_APT',
         source: 'airlabs',
@@ -592,14 +604,86 @@ describe('Phase C1: AirLabs-Backed Commercial Flight Foundation (Complete & Hard
         aircraft_icao: 'A21N',
       });
 
-      const template = await commercialService.commercializeRoute({
-        source_key: 'airlabs_MISSING_APT',
-        aptech_flight_number: 'APT888',
-        aircraft_type: 'A21N',
-        base_price_economy: 1000000,
+      await expect(
+        commercialService.commercializeRoute({
+          source_key: 'airlabs_MISSING_APT',
+          aptech_flight_number: 'APT888',
+          aircraft_type: 'A21N',
+          base_price_economy: 1000000,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('auto-ensures both HKG and LAX airport references before commercializing a connecting leg', async () => {
+      mockAirports.set('HKG', {
+        iata_code: 'HKG',
+        time_zone: 'Asia/Hong_Kong',
+        lat: 22.308,
+        lng: 113.9185,
+      });
+      mockRouteRefs.set('airlabs_HKG_LAX', {
+        source_key: 'airlabs_HKG_LAX',
+        source: 'airlabs',
+        airline_iata: 'CX',
+        flight_iata: 'CX880',
+        flight_number: '880',
+        dep_iata: 'HKG',
+        arr_iata: 'LAX',
+        dep_time: '00:15',
+        arr_time: '22:35',
+        duration: 740,
+        days: ['daily'],
       });
 
-      await expect(generatorService.generateForTemplate(template, '2026-10-01', 1)).rejects.toThrow(BadRequestException);
+      const template = await commercialService.commercializeRoute({
+        source_key: 'airlabs_HKG_LAX',
+        aptech_flight_number: 'APT8935',
+        aircraft_type: 'A20N',
+        base_price_economy: 900000,
+      });
+
+      expect(template.origin_iata).toBe('HKG');
+      expect(template.dest_iata).toBe('LAX');
+      expect(mockAirportsService.ensureAirportReference).toHaveBeenCalledWith('HKG');
+      expect(mockAirportsService.ensureAirportReference).toHaveBeenCalledWith('LAX');
+    });
+
+    it('self-heals an existing HKG -> LAX AirLabs template before materialization', async () => {
+      mockAirports.set('HKG', {
+        iata_code: 'HKG',
+        time_zone: 'Asia/Hong_Kong',
+      });
+      mockTemplates.set('AIRLABS-LEGACY-HKG-LAX', {
+        _id: 'legacy_hkg_lax',
+        template_id: 'AIRLABS-LEGACY-HKG-LAX',
+        source_type: 'AIRLABS',
+        is_active: true,
+        origin_iata: 'HKG',
+        dest_iata: 'LAX',
+      });
+      const generationResult = {
+        template_id: 'AIRLABS-LEGACY-HKG-LAX',
+        inserted: 1,
+        matched: 0,
+        processed_dates: 1,
+      } as any;
+      const generateSpy = jest
+        .spyOn(generatorService, 'generateForTemplate')
+        .mockResolvedValueOnce(generationResult);
+
+      await expect(
+        commercialService.materializeTemplate('AIRLABS-LEGACY-HKG-LAX', 1, '2026-10-02'),
+      ).resolves.toBe(generationResult);
+
+      expect(mockAirportsService.ensureAirportReference).toHaveBeenCalledTimes(2);
+      expect(mockAirportsService.ensureAirportReference).toHaveBeenCalledWith('HKG');
+      expect(mockAirportsService.ensureAirportReference).toHaveBeenCalledWith('LAX');
+      expect(generateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ template_id: 'AIRLABS-LEGACY-HKG-LAX' }),
+        '2026-10-02',
+        1,
+      );
+      generateSpy.mockRestore();
     });
 
     it('Defect 4: Iterates exact calendar dates across DST spring-forward boundary (America/Los_Angeles)', async () => {

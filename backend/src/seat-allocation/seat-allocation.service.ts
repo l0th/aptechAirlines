@@ -80,6 +80,15 @@ export class SeatAllocationService {
     return this.fleetLayoutService.buildEnrichedSeatMap(fId, aircraftType, allocations, overrides);
   }
 
+  async hasCustomerSeatAssignments(flightId: Types.ObjectId | string): Promise<boolean> {
+    const fId = typeof flightId === 'string' ? new Types.ObjectId(flightId) : flightId;
+    const existing = await this.allocationModel.exists({
+      flight_id: fId,
+      status: { $in: [SeatAllocationStatus.HELD, SeatAllocationStatus.CONFIRMED] },
+    });
+    return !!existing;
+  }
+
   /**
    * Pure, side-effect-free seat fee calculation for booking and reschedule quotes.
    */

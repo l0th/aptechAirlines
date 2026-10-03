@@ -77,9 +77,13 @@ import { PaypalService } from '../core/paypal.service';
           @if(quote.early_bird_percent){
             <div class="discount"><span>Điều chỉnh theo ngày bay</span><b>{{quote.early_bird_percent>0?'+':''}}{{quote.early_bird_percent}}%</b></div>
           }
+          @if(quote.load_adjustment_percent){
+            <div class="discount"><span>{{quote.load_adjustment_label}} · tải {{quote.load_factor_percent}}%</span><b>{{quote.load_adjustment_percent>0?'+':''}}{{quote.load_adjustment_percent}}%</b></div>
+          }
           @if(quote.ff_discount_percent){
             <div class="discount"><span>SkyMiles {{quote.ff_tier}}</span><b>-{{quote.ff_discount_percent}}%</b></div>
           }
+          @if(quote.pricing_profile_name){<small class="presentment">Pricing profile: {{quote.pricing_profile_name}}</small>}
           <div class="total"><span>Tổng</span><strong>{{money(quote.total_amount)}}</strong></div>
           @if(quote.presentment?.amount){
             <small class="presentment">Thanh toán PayPal: {{quote.presentment.amount}} {{quote.presentment.currency}}</small>
@@ -228,9 +232,10 @@ export class ReviewComponent{
   }
   private optionPrice(option:any){
     if(!option)return 0;
-    const direct=Number(option?.source?.total_party_price);
-    if(Number.isFinite(direct)&&direct>0)return direct;
-    return(option?.legs||[]).reduce((s:number,l:any)=>s+Number(l.total_party_price||0),0);
+    const legsTotal=(option?.legs||[]).reduce((s:number,l:any)=>s+Number(l.total_party_price||0),0);
+    if(legsTotal>0)return legsTotal;
+    const sourceTotal=Number(option?.source?.total_party_price);
+    return Number.isFinite(sourceTotal)?sourceTotal:0;
   }
   private syncDefaultPayment(){
     if(this.isStaffBooking)return;

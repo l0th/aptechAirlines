@@ -11,7 +11,7 @@ import {
 import { CreateBookingDto } from './bookings.dto';
 import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
-import { applyPricing } from '../common/pricing.util';
+import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
 import {
   BookingSeatSagaOperationDocument,
   SagaOperationType,
@@ -93,16 +93,32 @@ export class BookingsCreateService extends BookingsCorePart {
     let earlyBirdPercent = 0;
     let earlyBirdLabel = '';
     let earlyBirdLabelEn = '';
+    let loadFactorPercent = 0;
+    let loadAdjustmentPercent = 0;
+    let loadAdjustmentLabel = '';
+    let pricingProfileId = '';
+    let pricingProfileName = '';
     let ffTier = '';
     let ffDiscountPercent = 0;
 
     for (const { definition: leg, flight, inventory } of selectedLegs) {
 
       for (const p of dto.passengers) {
-        const pricing = applyPricing(inventory.base_price, daysUntilDeparture, user.sky_miles || 0);
+        const pricing = applyPricing(
+          inventory.base_price,
+          daysUntilDeparture,
+          user.sky_miles || 0,
+          (flight as any).pricing_profile_snapshot,
+          inventoryLoadFactor(inventory.allocated_seats, inventory.available_seats),
+        );
         earlyBirdPercent = pricing.early_bird_percent;
         earlyBirdLabel = pricing.early_bird_label;
         earlyBirdLabelEn = pricing.early_bird_label_en;
+        loadFactorPercent = pricing.load_factor_percent;
+        loadAdjustmentPercent = pricing.load_adjustment_percent;
+        loadAdjustmentLabel = pricing.load_adjustment_label;
+        pricingProfileId = pricing.pricing_profile_id || '';
+        pricingProfileName = pricing.pricing_profile_name || '';
         ffTier = pricing.ff_tier;
         ffDiscountPercent = pricing.ff_percent;
 
@@ -580,6 +596,11 @@ export class BookingsCreateService extends BookingsCorePart {
         early_bird_percent: earlyBirdPercent,
         early_bird_label: earlyBirdLabel,
         early_bird_label_en: earlyBirdLabelEn,
+        load_factor_percent: loadFactorPercent,
+        load_adjustment_percent: loadAdjustmentPercent,
+        load_adjustment_label: loadAdjustmentLabel,
+        pricing_profile_id: pricingProfileId || undefined,
+        pricing_profile_name: pricingProfileName || undefined,
         ff_tier: ffTier,
         ff_discount_percent: ffDiscountPercent,
         pricing_note: dto.legs.length > 1 ? 'Applied pricing based on earliest departure leg' : '',

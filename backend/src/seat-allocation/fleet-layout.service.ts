@@ -81,6 +81,7 @@ export class FleetLayoutService {
     overrides: FlightSeatOverrideDocument[],
   ): Promise<EnrichedSeatMapResponse> {
     const layout = this.getLayout(aircraftType);
+    const profileSnapshot = await this.seatPricingService.getFlightProfileSnapshot(flightId);
     const allocMap = new Map<string, SeatAllocationDocument>();
     for (const a of allocations) {
       allocMap.set(a.seat_code.toUpperCase(), a);
@@ -148,7 +149,12 @@ export class FleetLayoutService {
           }
 
           // Authoritative seat fee computation
-          const pricing = await this.seatPricingService.calculateSeatFee(flightId, seatDef, 'CHOOSE');
+          const pricing = await this.seatPricingService.calculateSeatFee(
+            flightId,
+            seatDef,
+            'CHOOSE',
+            profileSnapshot,
+          );
 
           enrichedGroup.push({
             seat_code: seatCode,

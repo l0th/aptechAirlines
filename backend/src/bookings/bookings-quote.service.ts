@@ -10,7 +10,7 @@ import {
   RescheduleTicketDto,
 } from './bookings.dto';
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
-import { applyPricing } from '../common/pricing.util';
+import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
 import { ConvertedPresentmentAmount } from '../paypal/paypal.service';
 import {
   BookingsQuoteBridge,
@@ -31,6 +31,11 @@ export class BookingsQuoteService extends BookingsQuotePart {
     total_amount: number;
     currency: string;
     early_bird_percent: number;
+    load_factor_percent: number;
+    load_adjustment_percent: number;
+    load_adjustment_label: string;
+    pricing_profile_id?: string;
+    pricing_profile_name?: string;
     ff_tier: string;
     ff_discount_percent: number;
     presentment?: ConvertedPresentmentAmount;
@@ -98,13 +103,29 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
     let totalFare = 0;
     let earlyBirdPercent = 0;
+    let loadFactorPercent = 0;
+    let loadAdjustmentPercent = 0;
+    let loadAdjustmentLabel = '';
+    let pricingProfileId: string | undefined;
+    let pricingProfileName: string | undefined;
     let ffTier = '';
     let ffDiscountPercent = 0;
 
-    for (const { inventory } of selectedLegs) {
+    for (const { flight, inventory } of selectedLegs) {
       for (const p of dto.passengers) {
-        const pricing = applyPricing(inventory.base_price, daysUntilDeparture, skyMiles);
+        const pricing = applyPricing(
+          inventory.base_price,
+          daysUntilDeparture,
+          skyMiles,
+          (flight as any).pricing_profile_snapshot,
+          inventoryLoadFactor(inventory.allocated_seats, inventory.available_seats),
+        );
         earlyBirdPercent = pricing.early_bird_percent;
+        loadFactorPercent = pricing.load_factor_percent;
+        loadAdjustmentPercent = pricing.load_adjustment_percent;
+        loadAdjustmentLabel = pricing.load_adjustment_label;
+        pricingProfileId = pricing.pricing_profile_id;
+        pricingProfileName = pricing.pricing_profile_name;
         ffTier = pricing.ff_tier;
         ffDiscountPercent = pricing.ff_percent;
 
@@ -160,6 +181,11 @@ export class BookingsQuoteService extends BookingsQuotePart {
       total_amount: totalAmount,
       currency: 'VND',
       early_bird_percent: earlyBirdPercent,
+      load_factor_percent: loadFactorPercent,
+      load_adjustment_percent: loadAdjustmentPercent,
+      load_adjustment_label: loadAdjustmentLabel,
+      pricing_profile_id: pricingProfileId,
+      pricing_profile_name: pricingProfileName,
       ff_tier: ffTier,
       ff_discount_percent: ffDiscountPercent,
       presentment,
@@ -254,7 +280,13 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
         const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
         for (const p of booking.passengers) {
-          const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+          const pricing = applyPricing(
+            inv.base_price,
+            daysUntilDep,
+            skyMiles,
+            (flight as any).pricing_profile_snapshot,
+            inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+          );
           let fare = pricing.final_price;
           if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
           if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
@@ -291,7 +323,13 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
       const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
       for (const p of booking.passengers) {
-        const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+        const pricing = applyPricing(
+          inv.base_price,
+          daysUntilDep,
+          skyMiles,
+          (flight as any).pricing_profile_snapshot,
+          inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+        );
         let fare = pricing.final_price;
         if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
         if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
@@ -333,7 +371,13 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
           const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
           for (const p of booking.passengers) {
-            const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+            const pricing = applyPricing(
+              inv.base_price,
+              daysUntilDep,
+              skyMiles,
+              (flight as any).pricing_profile_snapshot,
+              inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+            );
             let fare = pricing.final_price;
             if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
             if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
@@ -370,7 +414,13 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
         const daysUntilDep = (dep.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
         for (const p of booking.passengers) {
-          const pricing = applyPricing(inv.base_price, daysUntilDep, skyMiles);
+          const pricing = applyPricing(
+            inv.base_price,
+            daysUntilDep,
+            skyMiles,
+            (flight as any).pricing_profile_snapshot,
+            inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+          );
           let fare = pricing.final_price;
           if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
           if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);

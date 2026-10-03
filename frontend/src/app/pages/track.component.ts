@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { PaypalService } from '../core/paypal.service';
 import { AuthService } from '../core/auth.service';
+import { ToastService } from '../core/toast.service';
 
 @Component({
   standalone:true,
@@ -91,6 +92,7 @@ export class TrackComponent{
   api=inject(ApiService);
   paypal=inject(PaypalService);
   auth=inject(AuthService);
+  toast=inject(ToastService);
   route=inject(ActivatedRoute);
   router=inject(Router);
   code=''; result:any=null; tracked:any=null; policies:any[]=[]; error=''; message=''; loading=false; busy=false; paypalEnabled=false;
@@ -144,7 +146,18 @@ export class TrackComponent{
     const question=this.result.status==='BLOCKED'
       ?'Hủy vé đang giữ sẽ giải phóng toàn bộ ghế và không phát sinh khoản hoàn tiền. Bạn muốn tiếp tục?'
       :`Theo chính sách hiện tại, mức hoàn dự kiến là ${percent}%. Bạn muốn hủy vé này?`;
-    if(!confirm(question))return;
+    const questionEn=this.result.status==='BLOCKED'
+      ?'Cancelling this hold will release all seats and no refund will be issued. Do you want to continue?'
+      :`The current policy estimates a ${percent}% refund. Do you want to cancel this booking?`;
+    const confirmed=await this.toast.confirm({
+      titleVi:'Xác nhận hủy vé',
+      titleEn:'Confirm cancellation',
+      messageVi:question,
+      messageEn:questionEn,
+      confirmVi:'Hủy vé',
+      confirmEn:'Cancel booking',
+    });
+    if(!confirmed)return;
     const id=this.result.confirmation_number||this.result.blocking_number||this.result.pnr_code;
     this.busy=true;this.error='';this.message='';
     try{

@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { PricingProfileSnapshot } from '../common/pricing-profile.types';
+import type { SeatPricingProfileSnapshot } from '../seat-allocation/seat-pricing-profile.schema';
 
 export type FlightDocument = Flight & Document;
 
@@ -133,6 +135,18 @@ export class Flight {
 
   @Prop({ type: [FlightInventorySchema], default: [] })
   inventories: FlightInventory[];
+
+  @Prop({ required: false, trim: true, index: true })
+  pricing_profile_id?: string;
+
+  @Prop({ type: Object, required: false })
+  pricing_profile_snapshot?: PricingProfileSnapshot;
+
+  @Prop({ required: false, trim: true, index: true })
+  seat_pricing_profile_id?: string;
+
+  @Prop({ type: Object, required: false })
+  seat_pricing_profile_snapshot?: SeatPricingProfileSnapshot;
 
   // Provenance & Deterministic Schedule Identity (Phase A)
   @Prop({ required: false, trim: true })

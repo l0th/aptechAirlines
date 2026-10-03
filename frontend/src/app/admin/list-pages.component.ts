@@ -3,11 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
+import { ToastService } from '../core/toast.service';
+import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
   selector:'app-admin-list',
   standalone:true,
-  imports:[FormsModule],
+  imports:[FormsModule,PaginationComponent],
   template:`
     <div class="eyebrow">ADMIN</div>
     <div class="section-head">
@@ -23,50 +25,66 @@ import { AuthService } from '../core/auth.service';
     </div>
 
     <div class="card toolbar">
-      <input class="control" [(ngModel)]="query" [placeholder]="searchPlaceholder">
+      <input class="control" [(ngModel)]="query" (ngModelChange)="page=1" [placeholder]="searchPlaceholder">
       <span class="pill pill-gold">{{filtered.length}} bản ghi</span>
     </div>
     @if(message){<p class="success notice">{{message}}</p>}
     @if(error){<p class="error notice">{{error}}</p>}
 
     @if(editor){
-      <section class="card editor-panel">
-        <div class="editor-head"><div><div class="eyebrow">{{editorMode==='create'?'CREATE':'EDIT'}} {{kind.toUpperCase()}}</div><h2>{{editorMode==='create'?'Thêm mới':'Cập nhật'}}</h2></div><button class="btn btn-outline" (click)="editor=null">Đóng</button></div>
+      <div class="modal" (click)="editor=null">
+      <section class="card editor-panel" (click)="$event.stopPropagation()">
+        <button class="close" (click)="editor=null">×</button>
+        <div class="editor-head"><div><div class="eyebrow">{{editorMode==='create'?'CREATE':'EDIT'}} {{kind.toUpperCase()}}</div><h2>{{editorMode==='create'?'Thêm mới':'Cập nhật'}}</h2></div></div>
         @if(kind==='users'){
           <div class="form-grid">
             @if(editorMode==='create'){<div class="field"><span>Username</span><input class="control" [(ngModel)]="editor.username"></div><div class="field"><span>Password</span><input class="control" type="password" [(ngModel)]="editor.password"></div>}
             <div class="field"><span>Họ</span><input class="control" [(ngModel)]="editor.last_name"></div><div class="field"><span>Tên</span><input class="control" [(ngModel)]="editor.first_name"></div>
             <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="editor.email"></div><div class="field"><span>Điện thoại</span><input class="control" [(ngModel)]="editor.phone_number"></div>
             <div class="field full"><span>Địa chỉ</span><input class="control" [(ngModel)]="editor.address"></div><div class="field"><span>Role</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'"><option value="CUSTOMER">CUSTOMER</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
-            @if(editorMode==='edit'){<div class="field"><span>SkyMiles · đặt số dư</span><input class="control" type="number" min="0" step="1" [(ngModel)]="editor.sky_miles"><small>Chỉ Admin có quyền thay đổi. Giá trị tối thiểu là 0.</small></div>}
+            @if(editorMode==='edit'){<div class="field"><span>SkyMiles · đặt số dư</span><input class="control" type="number" min="0" step="1" [(ngModel)]="editor.sky_miles"></div>}
           </div>
         }@else if(kind==='airports'){
           <div class="form-grid"><div class="field"><span>IATA</span><input class="control" [(ngModel)]="editor.iata_code" [disabled]="editorMode==='edit'"></div><div class="field"><span>ICAO</span><input class="control" [(ngModel)]="editor.icao_code"></div><div class="field"><span>Airport</span><input class="control" [(ngModel)]="editor.airport_name"></div><div class="field"><span>City</span><input class="control" [(ngModel)]="editor.city_name"></div><div class="field"><span>Country code</span><input class="control" [(ngModel)]="editor.country_code"></div><div class="field"><span>Timezone</span><input class="control" [(ngModel)]="editor.time_zone"></div><div class="field"><span>Latitude</span><input class="control" type="number" [(ngModel)]="editor.lat"></div><div class="field"><span>Longitude</span><input class="control" type="number" [(ngModel)]="editor.lng"></div><label class="check full"><input type="checkbox" [(ngModel)]="editor.is_serviced_directly"> Phục vụ trực tiếp</label></div>
         }@else if(kind==='flights'){
-          @if(editor.commercial){<p class="info">Chuyến AirLabs thương mại: chỉ sửa lịch vận hành để bảo toàn inventory và provenance.</p>}
-          <div class="form-grid"><div class="field"><span>Flight number</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>@if(editorMode==='create'){<div class="field"><span>Origin IATA</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>Destination IATA</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}<div class="field"><span>Departure date</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div><div class="field full"><span>Scheduled departure (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_departure" placeholder="2026-10-01T01:00:00.000Z"></div><div class="field full"><span>Scheduled arrival (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_arrival" placeholder="2026-10-01T03:00:00.000Z"></div>@if(!editor.commercial){<div class="field"><span>Distance miles</span><input class="control" type="number" min="0" [(ngModel)]="editor.distance_miles"></div><div class="field"><span>Aircraft code</span><input class="control" [(ngModel)]="editor.aircraft_code"></div><div class="field"><span>Economy seats</span><input class="control" type="number" min="0" [(ngModel)]="editor.economy_seats"></div><div class="field"><span>Economy base price</span><input class="control" type="number" min="0" [(ngModel)]="editor.economy_price"></div><div class="field"><span>Business seats</span><input class="control" type="number" min="0" [(ngModel)]="editor.business_seats"></div><div class="field"><span>Business base price</span><input class="control" type="number" min="0" [(ngModel)]="editor.business_price"></div>}</div>
+          @if(editor.commercial){<p class="info">Chuyến thương mại theo ngày. Có thể đổi máy bay riêng cho ngày này khi chưa có ghế HELD/CONFIRMED; commercial template 330 ngày không bị thay đổi.</p>}
+          <div class="form-grid">
+            <div class="field"><span>Flight number</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>
+            @if(editorMode==='create'){<div class="field"><span>Origin IATA</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>Destination IATA</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
+            <div class="field"><span>Departure date</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div>
+            <div class="field"><span>Máy bay</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">Chọn máy bay</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} ghế</option>}</select></div>
+            <div class="field full"><span>Scheduled departure (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_departure" placeholder="2026-10-01T01:00:00.000Z"></div>
+            <div class="field full"><span>Scheduled arrival (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_arrival" placeholder="2026-10-01T03:00:00.000Z"></div>
+            <div class="field"><span>Distance miles</span><input class="control" type="number" min="0" [(ngModel)]="editor.distance_miles" [disabled]="editor.commercial"></div>
+          </div>
+          <div class="inventory-head"><strong>Inventory theo cabin</strong><small>Available được tự tính lại để giữ nguyên số ghế đã bán.</small></div>
+          <div class="table-wrap inner-table"><table class="table"><thead><tr><th>Cabin</th><th>Đã bán</th><th>Số ghế bán</th><th>Giá cơ bản</th><th>Sức chứa máy bay</th></tr></thead><tbody>
+            @for(inv of editor.inventory_rows;track inv.cabin_class){<tr><td><strong>{{inv.cabin_class}}</strong></td><td>{{soldSeats(inv)}}</td><td><input class="mini-number" type="number" min="0" [(ngModel)]="inv.allocated_seats"></td><td><input class="mini-price" type="number" min="0" [(ngModel)]="inv.base_price"></td><td>{{layoutCapacity(inv.cabin_class)||'—'}}</td></tr>}
+          </tbody></table></div>
         }
         <button class="btn btn-primary save" (click)="saveEditor()" [disabled]="busy">Lưu thay đổi</button>
       </section>
+      </div>
     }
 
     <div class="card table-wrap">
       <table class="table">
         @if(kind==='bookings'){
           <thead><tr><th>PNR</th><th>Customer</th><th>Type</th><th>Status</th><th>Total</th><th></th></tr></thead>
-          <tbody>@for(x of filtered;track x._id){<tr><td><strong>{{x.pnr_code}}</strong><small>{{x.confirmation_number||x.blocking_number||'—'}}</small></td><td>{{customerLabel(x)}}</td><td>{{x.booking_type}}</td><td><span class="pill" [class.pill-success]="x.status==='CONFIRMED'||x.status==='RESCHEDULED'" [class.pill-gold]="x.status==='BLOCKED'">{{x.status}}</span></td><td>{{money(x.total_amount)}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button>@if(x.status==='BLOCKED'){<button class="btn btn-dark" (click)="confirmHold(x)" [disabled]="busy">Xác nhận</button>}@if(x.status!=='CANCELLED'){<button class="btn btn-outline danger" (click)="cancelBooking(x)" [disabled]="busy">Hủy</button>}</div></td></tr>}</tbody>
+          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.pnr_code}}</strong><small>{{x.confirmation_number||x.blocking_number||'—'}}</small></td><td>{{customerLabel(x)}}</td><td>{{x.booking_type}}</td><td><span class="pill" [class.pill-success]="x.status==='CONFIRMED'||x.status==='RESCHEDULED'" [class.pill-gold]="x.status==='BLOCKED'">{{x.status}}</span></td><td>{{money(x.total_amount)}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button>@if(x.status==='BLOCKED'){<button class="btn btn-dark" (click)="confirmHold(x)" [disabled]="busy">Xác nhận</button>}@if(x.status!=='CANCELLED'){<button class="btn btn-outline danger" (click)="cancelBooking(x)" [disabled]="busy">Hủy</button>}</div></td></tr>}</tbody>
         }@else if(kind==='users'){
           <thead><tr><th>User</th><th>Contact</th><th>Role</th><th>SkyMiles</th><th></th></tr></thead>
-          <tbody>@for(x of filtered;track x._id){<tr><td><strong>{{x.first_name}} {{x.last_name}}</strong><small>@{{x.username}}</small></td><td>{{x.email}}<small>{{x.phone_number||'—'}}</small></td><td><span class="pill">{{x.role}}</span></td><td><strong>{{num(x.sky_miles)}}</strong><small>{{skyTier(x.sky_miles)}}</small></td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||x.role==='SUPER_ADMIN'">Xóa</button></div></td></tr>}</tbody>
+          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.first_name}} {{x.last_name}}</strong><small>@{{x.username}}</small></td><td>{{x.email}}<small>{{x.phone_number||'—'}}</small></td><td><span class="pill">{{x.role}}</span></td><td><strong>{{num(x.sky_miles)}}</strong><small>{{skyTier(x.sky_miles)}}</small></td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||x.role==='SUPER_ADMIN'">Xóa</button></div></td></tr>}</tbody>
         }@else if(kind==='flights'){
           <thead><tr><th>Số hiệu chuyến bay</th><th>Tuyến</th><th>Khởi hành</th><th>Trạng thái</th><th>Nguồn</th><th></th></tr></thead>
-          <tbody>@for(x of filtered;track x._id){<tr><td><strong>{{x.flight_number}}</strong><small>{{x.operator||'APTECH_AIRLINES'}}</small></td><td>{{x.origin_iata}} → {{x.dest_iata}}</td><td>{{dateTime(x.scheduled_departure)}}</td><td><span class="pill" [class.pill-success]="x.status==='SCHEDULED'">{{x.status}}</span></td><td>{{x.data_source||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-dark" (click)="openStatus(x)">Trạng thái</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
+          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.flight_number}}</strong><small>{{x.operator||'APTECH_AIRLINES'}}</small></td><td>{{x.origin_iata}} → {{x.dest_iata}}</td><td>{{dateTime(x.scheduled_departure)}}</td><td><span class="pill" [class.pill-success]="x.status==='SCHEDULED'">{{x.status}}</span></td><td>{{x.data_source||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-dark" (click)="openStatus(x)">Trạng thái</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
         }@else{
           <thead><tr><th>IATA</th><th>Airport</th><th>City</th><th>Country</th><th>Timezone</th><th></th></tr></thead>
-          <tbody>@for(x of filtered;track x._id||x.iata_code){<tr><td><strong>{{x.iata_code}}</strong></td><td>{{x.airport_name||x.name||'—'}}</td><td>{{x.city_name||x.city||'—'}}</td><td>{{x.country_code||x.country_name||x.country||'—'}}</td><td>{{x.time_zone||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
+          <tbody>@for(x of paged;track x._id||x.iata_code){<tr><td><strong>{{x.iata_code}}</strong></td><td>{{x.airport_name||x.name||'—'}}</td><td>{{x.city_name||x.city||'—'}}</td><td>{{x.country_code||x.country_name||x.country||'—'}}</td><td>{{x.time_zone||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
         }
       </table>
     </div>
+    <app-pagination [total]="filtered.length" [(page)]="page" [(pageSize)]="pageSize" />
 
     @if(selected){
       <div class="modal">
@@ -89,6 +107,7 @@ import { AuthService } from '../core/auth.service';
               <div><span>Phone</span><b>{{selected.phone_number||'—'}}</b></div><div><span>SkyMiles</span><b>{{num(selected.sky_miles)}} · {{skyTier(selected.sky_miles)}}</b></div>
               <div><span>Address</span><b>{{selected.address||'—'}}</b></div><div><span>Payment</span><b>Customer checkout via PayPal</b></div>
             </div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa tài khoản</button></div>
           }@else if(kind==='flights'){
             <div class="detail-grid">
               <div><span>Route</span><b>{{selected.origin_iata}} → {{selected.dest_iata}}</b></div><div><span>Status</span><b>{{selected.status}}</b></div>
@@ -96,12 +115,14 @@ import { AuthService } from '../core/auth.service';
               <div><span>Aircraft</span><b>{{selected.aircraft?.model_code||selected.aircraft?.type||'—'}}</b></div><div><span>Bookable</span><b>{{selected.is_bookable?'Yes':'No'}}</b></div>
               <div><span>Source</span><b>{{selected.data_source||'—'}}</b></div><div><span>Operator</span><b>{{selected.operator||'—'}}</b></div>
             </div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa chuyến bay</button></div>
           }@else{
             <div class="detail-grid">
               <div><span>IATA</span><b>{{selected.iata_code}}</b></div><div><span>Timezone</span><b>{{selected.time_zone||'—'}}</b></div>
               <div><span>Airport</span><b>{{selected.airport_name||selected.name||'—'}}</b></div><div><span>City</span><b>{{selected.city_name||selected.city||'—'}}</b></div>
               <div><span>Country</span><b>{{selected.country_name||selected.country||'—'}}</b></div><div><span>Coordinates</span><b>{{coords(selected)}}</b></div>
             </div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa sân bay</button></div>
           }
         </section>
       </div>
@@ -120,7 +141,7 @@ import { AuthService } from '../core/auth.service';
     }
   `,
   styles:[`
-    .head-actions,.row-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.toolbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:18px 0}.toolbar input{flex:1}.table td small{display:block;color:#7a8997;margin-top:4px}.notice{background:#fff;padding:10px 13px;border-radius:12px}.editor-panel{padding:20px;margin:0 0 18px}.editor-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.editor-head h2{margin:5px 0 16px;color:#071b2e}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field.full,.check.full{grid-column:1/-1}.check{display:flex;gap:8px;align-items:center;padding:10px 0}.save{width:100%;margin-top:16px}.info{background:#fff7df;color:#72540d;border-radius:12px;padding:11px 13px}.danger{color:#9b3030;border-color:#e4c0c0}.modal{position:fixed;inset:0;background:rgba(4,18,31,.55);display:grid;place-items:center;padding:20px;z-index:90}.detail,.status-editor{width:min(700px,100%);max-height:90vh;overflow:auto;padding:24px;position:relative}.status-editor{width:min(480px,100%)}.detail h2,.status-editor h2{color:#071b2e;margin:7px 0 18px}.status-editor .field{margin-bottom:12px}.close{position:absolute;right:14px;top:10px;border:0;background:transparent;font-size:28px}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.detail-grid>div{background:#f6f8fa;border-radius:12px;padding:12px;min-width:0}.detail-grid span{display:block;font-size:10px;text-transform:uppercase;color:#718093;font-weight:800}.detail-grid b{display:block;color:#142b3e;margin-top:5px;overflow-wrap:anywhere}.detail-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.btn:disabled{opacity:.5}@media(max-width:850px){.section-head{align-items:flex-start;flex-direction:column}.head-actions,.row-actions{justify-content:flex-start}}@media(max-width:650px){.toolbar{align-items:stretch;flex-direction:column}.detail-grid,.form-grid{grid-template-columns:1fr}.field.full,.check.full{grid-column:auto}.detail-actions{flex-direction:column}}
+    .head-actions,.row-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.toolbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:18px 0}.toolbar input{flex:1}.table td small{display:block;color:#7a8997;margin-top:4px}.notice{background:#fff;padding:10px 13px;border-radius:12px}.editor-panel{width:min(920px,100%);max-height:92vh;overflow:auto;padding:24px;position:relative}.editor-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.editor-head h2{margin:5px 0 16px;color:#071b2e}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field.full,.check.full{grid-column:1/-1}.check{display:flex;gap:8px;align-items:center;padding:10px 0}.save{width:100%;margin-top:16px}.info{background:#fff7df;color:#72540d;border-radius:12px;padding:11px 13px}.inventory-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin:20px 0 8px;color:#0a2540}.inventory-head small{color:#718093}.inner-table{border:1px solid #e1e8ee;border-radius:12px}.mini-number,.mini-price{border:1px solid #d8e1e8;border-radius:8px;padding:8px;width:110px}.mini-price{width:150px}.inventory-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin:20px 0 8px;color:#0a2540}.inventory-head small{color:#718093}.inner-table{border:1px solid #e1e8ee;border-radius:12px}.mini-number,.mini-price{border:1px solid #d8e1e8;border-radius:8px;padding:8px;width:110px}.mini-price{width:150px}.danger{color:#9b3030;border-color:#e4c0c0}.modal{position:fixed;inset:0;background:rgba(4,18,31,.55);display:grid;place-items:center;padding:20px;z-index:90}.detail,.status-editor{width:min(700px,100%);max-height:90vh;overflow:auto;padding:24px;position:relative}.status-editor{width:min(480px,100%)}.detail h2,.status-editor h2{color:#071b2e;margin:7px 0 18px}.status-editor .field{margin-bottom:12px}.close{position:absolute;right:14px;top:10px;border:0;background:transparent;font-size:28px}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.detail-grid>div{background:#f6f8fa;border-radius:12px;padding:12px;min-width:0}.detail-grid span{display:block;font-size:10px;text-transform:uppercase;color:#718093;font-weight:800}.detail-grid b{display:block;color:#142b3e;margin-top:5px;overflow-wrap:anywhere}.detail-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.btn:disabled{opacity:.5}@media(max-width:850px){.section-head{align-items:flex-start;flex-direction:column}.head-actions,.row-actions{justify-content:flex-start}}@media(max-width:650px){.toolbar{align-items:stretch;flex-direction:column}.detail-grid,.form-grid{grid-template-columns:1fr}.field.full,.check.full{grid-column:auto}.detail-actions{flex-direction:column}.inventory-head{align-items:flex-start;flex-direction:column}}
   `]
 })
 export class AdminListComponent implements OnInit{
@@ -129,39 +150,68 @@ export class AdminListComponent implements OnInit{
   api=inject(ApiService);
   auth=inject(AuthService);
   router=inject(Router);
-  rows:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';error='';message='';query='';busy=false;
+  toast=inject(ToastService);
+  rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';error='';message='';query='';busy=false;page=1;pageSize=20;
 
-  ngOnInit(){this.load()}
+  ngOnInit(){
+    this.load();
+    if(this.kind==='flights'){
+      this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,'Không tải được aircraft layouts.')});
+    }
+  }
   get subtitle(){return({bookings:'Các đặt chỗ đang lưu trong hệ thống và các tác vụ theo lịch.',users:'Tài khoản và hồ sơ khách hàng/nhân viên.',flights:'Chuyến bay, lịch vận hành và trạng thái khẩn cấp.',airports:'Danh mục sân bay, múi giờ và phạm vi phục vụ.'} as any)[this.kind]||'Dữ liệu trực tiếp từ máy chủ.'}
   get searchPlaceholder(){return({bookings:'PNR, mã xác nhận, trạng thái',users:'Tên, tên đăng nhập, email, vai trò',flights:'Số hiệu chuyến bay, tuyến bay, trạng thái',airports:'IATA, thành phố, quốc gia'} as any)[this.kind]||'Tìm kiếm'}
   get filtered(){const q=this.query.trim().toLowerCase();if(!q)return this.rows;return this.rows.filter(x=>JSON.stringify(this.searchable(x)).toLowerCase().includes(q))}
+  get paged(){const start=(this.page-1)*this.pageSize;return this.filtered.slice(start,start+this.pageSize)}
   skyTier(value:any){const miles=Number(value||0);return miles<20000?'MEMBER':miles<50000?'SILVER':miles<100000?'GOLD':'PLATINUM'}
   load(){
     this.error='';
     const req=this.kind==='users'?this.api.users():this.kind==='flights'?this.api.flights():this.kind==='airports'?this.api.airports():this.api.bookings();
-    req.subscribe({next:(r:any)=>this.rows=Array.isArray(r)?r:(r?.items||r?.data||[]),error:e=>this.error=this.msg(e,'Không tải được dữ liệu.')})
+    req.subscribe({next:(r:any)=>{this.rows=Array.isArray(r)?r:(r?.items||r?.data||[]);this.page=1},error:e=>this.error=this.msg(e,'Không tải được dữ liệu.')})
   }
   openCreate(){
     this.editorMode='create';this.error='';this.message='';
     if(this.kind==='users')this.editor={username:'',password:'User@2026',first_name:'',last_name:'',email:'',phone_number:'',address:'',role:'CUSTOMER'};
     else if(this.kind==='airports')this.editor={iata_code:'',icao_code:'',airport_name:'',city_name:'',country_code:'VN',time_zone:'Asia/Ho_Chi_Minh',lat:null,lng:null,is_serviced_directly:true};
-    else if(this.kind==='flights')this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',scheduled_departure:'',scheduled_arrival:'',distance_miles:0,aircraft_code:'A20N',economy_seats:180,economy_price:0,business_seats:0,business_price:0,commercial:false};
+    else if(this.kind==='flights'){
+      this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',scheduled_departure:'',scheduled_arrival:'',distance_miles:0,aircraft_code:'A20N',commercial:false,inventory_rows:[]};
+      this.flightAircraftChanged(true);
+    }
   }
   openEdit(x:any){
     this.editorMode='edit';this.error='';this.message='';
     if(this.kind==='users')this.editor={...x,originalRole:x.role};
     else if(this.kind==='airports')this.editor={...x};
     else if(this.kind==='flights'){
-      const econ=this.inventory(x,'ECONOMY'),bus=this.inventory(x,'BUSINESS');
-      this.editor={...x,commercial:x.data_source==='AIRLABS_COMMERCIALIZED',scheduled_departure:this.iso(x.scheduled_departure),scheduled_arrival:this.iso(x.scheduled_arrival),aircraft_code:x.aircraft?.model_code||'',economy_seats:econ?.allocated_seats||0,economy_price:econ?.base_price||0,business_seats:bus?.allocated_seats||0,business_price:bus?.base_price||0};
+      this.editor={
+        ...x,
+        commercial:x.data_source==='AIRLABS_COMMERCIALIZED',
+        scheduled_departure:this.iso(x.scheduled_departure),
+        scheduled_arrival:this.iso(x.scheduled_arrival),
+        aircraft_code:x.aircraft?.model_code||'',
+        inventory_rows:(x.inventories||[]).map((inv:any)=>({
+          cabin_class:inv.cabin_class,
+          allocated_seats:Number(inv.allocated_seats||0),
+          available_seats:Number(inv.available_seats||0),
+          base_price:Number(inv.base_price||0),
+          bucket_code:inv.bucket_code||String(inv.cabin_class||'Y')[0],
+          _original_allocated:Number(inv.allocated_seats||0),
+          _original_available:Number(inv.available_seats||0),
+        })),
+      };
     }
   }
+  editFromDetail(x:any){this.selected=null;this.openEdit(x)}
   saveEditor(){if(!this.editor)return;if(this.kind==='users')this.saveUser();else if(this.kind==='airports')this.saveAirport();else if(this.kind==='flights')this.saveFlight()}
   saveUser(){
     const e=this.editor;
     if(!e.first_name?.trim()||!e.last_name?.trim()||!e.email?.trim()||(this.editorMode==='create'&&(!e.username?.trim()||!e.password))){this.error='Vui lòng nhập đủ username/password/họ tên/email.';return}
-    const body:any={first_name:e.first_name.trim(),last_name:e.last_name.trim(),email:e.email.trim(),phone_number:e.phone_number?.trim()||'',address:e.address?.trim()||'',role:e.role};
+    const phone=e.phone_number?.trim();
+    const body:any={first_name:e.first_name.trim(),last_name:e.last_name.trim(),email:e.email.trim(),address:e.address?.trim()||'',role:e.role};
+    if(phone)body.phone_number=phone;
+    else if(this.editorMode==='edit')body.phone_number='';
     if(this.editorMode==='create'){body.username=e.username.trim();body.password=e.password}else body.sky_miles=Math.max(0,Number(e.sky_miles||0));
+    if(this.editorMode==='edit'&&e.originalRole==='SUPER_ADMIN')delete body.role;
     this.busy=true;
     const req=this.editorMode==='create'?this.api.createUser(body):this.api.updateUser(e._id,body);
     req.subscribe({next:()=>this.done(this.editorMode==='create'?'Đã tạo tài khoản.':'Đã cập nhật tài khoản.'),error:x=>this.fail(x,'Không lưu được tài khoản.')});
@@ -181,18 +231,38 @@ export class AdminListComponent implements OnInit{
     if(arr.getTime()<=dep.getTime()){this.error='Giờ đến phải sau giờ khởi hành.';return}
     if(!e.departure_date){this.error='Departure date là bắt buộc.';return}
     const duration=Math.max(1,Math.round((arr.getTime()-dep.getTime())/60000));
-    const base:any={departure_date:e.departure_date,scheduled_departure:dep.toISOString(),scheduled_arrival:arr.toISOString(),duration_minutes:duration};
+    if(!e.aircraft_code?.trim()){this.error='Chọn máy bay cho chuyến bay.';return}
+    const layout=this.selectedFlightLayout;
+    if(!layout){this.error='Loại máy bay không tồn tại trong fleet layout.';return}
+    const inventories:any[]=[];
+    for(const inv of (e.inventory_rows||[])){
+      const target=Math.max(0,Math.round(Number(inv.allocated_seats||0)));
+      const sold=this.soldSeats(inv);
+      const capacity=this.layoutCapacity(inv.cabin_class);
+      if(target<sold){this.error=`${inv.cabin_class}: không thể giảm dưới ${sold} ghế đã bán.`;return}
+      if(target>0&&!capacity){this.error=`${layout.aircraft_type} không hỗ trợ cabin ${inv.cabin_class}.`;return}
+      if(target>capacity){this.error=`${inv.cabin_class}: tối đa ${capacity} ghế trên ${layout.aircraft_type}.`;return}
+      if(target>0)inventories.push({cabin_class:inv.cabin_class,is_smoking:false,bucket_code:inv.bucket_code||String(inv.cabin_class||'Y')[0],base_price:Math.max(0,Number(inv.base_price||0)),allocated_seats:target,available_seats:Math.max(0,target-sold)});
+    }
+    if(!inventories.length){this.error='Phải có ít nhất một cabin có ghế bán.';return}
+    const base:any={
+      departure_date:e.departure_date,
+      scheduled_departure:dep.toISOString(),
+      scheduled_arrival:arr.toISOString(),
+      duration_minutes:duration,
+      aircraft:{model_code:layout.aircraft_type,model_name:layout.model_name,total_capacity:Number(layout.total_capacity)},
+      inventories,
+    };
     let body:any=base;
     if(!e.commercial){
       if(!e.flight_number?.trim()){this.error='Flight number là bắt buộc.';return}
-      const econSeats=Math.max(0,Number(e.economy_seats||0)),busSeats=Math.max(0,Number(e.business_seats||0));
-      if(econSeats+busSeats<1){this.error='Tổng số ghế phải lớn hơn 0.';return}
-      body={...base,flight_number:e.flight_number.trim().toUpperCase(),distance_miles:Math.max(0,Math.round(Number(e.distance_miles||0))),inventories:[this.inventoryPayload(e,'ECONOMY',econSeats,Number(e.economy_price||0)),...(busSeats>0?[this.inventoryPayload(e,'BUSINESS',busSeats,Number(e.business_price||0))]:[])]};
-      if(this.editorMode==='create'){
-        if(!e.origin_iata?.trim()||!e.dest_iata?.trim()){this.error='Origin và destination là bắt buộc.';return}
-        body.origin_iata=e.origin_iata.trim().toUpperCase();body.dest_iata=e.dest_iata.trim().toUpperCase();
-        if(e.aircraft_code?.trim())body.aircraft={model_code:e.aircraft_code.trim().toUpperCase(),model_name:e.aircraft_code.trim().toUpperCase(),total_capacity:econSeats+busSeats};
-      }
+      body={...base,flight_number:e.flight_number.trim().toUpperCase(),distance_miles:Math.max(0,Math.round(Number(e.distance_miles||0)))};
+    }
+    if(this.editorMode==='create'){
+      if(!e.origin_iata?.trim()||!e.dest_iata?.trim()){this.error='Origin và destination là bắt buộc.';return}
+      body.flight_number=e.flight_number.trim().toUpperCase();
+      body.origin_iata=e.origin_iata.trim().toUpperCase();body.dest_iata=e.dest_iata.trim().toUpperCase();
+      body.distance_miles=Math.max(0,Math.round(Number(e.distance_miles||0)));
     }
     this.busy=true;
     const req=this.editorMode==='create'?this.api.createFlight(body):this.api.updateFlight(e._id,body);
@@ -206,10 +276,18 @@ export class AdminListComponent implements OnInit{
     this.busy=true;
     this.api.updateFlightStatus(e._id,body).subscribe({next:()=>{this.statusEditor=null;this.done('Đã cập nhật trạng thái chuyến bay.')},error:x=>this.fail(x,'Không cập nhật được trạng thái.')});
   }
-  remove(x:any){
-    const label=this.primary(x);
-    if(!confirm('Xóa '+label+'?'))return;
+  async remove(x:any){
     if(this.kind==='users'&&x.role==='SUPER_ADMIN'){this.error='SUPER_ADMIN không thể bị xóa.';return}
+    const label=this.primary(x);
+    const confirmed=await this.toast.confirm({
+      titleVi:'Xác nhận xóa',
+      titleEn:'Confirm deletion',
+      messageVi:'Bạn có chắc muốn xóa '+label+'?',
+      messageEn:'Are you sure you want to delete '+label+'?',
+      confirmVi:'Xóa',
+      confirmEn:'Delete',
+    });
+    if(!confirmed)return;
     this.busy=true;
     const req=this.kind==='users'?this.api.deleteUser(x._id):this.kind==='flights'?this.api.deleteFlight(x._id):this.api.deleteAirport(x.iata_code);
     req.subscribe({next:()=>this.done('Đã xóa '+label+'.'),error:e=>this.fail(e,'Không xóa được dữ liệu.')});
@@ -223,9 +301,18 @@ export class AdminListComponent implements OnInit{
     this.busy=true;
     this.api.confirm({blocking_number:blocking,payment_method:'PROFILE_CARD'}).subscribe({next:()=>this.done('Đã xác nhận '+blocking+'.'),error:e=>this.fail(e,'Không xác nhận được booking.')});
   }
-  cancelBooking(x:any){
+  async cancelBooking(x:any){
     const code=x.confirmation_number||x.blocking_number||x.pnr_code;
-    if(!code||!confirm('Hủy booking '+code+' theo chính sách hiện hành?'))return;
+    if(!code)return;
+    const confirmed=await this.toast.confirm({
+      titleVi:'Hủy booking?',
+      titleEn:'Cancel booking?',
+      messageVi:'Hủy booking '+code+' theo chính sách hiện hành?',
+      messageEn:'Cancel booking '+code+' under the current policy?',
+      confirmVi:'Hủy booking',
+      confirmEn:'Cancel booking',
+    });
+    if(!confirmed)return;
     this.busy=true;
     this.api.cancel(code).subscribe({next:r=>this.done('Đã hủy booking. Mã hủy: '+(r?.cancellation_number||'đã tạo')+'.'),error:e=>this.fail(e,'Không hủy được booking.')});
   }
@@ -243,6 +330,26 @@ export class AdminListComponent implements OnInit{
   inventoryPayload(e:any,cabin:string,target:number,price:number){
     const old=this.inventory(e,cabin),beforeAllocated=Number(old?.allocated_seats||0),beforeAvailable=Number(old?.available_seats||0);
     return{cabin_class:cabin,is_smoking:false,bucket_code:old?.bucket_code||cabin[0],base_price:Math.max(0,Number(price||0)),allocated_seats:target,available_seats:this.editorMode==='create'?target:Math.max(0,beforeAvailable+(target-beforeAllocated))};
+  }
+  get selectedFlightLayout(){return this.layouts.find(a=>a.aircraft_type===this.editor?.aircraft_code)||null}
+  layoutCapacity(cabin:string){return Number(this.selectedFlightLayout?.cabin_capacities?.[cabin]||0)}
+  soldSeats(inv:any){return Math.max(0,Number(inv?._original_allocated??inv?.allocated_seats??0)-Number(inv?._original_available??inv?.available_seats??0))}
+  flightAircraftChanged(initial=false){
+    if(!this.editor)return;
+    const layout=this.selectedFlightLayout;if(!layout)return;
+    const current:any[]=Array.isArray(this.editor.inventory_rows)?this.editor.inventory_rows:[];
+    const byCabin=new Map(current.map(inv=>[inv.cabin_class,inv]));
+    const next:any[]=[];
+    for(const cabin of (layout.supported_cabins||Object.keys(layout.cabin_capacities||{}))){
+      const old:any=byCabin.get(cabin);
+      if(old){next.push(old);continue}
+      const cap=Number(layout.cabin_capacities?.[cabin]||0);
+      next.push({cabin_class:cabin,allocated_seats:initial?(cabin==='ECONOMY'?cap:0):0,available_seats:initial?(cabin==='ECONOMY'?cap:0):0,base_price:0,bucket_code:String(cabin)[0],_original_allocated:0,_original_available:0});
+    }
+    for(const old of current){
+      if(!next.some(inv=>inv.cabin_class===old.cabin_class)&&this.soldSeats(old)>0)next.push(old);
+    }
+    this.editor.inventory_rows=next;
   }
   parseIso(v:any){const s=String(v||'').trim();if(!/(Z|[+-]\d{2}:\d{2})$/i.test(s))return null;const d=new Date(s);return isNaN(d.getTime())?null:d}
   iso(v:any){if(!v)return'';const d=new Date(v);return isNaN(d.getTime())?String(v):d.toISOString()}

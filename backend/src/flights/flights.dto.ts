@@ -173,6 +173,11 @@ export class UpdateFlightDto {
   distance_miles?: number;
 
   @IsOptional()
+  @ValidateNested()
+  @Type(() => AircraftDto)
+  aircraft?: AircraftDto;
+
+  @IsOptional()
   @IsEnum(FlightStatus)
   status?: FlightStatus;
 

@@ -1,6 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 import { CabinClass } from '../flights.schema';
+import { PricingProfileSnapshot } from '../../common/pricing-profile.types';
+import type { SeatPricingProfileSnapshot } from '../../seat-allocation/seat-pricing-profile.schema';
 
 export type ScheduleTemplateDocument = ScheduleTemplate & Document;
 
@@ -61,6 +63,18 @@ export class ScheduleTemplate {
   // Commercial inventory allocation (Defect 1 & 7)
   @Prop({ type: [CommercialInventoryConfigSchema], default: [] })
   commercial_inventories?: CommercialInventoryConfig[];
+
+  @Prop({ required: false, trim: true, index: true })
+  pricing_profile_id?: string;
+
+  @Prop({ type: Object, required: false })
+  pricing_profile_snapshot?: PricingProfileSnapshot;
+
+  @Prop({ required: false, trim: true, index: true })
+  seat_pricing_profile_id?: string;
+
+  @Prop({ type: Object, required: false })
+  seat_pricing_profile_snapshot?: SeatPricingProfileSnapshot;
 
   // Provenance fields (Phase C1: AirLabs-Backed Commercial Flight Foundation)
   @Prop({ default: 'LEGACY_SYNTHETIC', trim: true })

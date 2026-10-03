@@ -30,6 +30,12 @@ import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
+import { RevenuePricingService } from './revenue-pricing.service';
+import {
+  AssignPricingProfileDto,
+  CreatePricingProfileDto,
+  UpdatePricingProfileDto,
+} from './pricing-profile.dto';
 
 // Admin roles allowed to mutate flight data (create/update/delete/status) and trigger AirLabs enrichment
 const ADMIN_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN];
@@ -42,6 +48,7 @@ export class FlightsController {
     private readonly flightsService: FlightsService,
     private readonly flightGeneratorService?: FlightGeneratorService,
     private readonly airlabsCommercialService?: AirlabsCommercialService,
+    private readonly revenuePricingService?: RevenuePricingService,
   ) {}
 
   @Get('search')
@@ -177,6 +184,46 @@ export class FlightsController {
   async getBookingWindow() {
     const { getBookingWindowLimits } = await import('../common/pricing.util');
     return getBookingWindowLimits();
+  }
+
+  @Get('pricing-profiles')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async listPricingProfiles() {
+    if (!this.revenuePricingService) throw new BadRequestException('RevenuePricingService is not available');
+    return this.revenuePricingService.listProfiles();
+  }
+
+  @Post('pricing-profiles')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async createPricingProfile(@Body() dto: CreatePricingProfileDto) {
+    if (!this.revenuePricingService) throw new BadRequestException('RevenuePricingService is not available');
+    return this.revenuePricingService.createProfile(dto);
+  }
+
+  @Patch('pricing-profiles/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async updatePricingProfile(@Param('id') id: string, @Body() dto: UpdatePricingProfileDto) {
+    if (!this.revenuePricingService) throw new BadRequestException('RevenuePricingService is not available');
+    return this.revenuePricingService.updateProfile(id, dto);
+  }
+
+  @Post('pricing-profiles/:id/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async assignPricingProfile(@Param('id') id: string, @Body() dto: AssignPricingProfileDto) {
+    if (!this.revenuePricingService) throw new BadRequestException('RevenuePricingService is not available');
+    return this.revenuePricingService.assignProfile(id, dto);
+  }
+
+  @Delete('pricing-profiles/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLES)
+  async deletePricingProfile(@Param('id') id: string) {
+    if (!this.revenuePricingService) throw new BadRequestException('RevenuePricingService is not available');
+    return this.revenuePricingService.deleteProfile(id);
   }
 
   // --- Phase C1: AirLabs-Backed Commercial Flight Endpoints (Admin) ---

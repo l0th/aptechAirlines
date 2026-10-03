@@ -200,3 +200,23 @@ User yêu cầu phiên này làm liền một mạch thay vì dừng sau từng 
 - `git diff --check`: **PASS**.
 - Đã thêm `docs/CLASSROOM-TEST-CHECKLIST.md` để bạn cùng lớp có thể test Guest -> Customer -> Clerk -> Admin -> quay lại Customer theo yêu cầu 1, 2, 3.1-3.10.
 - Tại thời điểm ghi checkpoint này chưa commit/push; bước tiếp theo chính xác là stage toàn bộ source/project docs hợp lệ, loại các file local không thuộc source (`node_modules` symlink, RTF/RTFD ghi chú phiên), commit trên `frontend-v2`, push `origin/frontend-v2`, rồi xác nhận HEAD và ahead/behind.
+
+## UI / flow regression continuation - 2026-10-02
+
+- Branch vẫn là `frontend-v2`; không reset/revert và không commit/push trong phiên này.
+- Live Playwright smoke test trên app local:
+  - Guest homepage + public lookup: PASS, không console/page error, desktop không horizontal overflow.
+  - CLERK `e2e_clerk`: login PASS, Reservation Desk render PASS, truy cập `/admin/users` bị chặn/redirect đúng.
+  - ADMIN `e2e_admin`: login PASS; Users, Flights, Airports, Policies, Commercial, Fare Pricing, Seat Pricing, Seat Operations đều render PASS, không console/page error, desktop không horizontal overflow.
+  - `e2e_customer` hiện trả 401 với mật khẩu checklist, trong khi `e2e_customer_gold`, `e2e_clerk`, `e2e_admin` đều authenticate được bằng `E2ePass@2026`. Source seed vẫn khai báo và upsert đúng password hash cho `e2e_customer`, nên đây là trạng thái DB test hiện tại chứ chưa có bằng chứng là auth regression.
+  - Dùng `e2e_customer_gold` đã đi được Home -> Results -> Passenger -> Seat; primary passenger prefill đúng `Gold Customer`. Một số assertion visibility/map trong script đầu chạy quá sớm nên không dùng làm kết luận lỗi UI; lần browser rerun sâu hơn bị tool execution restriction nên chưa claim full click-through tới Review.
+- Verification source hiện tại:
+  - Backend `npm run build`: PASS.
+  - Frontend host `npm run build`: PASS; Angular bundle generation hoàn tất thành công.
+  - `git diff --check`: PASS.
+  - Focused regression cho pricing profile, seat pricing/profile, airports, policies, AirLabs commercial, flights admin/revenue pricing: **8/8 suites, 99/99 tests PASS**.
+  - Full backend Jest với `JWT_SECRET` test-only và `TEST_MONGO_URI=mongodb://127.0.0.1:27018/airline_codex_full_20261002`: **38/38 suites, 826/826 tests PASS**.
+- Bước tiếp theo chính xác khi tiếp tục UI test:
+  1. Không reseed giữa lúc đang giữ state test tay hiện tại.
+  2. Nếu muốn reset bộ classroom test về trạng thái deterministic, chạy seed E2E trước khi bắt đầu vòng test mới; việc này sẽ phục hồi password của `e2e_customer` nhưng đồng thời reset dataset E2E.
+  3. Tiếp tục manual/live browser từ Customer flow (Results -> Passenger -> Seat -> Review -> Hold/Buy), sau đó kiểm tra round-trip/connecting và viewport mobile.

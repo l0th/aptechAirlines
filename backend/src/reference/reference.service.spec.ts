@@ -1419,6 +1419,38 @@ describe('ReferenceService - AirLabs Route Data Foundation (Phase A Final Consis
   });
 
   describe('10. Global Autocomplete with Unserved Reference Airports & Internal Source Isolation', () => {
+    it.each(['hà nội', 'Hà Nội', 'ha noi'])(
+      'suggest(%s) returns HAN regardless of Vietnamese diacritics',
+      async (query) => {
+        const han = {
+          iata_code: 'HAN',
+          airport_name: 'Noi Bai International Airport',
+          city_name: 'Ha Noi',
+          country_code: 'VN',
+          time_zone: 'Asia/Ho_Chi_Minh',
+          is_serviced_directly: true,
+        };
+
+        airportModel.find.mockImplementation((filter: any) => {
+          if (filter?.is_serviced_directly === true) {
+            return { exec: jest.fn().mockResolvedValue([han]) };
+          }
+          const cityRegex = filter?.$or?.find((entry: any) => entry.city_name)?.city_name;
+          const matches = cityRegex instanceof RegExp && cityRegex.test(han.city_name) ? [han] : [];
+          return {
+            limit: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue(matches),
+            }),
+            exec: jest.fn().mockResolvedValue(matches),
+          };
+        });
+
+        const res = await service.suggest(query);
+
+        expect(res.airports.map((airport) => airport.iata_code)).toContain('HAN');
+      },
+    );
+
     it('suggest() returns both serviced and unserved airports, exposing nearest hub info and VI/EN labels', async () => {
       const mockAirports = [
         {

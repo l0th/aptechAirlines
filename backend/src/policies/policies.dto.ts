@@ -1,4 +1,4 @@
-import { IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class CreatePolicyDto {
   @IsInt()
@@ -8,16 +8,16 @@ export class CreatePolicyDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  max_days_before?: number;
+  max_days_before?: number | null;
 
   @IsNumber()
   @Min(0)
   @Max(100)
   refund_percentage: number;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  description: string;
+  description?: string;
 
   @IsOptional()
   @IsString()
@@ -33,7 +33,7 @@ export class UpdatePolicyDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  max_days_before?: number;
+  max_days_before?: number | null;
 
   @IsOptional()
   @IsNumber()

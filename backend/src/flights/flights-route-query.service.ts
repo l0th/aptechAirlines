@@ -23,7 +23,7 @@ import {
 import { AirportsService } from '../airports/airports.service';
 import { Booking, BookingDocument, BookingStatus, PaymentMethod } from '../bookings/bookings.schema';
 import { localWallTimeToUtc, parseUtcWallTime, localDateKey, utcOffsetMinutes, formatLocalTime } from '../common/timezone.util';
-import { earlyBirdQuote, getBookingWindowLimits, maxAdvanceBookingDays } from '../common/pricing.util';
+import { applyPricing, getBookingWindowLimits, inventoryLoadFactor, maxAdvanceBookingDays } from '../common/pricing.util';
 
 import { ReferenceService } from '../reference/reference.service';
 import { RouteGraphCoverage, RouteGraphResult, RouteGraphService } from '../reference/route-graph.service';
@@ -108,17 +108,21 @@ export class FlightsRouteQueryService extends FlightsServicePart {
       const arrOffset = utcOffsetMinutes(fl.scheduled_arrival, destTz);
 
       const daysUntilDeparture = Math.max(0, (fl.scheduled_departure.getTime() - now) / 86400000);
-      const earlyBird = earlyBirdQuote(daysUntilDeparture);
-
       for (const inv of fl.inventories) {
         if (cabinClass && inv.cabin_class !== cabinClass) continue;
         if (isSmoking !== undefined && inv.is_smoking !== isSmoking) continue;
         if (inv.available_seats < totalPassengers) continue;
 
-        const discountedBase = inv.base_price * earlyBird.multiplier;
-        const adultPrice = Math.round(discountedBase);
-        const childPrice = Math.round(discountedBase * 0.75);
-        const seniorPrice = Math.round(discountedBase * 0.85);
+        const pricing = applyPricing(
+          inv.base_price,
+          daysUntilDeparture,
+          0,
+          (fl as any).pricing_profile_snapshot,
+          inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+        );
+        const adultPrice = pricing.final_price;
+        const childPrice = Math.round(adultPrice * 0.75);
+        const seniorPrice = Math.round(adultPrice * 0.85);
         const totalPartyPrice =
           adults * adultPrice + children * childPrice + seniors * seniorPrice;
 
@@ -150,9 +154,14 @@ export class FlightsRouteQueryService extends FlightsServicePart {
           available_seats: inv.available_seats,
           base_price_per_adult: adultPrice,
           total_party_price: totalPartyPrice,
-          early_bird_percent: earlyBird.percent,
-          early_bird_label: earlyBird.label,
-          early_bird_label_en: earlyBird.label_en,
+          early_bird_percent: pricing.early_bird_percent,
+          early_bird_label: pricing.early_bird_label,
+          early_bird_label_en: pricing.early_bird_label_en,
+          load_factor_percent: pricing.load_factor_percent,
+          load_adjustment_percent: pricing.load_adjustment_percent,
+          load_adjustment_label: pricing.load_adjustment_label,
+          pricing_profile_id: pricing.pricing_profile_id,
+          pricing_profile_name: pricing.pricing_profile_name,
           days_until_departure: Math.floor(daysUntilDeparture),
         });
       }
@@ -199,8 +208,6 @@ export class FlightsRouteQueryService extends FlightsServicePart {
       const oTz = await getTz(leg.origin_iata);
       const dTz = await getTz(leg.dest_iata);
       const daysUntilDeparture = leg.scheduled_departure ? Math.max(0, (new Date(leg.scheduled_departure).getTime() - now) / 86400000) : 0;
-      const earlyBird = earlyBirdQuote(daysUntilDeparture);
-
       const mappedInventories = leg.inventories
         .filter(
           (i: any) =>
@@ -209,18 +216,30 @@ export class FlightsRouteQueryService extends FlightsServicePart {
         )
         .map((inv: any) => {
             const rawInv = typeof inv.toObject === 'function' ? inv.toObject() : inv;
-            const discountedBase = Math.round(inv.base_price * earlyBird.multiplier);
-            const childPrice = Math.round(discountedBase * 0.75);
-            const seniorPrice = Math.round(discountedBase * 0.85);
-            const totalPartyPrice = adults * discountedBase + children * childPrice + seniors * seniorPrice;
+            const pricing = applyPricing(
+              inv.base_price,
+              daysUntilDeparture,
+              0,
+              leg.pricing_profile_snapshot,
+              inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+            );
+            const adultPrice = pricing.final_price;
+            const childPrice = Math.round(adultPrice * 0.75);
+            const seniorPrice = Math.round(adultPrice * 0.85);
+            const totalPartyPrice = adults * adultPrice + children * childPrice + seniors * seniorPrice;
 
             return {
                 ...rawInv,
-                base_price_per_adult: discountedBase,
+                base_price_per_adult: adultPrice,
                 total_party_price: totalPartyPrice,
-                early_bird_percent: earlyBird.percent,
-                early_bird_label: earlyBird.label,
-                early_bird_label_en: earlyBird.label_en,
+                early_bird_percent: pricing.early_bird_percent,
+                early_bird_label: pricing.early_bird_label,
+                early_bird_label_en: pricing.early_bird_label_en,
+                load_factor_percent: pricing.load_factor_percent,
+                load_adjustment_percent: pricing.load_adjustment_percent,
+                load_adjustment_label: pricing.load_adjustment_label,
+                pricing_profile_id: pricing.pricing_profile_id,
+                pricing_profile_name: pricing.pricing_profile_name,
                 days_until_departure: Math.floor(daysUntilDeparture)
             };
         });

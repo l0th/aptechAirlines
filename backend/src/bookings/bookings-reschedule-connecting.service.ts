@@ -9,7 +9,7 @@ import {
 } from './bookings.schema';
 import { RescheduleTicketDto } from './bookings.dto';
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
-import { applyPricing } from '../common/pricing.util';
+import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
 import {
   BookingSeatSagaOperationDocument,
   SagaOperationType,
@@ -273,7 +273,13 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
           0,
           (new Date(fl.scheduled_departure).getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
         );
-        const pricing = applyPricing(inv.base_price, daysUntil, user.sky_miles || 0);
+        const pricing = applyPricing(
+          inv.base_price,
+          daysUntil,
+          user.sky_miles || 0,
+          (fl as any).pricing_profile_snapshot,
+          inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
+        );
 
         newTotalMiles += fl.distance_miles * passengerCount;
 

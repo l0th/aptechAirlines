@@ -10,6 +10,7 @@ import { RouteRef, RouteRefDocument } from '../reference/reference.schema';
 import { ScheduleTemplate, ScheduleTemplateDocument } from './schemas/schedule-template.schema';
 import { Flight, FlightDocument } from './flights.schema';
 import { Airport, AirportDocument } from '../airports/airports.schema';
+import { AirportsService } from '../airports/airports.service';
 import { FlightGeneratorService, GenerationStats } from './flight-generator.service';
 import {
   CommercializeRouteDto,
@@ -46,6 +47,7 @@ export class AirlabsCommercialService {
     @InjectModel(Flight.name) private flightModel: Model<FlightDocument>,
     @InjectModel(Airport.name) private airportModel: Model<AirportDocument>,
     private flightGeneratorService: FlightGeneratorService,
+    private airportsService: AirportsService,
   ) {}
 
   /**
@@ -245,6 +247,15 @@ export class AirlabsCommercialService {
     this.validateProviderTimeFormat('dep_time_utc', depTimeUtc);
     this.validateProviderTimeFormat('arr_time', arrTime);
     this.validateProviderTimeFormat('arr_time_utc', arrTimeUtc);
+
+    // Network discovery can resolve airports from curated reference data even when the
+    // MongoDB airport document does not exist yet. Provision both endpoints before any
+    // timezone-sensitive validation so commercialization and later materialization use
+    // the same authoritative airport/timezone records.
+    await Promise.all([
+      this.airportsService.ensureAirportReference(depIata),
+      this.airportsService.ensureAirportReference(arrIata),
+    ]);
 
     // Validate provider local vs UTC consistency if both local and UTC values are supplied (Issue 3)
     if ((depTime && depTimeUtc) || (arrTime && arrTimeUtc)) {
@@ -530,6 +541,19 @@ export class AirlabsCommercialService {
 
     if (dto.aircraft_type) {
       template.aircraft_type = layout.aircraft_type;
+      const seatProfile = (template as any).seat_pricing_profile_snapshot;
+      if (
+        seatProfile?.aircraft_type &&
+        seatProfile.aircraft_type !== 'ALL' &&
+        seatProfile.aircraft_type !== layout.aircraft_type
+      ) {
+        if (typeof (template as any).set === 'function') {
+          (template as any).set('seat_pricing_profile_id', undefined);
+          (template as any).set('seat_pricing_profile_snapshot', undefined);
+        }
+        (template as any).seat_pricing_profile_id = undefined;
+        (template as any).seat_pricing_profile_snapshot = undefined;
+      }
     }
 
     // Validate effective cabin classes against target aircraft layout
@@ -700,6 +724,13 @@ export class AirlabsCommercialService {
         `Cannot materialize inactive commercial template: "${template.template_id}"`,
       );
     }
+
+    // Self-heal templates commercialized before airport auto-provisioning was added.
+    // This makes existing SGN->HKG / HKG->LAX templates materializable without manual DB edits.
+    await Promise.all([
+      this.airportsService.ensureAirportReference(template.origin_iata),
+      this.airportsService.ensureAirportReference(template.dest_iata),
+    ]);
 
     return this.flightGeneratorService.generateForTemplate(template, startDateStr, daysAhead);
   }
