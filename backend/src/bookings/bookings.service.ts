@@ -349,7 +349,7 @@ export class BookingsService {
     }
     if (!isCustomerBookableFlight(flight)) {
       throw new BadRequestException(
-        `Cannot ${context} flight ${flight.flight_number}: only AirLabs-backed Aptech commercial flights are customer-bookable.`,
+        `Cannot ${context} flight ${flight.flight_number}: only approved Aptech commercial or admin-created flights are customer-bookable.`,
       );
     }
   }

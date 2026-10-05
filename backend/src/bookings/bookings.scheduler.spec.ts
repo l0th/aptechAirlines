@@ -38,6 +38,7 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
 
     mailService = {
       sendBlockedTicketReminder: jest.fn(),
+      sendUpcomingTripReminder: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -268,6 +269,38 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
       // Hold deadline formatted in earliest flight's origin timezone (UTC 03:00 + 7 = 10:00)
       expect(body).toContain('<strong>Payment deadline:</strong> 2026-10-25 10:00 (Asia/Ho_Chi_Minh)');
       expect(body).not.toContain('<strong>Payment deadline:</strong> 2026-10-25 12:00 (Asia/Tokyo)');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('Case 6: confirmed trip within 3 days receives one upcoming-trip reminder per itinerary fingerprint', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-10-20T00:00:00.000Z'));
+    try {
+      const dep = new Date('2026-10-22T01:00:00.000Z');
+      const arr = new Date('2026-10-22T03:00:00.000Z');
+      flightsService.findById.mockResolvedValue({
+        flight_number: 'APT9001', origin_iata: 'SGN', dest_iata: 'HAN', scheduled_departure: dep, scheduled_arrival: arr,
+      });
+      flightsService.getAirportTimeZone.mockResolvedValue('Asia/Ho_Chi_Minh');
+      mailService.sendUpcomingTripReminder.mockResolvedValue(true);
+
+      const mockBooking: any = {
+        pnr_code: 'PNR-UPCOMING', confirmation_number: 'CNF-UPCOMING', status: BookingStatus.CONFIRMED,
+        user_id: { email: 'upcoming@example.com', first_name: 'An', last_name: 'Nguyen' },
+        ticket_coupons: [{ flight_id: 'f-upcoming', flight_number: 'APT9001', inventory_id: 'i1', cabin_class: 'ECONOMY', coupon_status: 'ACTIVE' }],
+        save: jest.fn().mockResolvedValue(true),
+      };
+      bookingModel.find.mockReturnValue({ populate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([mockBooking]) }) });
+
+      expect(await scheduler.sendUpcomingTripReminders()).toBe(1);
+      expect(mailService.sendUpcomingTripReminder).toHaveBeenCalledTimes(1);
+      expect(mockBooking.departure_reminder_key).toContain('f-upcoming');
+      expect(mockBooking.save).toHaveBeenCalledTimes(1);
+
+      expect(await scheduler.sendUpcomingTripReminders()).toBe(0);
+      expect(mailService.sendUpcomingTripReminder).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }

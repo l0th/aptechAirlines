@@ -1,11 +1,11 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Booking, BookingDocument, BookingStatus } from './bookings.schema';
 import { BookingsService } from './bookings.service';
 import { FlightsService } from '../flights/flights.service';
-import { MailService, escapeHtml } from '../mail/mail.service';
+import { ItineraryLegData, MailService, escapeHtml } from '../mail/mail.service';
 import { formatLocalTime } from '../common/timezone.util';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
@@ -35,6 +35,7 @@ export class BookingsScheduler {
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledJobs(): Promise<void> {
     await this.sendPendingReminders();
+    await this.sendUpcomingTripReminders();
     await this.autoCancelExpiredBlocks();
     await this.reconcileStaleSagaOperations();
     await this.recoverUnconfirmedSeatAllocations();
@@ -99,6 +100,130 @@ export class BookingsScheduler {
       }
     }
     return sent;
+  }
+
+  /**
+   * Sends a customer reminder when a confirmed trip is within 3 days of its
+   * next active departure. The itinerary fingerprint prevents duplicate hourly
+   * sends but still allows a new reminder after a reschedule changes the trip.
+   */
+  async sendUpcomingTripReminders(): Promise<number> {
+    const now = new Date();
+    const threeDaysFromNow = new Date(now.getTime() + 3 * DAY_MS);
+    const candidates = await this.bookingModel
+      .find({ status: { $in: [BookingStatus.CONFIRMED, BookingStatus.RESCHEDULED] } })
+      .populate('user_id', 'email first_name last_name')
+      .exec();
+
+    let sent = 0;
+    for (const booking of candidates) {
+      try {
+        const itinerary = await this.resolveActiveItinerary(booking);
+        if (itinerary.earliestDeparture <= now || itinerary.earliestDeparture > threeDaysFromNow) continue;
+        if (booking.departure_reminder_key === itinerary.key) continue;
+        if (await this.sendUpcomingForBooking(booking, itinerary)) sent++;
+      } catch (err: any) {
+        this.logger.error(`Failed to send upcoming-trip reminder for ${booking.pnr_code}: ${err?.message || err}`);
+      }
+    }
+    return sent;
+  }
+
+  /** Admin/demo action: send the correct reminder template for one booking now. */
+  async sendManualReminder(bookingId: string): Promise<{ type: 'HOLD_PAYMENT' | 'UPCOMING_TRIP'; message: string }> {
+    const booking = await this.bookingModel
+      .findById(bookingId)
+      .populate('user_id', 'email first_name last_name')
+      .exec();
+    if (!booking) throw new NotFoundException('Booking not found.');
+
+    const user: any = booking.user_id as any;
+    if (!user?.email) throw new BadRequestException('Customer does not have an email address.');
+
+    if (booking.status === BookingStatus.BLOCKED) {
+      const earliestDeparture = await this.bookingsService.getEarliestDeparture(booking);
+      const body = await this.buildReminderBody(booking, user, earliestDeparture);
+      const ok = await this.mailService.sendBlockedTicketReminder(user.email, body);
+      if (!ok) throw new BadRequestException('Email delivery failed. Check SMTP configuration/logs.');
+      booking.is_reminder_sent = true;
+      await booking.save();
+      return { type: 'HOLD_PAYMENT', message: `Đã gửi email nhắc thanh toán cho ${booking.pnr_code}.` };
+    }
+
+    if (booking.status === BookingStatus.CONFIRMED || booking.status === BookingStatus.RESCHEDULED) {
+      const itinerary = await this.resolveActiveItinerary(booking);
+      const ok = await this.sendUpcomingForBooking(booking, itinerary);
+      if (!ok) throw new BadRequestException('Email delivery failed. Check SMTP configuration/logs.');
+      return { type: 'UPCOMING_TRIP', message: `Đã gửi email nhắc lịch bay cho ${booking.pnr_code}.` };
+    }
+
+    throw new BadRequestException('Only BLOCKED, CONFIRMED, or RESCHEDULED bookings can receive reminders.');
+  }
+
+  private async sendUpcomingForBooking(
+    booking: BookingDocument,
+    itinerary: Awaited<ReturnType<BookingsScheduler['resolveActiveItinerary']>>,
+  ): Promise<boolean> {
+    const user: any = booking.user_id as any;
+    if (!user?.email) return false;
+    const passengerName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Customer';
+    const departureTimeFormatted = itinerary.legs[0]?.departureTimeFormatted || itinerary.earliestDeparture.toISOString();
+    const ok = await this.mailService.sendUpcomingTripReminder({
+      toEmail: user.email,
+      passengerName,
+      bookingReference: booking.pnr_code,
+      confirmationNumber: booking.confirmation_number,
+      departureTimeFormatted,
+      itinerary: itinerary.legs,
+    });
+    if (!ok) return false;
+    booking.departure_reminder_key = itinerary.key;
+    await booking.save();
+    this.logger.log(`Upcoming-trip reminder sent for booking ${booking.pnr_code} (${user.email})`);
+    return true;
+  }
+
+  private async resolveActiveItinerary(booking: BookingDocument): Promise<{
+    earliestDeparture: Date;
+    key: string;
+    legs: ItineraryLegData[];
+  }> {
+    const coupons = (booking.ticket_coupons || []).filter(
+      (coupon: any) => !['CANCELLED', 'RESCHEDULED'].includes(String(coupon.coupon_status || 'ACTIVE').toUpperCase()),
+    );
+    const seen = new Set<string>();
+    const resolved: Array<{ departure: Date; key: string; leg: ItineraryLegData }> = [];
+    for (const coupon of coupons) {
+      const flightId = coupon.flight_id?.toString();
+      if (!flightId || seen.has(flightId)) continue;
+      seen.add(flightId);
+      const flight = await this.flightsService.findById(flightId);
+      const departure = new Date(flight.scheduled_departure);
+      if (Number.isNaN(departure.getTime())) continue;
+      const originTz = await this.flightsService.getAirportTimeZone(flight.origin_iata);
+      const destinationTz = await this.flightsService.getAirportTimeZone(flight.dest_iata);
+      const depLocal = formatLocalTime(flight.scheduled_departure, originTz);
+      const arrLocal = formatLocalTime(flight.scheduled_arrival, destinationTz);
+      resolved.push({
+        departure,
+        key: `${flightId}:${departure.toISOString()}`,
+        leg: {
+          flightNumber: flight.flight_number,
+          origin: flight.origin_iata,
+          destination: flight.dest_iata,
+          cabinClass: coupon.cabin_class,
+          departureTimeFormatted: depLocal ? `${depLocal} (${originTz})` : departure.toISOString(),
+          arrivalTimeFormatted: arrLocal ? `${arrLocal} (${destinationTz})` : undefined,
+        },
+      });
+    }
+    resolved.sort((a, b) => a.departure.getTime() - b.departure.getTime());
+    if (!resolved.length) throw new BadRequestException('Booking has no active future itinerary to remind.');
+    return {
+      earliestDeparture: resolved[0].departure,
+      key: resolved.map((x) => x.key).join('|'),
+      legs: resolved.map((x) => x.leg),
+    };
   }
 
   /**
@@ -188,19 +313,24 @@ export class BookingsScheduler {
     }
 
     return `
-      <h2>Blocked Ticket Reminder</h2>
-      <p>Dear ${escapeHtml(passengerName)},</p>
-      <p>This is a reminder that you have a <strong>blocked (unpaid) ticket</strong> with departure on
-      <strong>${escapeHtml(earliestStr)}</strong> — 3 weeks or less away.</p>
-      <p><strong>Booking reference (PNR):</strong> ${escapeHtml(booking.pnr_code)}<br/>
-      <strong>Blocking number:</strong> ${escapeHtml(booking.blocking_number || '-')}<br/>
-      <strong>Payment deadline:</strong> ${escapeHtml(deadlineStr)}</p>
-      <p>Your itinerary:</p>
-      <ul>${lines.join('')}</ul>
-      <p>Please confirm your ticket before the payment deadline. If you do not confirm in time,
-      the reservation will be automatically cancelled and the seats will be released.</p>
-      <p>Thank you for flying with us.</p>
-    `;
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
+        <div style="background:#071b2e;color:#fff;padding:22px 24px;border-radius:14px 14px 0 0">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f2c85f">APTECH AIRLINES</div>
+          <h2 style="margin:8px 0 0">Nhắc thanh toán vé đang giữ chỗ</h2>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-top:0;padding:24px;border-radius:0 0 14px 14px">
+          <p>Xin chào ${escapeHtml(passengerName)},</p>
+          <p>Bạn đang có một vé <strong>giữ chỗ chưa thanh toán</strong>. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(earliestStr)}</strong>.</p>
+          <div style="background:#fff7df;border:1px solid #efd783;padding:14px;border-radius:12px;margin:16px 0">
+            <div><strong>PNR:</strong> ${escapeHtml(booking.pnr_code)}</div>
+            <div><strong>Mã giữ chỗ:</strong> ${escapeHtml(booking.blocking_number || '-')}</div>
+            <div><strong>Payment deadline:</strong> ${escapeHtml(deadlineStr)}<br/><span style="color:#64748b;font-size:12px">Hạn xác nhận & thanh toán</span></div>
+          </div>
+          <p><strong>Hành trình:</strong></p><ul>${lines.join('')}</ul>
+          <p>Vui lòng xác nhận vé trước hạn. Nếu quá hạn, hệ thống sẽ tự động hủy giữ chỗ và hoàn ghế về kho.</p>
+          <p style="color:#64748b;font-size:12px;margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px">Aptech Airlines • Thông báo giữ chỗ tự động • Vui lòng không trả lời trực tiếp email này.</p>
+        </div>
+      </div>`;
   }
 
   /**

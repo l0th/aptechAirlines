@@ -346,11 +346,11 @@ describe('Admin Commercial Network Discovery (Phase C3.1+ Invariants)', () => {
     expect(res.itineraries[0].legs[0].is_bookable).toBe(false);
   });
 
-  // 11. existing C2 customer filter remains unchanged
-  it('11. customer bookable filter enforces operator=APTECH_AIRLINES and data_source=AIRLABS_COMMERCIALIZED', () => {
+  // 11. customer search accepts approved commercialized and admin-created flights
+  it('11. customer bookable filter enforces operator=APTECH_AIRLINES and approved data sources', () => {
     const filter = require('./flights.schema').getCustomerBookableFlightFilter();
     expect(filter.operator).toBe('APTECH_AIRLINES');
-    expect(filter.data_source).toBe('AIRLABS_COMMERCIALIZED');
+    expect(filter.data_source).toEqual({ $in: ['AIRLABS_COMMERCIALIZED', 'ADMIN_MANUAL'] });
     expect(filter.is_bookable).toBe(true);
     expect(filter.status).toEqual({ $ne: 'CANCELLED' });
   });

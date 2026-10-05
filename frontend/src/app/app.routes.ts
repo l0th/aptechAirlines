@@ -24,6 +24,7 @@ export const routes:Routes=[
   {path:'analytics',canActivate:[adminGuard],loadComponent:()=>import('./admin/dashboard.component').then(m=>m.DashboardComponent)},
   {path:'bookings',loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.BookingsAdminComponent)},
   {path:'users',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.UsersAdminComponent)},
+  {path:'staff',canActivate:[adminGuard],loadComponent:()=>import('./admin/staff-management.component').then(m=>m.StaffManagementComponent)},
   {path:'flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.FlightsAdminComponent)},
   {path:'airports',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.AirportsAdminComponent)},
   {path:'policies',canActivate:[adminGuard],loadComponent:()=>import('./admin/policies.component').then(m=>m.PoliciesComponent)},

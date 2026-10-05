@@ -7,6 +7,7 @@ import { JwtAuthGuard } from './auth.guard';
 import { RolesGuard } from './roles.guard';
 import { StrictCustomerGuard } from './strict-customer.guard';
 import { UsersModule } from '../users/users.module';
+import { MailModule } from '../mail/mail.module';
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ function resolveJwtSecret(): string {
   imports: [
     // forwardRef: UsersModule also imports AuthModule (circular module graph)
     forwardRef(() => UsersModule),
+    MailModule,
     JwtModule.register({
       global: true,
       secret: resolveJwtSecret(),

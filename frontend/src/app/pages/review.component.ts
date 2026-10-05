@@ -63,11 +63,9 @@ import { PaypalService } from '../core/paypal.service';
       <aside class="card side">
         <h2>Tổng quan giá</h2>
         @if(isStaffBooking){
-          <div class="estimate-note">Giá tại quầy đang là mức tạm tính. Tổng cuối cùng sẽ được cập nhật theo hồ sơ khách hàng trước khi xác nhận vé.</div>
-          <div class="price-line"><span>Ước tính vé</span><strong>{{money(staffFareEstimate)}}</strong></div>
-          <div class="price-line"><span>Phụ phí ghế đã chọn</span><strong>{{money(state.seatFeeTotal())}}</strong></div>
-          <div class="total"><span>Ước tính</span><strong>{{money(staffFareEstimate+state.seatFeeTotal())}}</strong></div>
-        }@else if(!auth.authenticated()){
+          <div class="estimate-note">Báo giá được tính trực tiếp theo hồ sơ khách hàng đang được phục vụ, gồm SkyMiles, giá động và phụ phí ghế.</div>
+        }
+        @if(!auth.authenticated()){
           <div class="login-note">Đăng nhập để lấy báo giá theo SkyMiles và hoàn tất giao dịch.</div>
         }@else if(loadingQuote){
           <p class="muted">Đang cập nhật giá vé…</p>
@@ -159,7 +157,7 @@ export class ReviewComponent{
     },error:()=>this.syncDefaultPayment()});
     this.syncDefaultPayment();
 
-    if(!this.auth.authenticated()||this.isStaffBooking||this.auth.staff()){
+    if(!this.auth.authenticated()||(this.auth.staff()&&!this.isStaffBooking)){
       this.loadingQuote=false;
       return;
     }
@@ -176,7 +174,9 @@ export class ReviewComponent{
 
   loadQuote(){
     this.loadingQuote=true;this.error='';
-    this.api.quoteBooking(this.state.buildPayload(false,'PAYPAL')).subscribe({
+    const customerId=this.isStaffBooking?this.staffCustomer._id:'self';
+    const paymentMethod=this.isStaffBooking?'PROFILE_CARD':'PAYPAL';
+    this.api.quoteBooking(this.state.buildPayload(false,paymentMethod,customerId)).subscribe({
       next:q=>{this.quote=q;this.state.quote.set(q);this.loadingQuote=false},
       error:e=>{this.error=this.msg(e,'Không lấy được báo giá.');this.loadingQuote=false}
     });

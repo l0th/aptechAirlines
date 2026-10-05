@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
@@ -18,7 +18,7 @@ import { PaginationComponent } from '../shared/pagination.component';
 
     @if(!auth.authenticated()){
       <div class="card empty"><h2>Cần đăng nhập</h2><p class="muted">Đăng nhập để xem các chuyến đi của bạn.</p></div>
-    } @else if(loading){
+    } @else if(loading()) {
       <div class="card empty">Đang tải chuyến đi…</div>
     } @else {
       <div class="trip-list">
@@ -74,8 +74,8 @@ import { PaginationComponent } from '../shared/pagination.component';
           </article>
         }
       </div>
-      <app-pagination [total]="trips.length" [(page)]="page" [(pageSize)]="pageSize" [pageSizeOptions]="[5,10,20,50]" />
-      @if(!trips.length){<div class="card empty">Bạn chưa có booking nào.</div>}
+      <app-pagination [total]="trips().length" [(page)]="page" [(pageSize)]="pageSize" [pageSizeOptions]="[5,10,20,50]" />
+      @if(!trips().length){<div class="card empty">Bạn chưa có booking nào.</div>}
     }
 
     @if(message){<p class="success notice">{{message}}</p>}
@@ -151,11 +151,11 @@ export class TripsComponent {
   router = inject(Router);
   toast = inject(ToastService);
 
-  trips: any[] = [];
+  trips = signal<any[]>([]);
   policies: any[] = [];
   selected: any = null;
   selectedTracked: any = null;
-  loading = true;
+  loading = signal(true);
   busy = false;
   paypalEnabled = false;
   message = '';
@@ -167,7 +167,7 @@ export class TripsComponent {
 
   constructor() {
     if (this.auth.authenticated()) this.load();
-    else this.loading = false;
+    else this.loading.set(false);
     this.api.paypalConfig().subscribe({ next: r => this.paypalEnabled = !!r?.enabled, error: () => {} });
     this.api.policies().subscribe({ next: r => this.policies = r || [], error: () => {} });
   }
@@ -178,18 +178,19 @@ export class TripsComponent {
 
   get pagedTrips() {
     const start = (this.page - 1) * this.pageSize;
-    return this.trips.slice(start, start + this.pageSize);
+    return this.trips().slice(start, start + this.pageSize);
   }
 
   load() {
+    this.loading.set(true);
     this.api.myTrips().subscribe({
       next: r => {
-        this.trips = r || [];
+        this.trips.set(r || []);
         this.page = 1;
-        this.loading = false;
-        void this.loadSchedules(this.trips);
+        this.loading.set(false);
+        void this.loadSchedules(this.trips());
       },
-      error: e => { this.error = this.msg(e, 'Không tải được booking.'); this.loading = false; },
+      error: e => { this.error = this.msg(e, 'Không tải được booking.'); this.loading.set(false); },
     });
   }
 

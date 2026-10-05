@@ -5,6 +5,8 @@ export class ApiService{
  private http=inject(HttpClient); private base='/api';
  login(body:any){return this.http.post<any>(`${this.base}/auth/login`,body)}
  register(body:any){return this.http.post<any>(`${this.base}/auth/register`,body)}
+ forgotPassword(email:string){return this.http.post<any>(`${this.base}/auth/forgot-password`,{email})}
+ resetPassword(body:{email:string;code:string;new_password:string}){return this.http.post<any>(`${this.base}/auth/reset-password`,body)}
  me(){return this.http.get<any>(`${this.base}/auth/me`)}
  updateUser(id:string,body:any){return this.http.put<any>(`${this.base}/users/${id}`,body)}
  suggestLocations(q:string){return this.http.get<any>(`${this.base}/reference/suggest`,{params:{q}})}
@@ -35,7 +37,8 @@ export class ApiService{
  createUser(body:any){return this.http.post<any>(`${this.base}/users`,body)}
  deleteUser(id:string){return this.http.delete<any>(`${this.base}/users/${encodeURIComponent(id)}`)}
  bookings(){return this.http.get<any[]>(`${this.base}/bookings`)}
- runBookingScheduler(job:'run-reminders'|'run-expiry'){return this.http.post<any>(`${this.base}/bookings/scheduler/${job}`,{})}
+ runBookingScheduler(job:'run-reminders'|'run-travel-reminders'|'run-expiry'){return this.http.post<any>(`${this.base}/bookings/scheduler/${job}`,{})}
+ sendBookingReminder(id:string){return this.http.post<any>(`${this.base}/bookings/${encodeURIComponent(id)}/send-reminder`,{})}
  flights(){return this.http.get<any[]>(`${this.base}/flights`)}
  createFlight(body:any){return this.http.post<any>(`${this.base}/flights`,body)}
  updateFlight(id:string,body:any){return this.http.put<any>(`${this.base}/flights/${encodeURIComponent(id)}`,body)}

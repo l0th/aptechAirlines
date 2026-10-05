@@ -8,7 +8,15 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Flight, FlightDocument, FlightStatus, CabinClass, getCustomerBookableFlightFilter } from './flights.schema';
+import {
+  Flight,
+  FlightDocument,
+  FlightStatus,
+  CabinClass,
+  CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
+  CUSTOMER_BOOKABLE_OPERATOR,
+  getCustomerBookableFlightFilter,
+} from './flights.schema';
 import {
   CreateFlightDto,
   SearchFlightDto,
@@ -188,6 +196,12 @@ export class FlightsAdminService extends FlightsServicePart {
       origin_iata: createFlightDto.origin_iata.toUpperCase(),
       dest_iata: createFlightDto.dest_iata.toUpperCase(),
       status: FlightStatus.SCHEDULED,
+      operator: CUSTOMER_BOOKABLE_OPERATOR,
+      is_bookable: true,
+      data_source: CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
+      generated_source: 'admin_manual',
+      is_generated: false,
+      is_manually_modified: true,
     });
     return created.save();
   }

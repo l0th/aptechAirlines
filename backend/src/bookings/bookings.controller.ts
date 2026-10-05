@@ -57,8 +57,11 @@ export class BookingsController {
     @Req() req: { user: { sub: string; role: UserRole } },
     @Body() quoteBookingDto: QuoteBookingDto,
   ) {
-    quoteBookingDto.user_id = req.user.sub;
-    return this.bookingsService.quoteBooking(quoteBookingDto, req.user.sub);
+    const targetUserId = req.user.role === UserRole.CUSTOMER
+      ? req.user.sub
+      : quoteBookingDto.user_id || req.user.sub;
+    quoteBookingDto.user_id = targetUserId;
+    return this.bookingsService.quoteBooking(quoteBookingDto, targetUserId);
   }
 
   @Post('reschedule/quote')
@@ -242,12 +245,27 @@ export class BookingsController {
     return { message: `Reminder job finished. ${processed} reminder(s) sent.` };
   }
 
+  @Post('scheduler/run-travel-reminders')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async runTravelReminders() {
+    const processed = await this.bookingsScheduler.sendUpcomingTripReminders();
+    return { message: `Upcoming-trip reminder job finished. ${processed} reminder(s) sent.` };
+  }
+
   @Post('scheduler/run-expiry')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async runExpiry() {
     const processed = await this.bookingsScheduler.autoCancelExpiredBlocks();
     return { message: `Expiry job finished. ${processed} booking(s) auto-cancelled.` };
+  }
+
+  @Post(':id/send-reminder')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async sendBookingReminder(@Param('id') id: string) {
+    return this.bookingsScheduler.sendManualReminder(id);
   }
 
   @Get(':id')

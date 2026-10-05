@@ -12,6 +12,8 @@ import { Component, Input } from '@angular/core';
 @case('seat'){<path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z"/>}
 @case('shield'){<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6l8-3 8 3z"/><path d="m9 12 2 2 4-4"/>}
 @case('check'){<path d="m5 12 4 4L19 6"/>}
+@case('eye'){<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>}
+@case('eye-off'){<path d="m3 3 18 18"/><path d="M10.6 6.2A10.4 10.4 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-2.1 2.8M6.6 6.6C3.7 8.4 2 12 2 12s3.5 6 10 6c1.5 0 2.8-.3 4-.7"/><path d="M9.9 9.9A3 3 0 0 0 14.1 14.1"/>}
 @case('menu'){<path d="M4 6h16M4 12h16M4 18h16"/>}
 @default{<circle cx="12" cy="12" r="9"/>}
 }</svg>`})

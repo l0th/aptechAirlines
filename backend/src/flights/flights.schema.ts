@@ -229,12 +229,17 @@ FlightSchema.index({ data_source: 1, operator: 1, is_bookable: 1, status: 1 });
 // ============================================================================
 export const CUSTOMER_BOOKABLE_OPERATOR = 'APTECH_AIRLINES';
 export const CUSTOMER_BOOKABLE_DATA_SOURCE = 'AIRLABS_COMMERCIALIZED';
+export const CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE = 'ADMIN_MANUAL';
+export const CUSTOMER_BOOKABLE_DATA_SOURCES = [
+  CUSTOMER_BOOKABLE_DATA_SOURCE,
+  CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
+] as const;
 
 export function getCustomerBookableFlightFilter(): Record<string, any> {
   return {
     operator: CUSTOMER_BOOKABLE_OPERATOR,
     is_bookable: true,
-    data_source: CUSTOMER_BOOKABLE_DATA_SOURCE,
+    data_source: { $in: [...CUSTOMER_BOOKABLE_DATA_SOURCES] },
     status: { $ne: FlightStatus.CANCELLED },
   };
 }
@@ -244,7 +249,7 @@ export function isCustomerBookableFlight(flight: any): boolean {
   return (
     flight.operator === CUSTOMER_BOOKABLE_OPERATOR &&
     flight.is_bookable === true &&
-    flight.data_source === CUSTOMER_BOOKABLE_DATA_SOURCE &&
+    CUSTOMER_BOOKABLE_DATA_SOURCES.includes(flight.data_source) &&
     flight.status !== FlightStatus.CANCELLED
   );
 }

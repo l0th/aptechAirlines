@@ -16,6 +16,26 @@ export class LoginDto {
   password: string;
 }
 
+export class ForgotPasswordDto {
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Verification code must contain exactly 6 digits.' })
+  code: string;
+
+  @IsString()
+  @MinLength(6)
+  new_password: string;
+}
+
 export class RegisterDto {
   @IsString()
   @IsNotEmpty()

@@ -23,6 +23,8 @@ export function toSafeUserResponse(user: any): any {
   const masked = hasCard && digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : undefined;
 
   delete raw.password_hash;
+  delete raw.password_reset_code_hash;
+  delete raw.password_reset_expires_at;
   delete raw.preferred_credit_card;
   return {
     ...raw,

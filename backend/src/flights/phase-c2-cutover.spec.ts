@@ -5,6 +5,7 @@ import {
   CabinClass,
   CUSTOMER_BOOKABLE_OPERATOR,
   CUSTOMER_BOOKABLE_DATA_SOURCE,
+  CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
   getCustomerBookableFlightFilter,
   isCustomerBookableFlight,
 } from './flights.schema';
@@ -143,7 +144,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       expect(capturedFilters.length).toBeGreaterThan(0);
       const directFilter = capturedFilters[0];
       expect(directFilter.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-      expect(directFilter.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(directFilter.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(directFilter.is_bookable).toBe(true);
       expect(directFilter.status).toEqual({ $ne: FlightStatus.CANCELLED });
     });
@@ -166,7 +169,7 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       };
 
       flightModel.find.mockImplementation((filter: any) => {
-        if (filter.data_source === CUSTOMER_BOOKABLE_DATA_SOURCE) {
+        if (filter.data_source?.$in?.includes(CUSTOMER_BOOKABLE_DATA_SOURCE)) {
           return {
             sort: jest.fn().mockReturnThis(),
             exec: jest.fn().mockResolvedValue([commercialFlight]),
@@ -215,7 +218,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       // All flight queries executed by search must include customer bookable invariant
       for (const q of queries) {
         expect(q.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-        expect(q.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+        expect(q.data_source).toEqual({
+          $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+        });
         expect(q.is_bookable).toBe(true);
         expect(q.status).toEqual({ $ne: FlightStatus.CANCELLED });
       }
@@ -266,7 +271,7 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
         // Leg 2 query matches only if filter matches data_source
         if (filter.origin_iata && (filter.origin_iata === 'DAD' || filter.origin_iata.$in?.includes('DAD'))) {
           // If query enforces AIRLABS_COMMERCIALIZED, synthetic leg2 will not be returned
-          if (filter.data_source === CUSTOMER_BOOKABLE_DATA_SOURCE) {
+          if (!filter.data_source?.$in?.includes('INTERNAL_GENERATED')) {
             return {
               sort: jest.fn().mockReturnThis(),
               exec: jest.fn().mockResolvedValue([]), // No commercial leg 2!
@@ -293,6 +298,61 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
 
       expect(res.connecting_routes || []).toHaveLength(0);
     });
+
+    it('4b. admin-created SGN -> SIN -> LAX flights can be combined into a one-stop itinerary', async () => {
+      const leg1 = {
+        _id: 'manual_sgn_sin',
+        flight_number: 'APT701',
+        origin_iata: 'SGN',
+        dest_iata: 'SIN',
+        departure_date: '2026-10-15',
+        scheduled_departure: new Date('2026-10-15T02:00:00Z'),
+        scheduled_arrival: new Date('2026-10-15T04:00:00Z'),
+        duration_minutes: 120,
+        operator: CUSTOMER_BOOKABLE_OPERATOR,
+        is_bookable: true,
+        data_source: CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv_manual_1', cabin_class: CabinClass.ECONOMY, allocated_seats: 20, available_seats: 20, base_price: 100 }],
+      };
+      const leg2 = {
+        _id: 'manual_sin_lax',
+        flight_number: 'APT702',
+        origin_iata: 'SIN',
+        dest_iata: 'LAX',
+        departure_date: '2026-10-15',
+        scheduled_departure: new Date('2026-10-15T06:00:00Z'),
+        scheduled_arrival: new Date('2026-10-15T20:00:00Z'),
+        duration_minutes: 840,
+        operator: CUSTOMER_BOOKABLE_OPERATOR,
+        is_bookable: true,
+        data_source: CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
+        status: FlightStatus.SCHEDULED,
+        inventories: [{ _id: 'inv_manual_2', cabin_class: CabinClass.ECONOMY, allocated_seats: 20, available_seats: 20, base_price: 400 }],
+      };
+
+      flightModel.find.mockImplementation((filter: any) => {
+        expect(filter.data_source?.$in).toContain(CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE);
+        const origins = Array.isArray(filter.origin_iata?.$in) ? filter.origin_iata.$in : [filter.origin_iata];
+        const rows = origins.includes('SGN') ? [leg1] : origins.includes('SIN') ? [leg2] : [];
+        return {
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(rows),
+        };
+      });
+
+      const res = await flightsService.searchFlights({
+        origin: 'SGN',
+        destination: 'LAX',
+        departure_date: '2026-10-15',
+        adults: 1,
+        include_connecting: true,
+      });
+
+      expect(res.connecting_routes).toHaveLength(1);
+      expect(res.connecting_routes[0].transit_airport).toBe('SIN');
+      expect(res.connecting_routes[0].legs.map((x: any) => x.flight_number)).toEqual(['APT701', 'APT702']);
+    });
   });
 
   // =========================================================================
@@ -302,7 +362,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
     it('5. nearby availability ignores synthetic-only dates', async () => {
       // Return synthetic flight only when data_source is not enforced (which would be a leak)
       flightModel.find.mockImplementation((filter: any) => {
-        expect(filter.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+        expect(filter.data_source).toEqual({
+          $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+        });
         // DB only has synthetic flights for these dates, so commercial query returns empty
         return {
           sort: jest.fn().mockReturnThis(),
@@ -354,7 +416,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       const originDistinct = distinctFilters.find((d) => d.field === 'origin_iata');
       expect(originDistinct).toBeDefined();
       expect(originDistinct.filter.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-      expect(originDistinct.filter.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(originDistinct.filter.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(originDistinct.filter.is_bookable).toBe(true);
     });
   });
@@ -538,7 +602,7 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
           passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'John', last_name: 'Doe' }],
           is_block: true,
         }),
-      ).rejects.toThrow('only AirLabs-backed Aptech commercial flights are customer-bookable.');
+      ).rejects.toThrow('only approved Aptech commercial or admin-created flights are customer-bookable.');
     });
 
     it('9. createBooking accepts AIRLABS_COMMERCIALIZED target', async () => {
@@ -590,7 +654,7 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
           new_flight_id: 'synth_new',
           new_inventory_id: 'inv_new',
         } as any),
-      ).rejects.toThrow('only AirLabs-backed Aptech commercial flights are customer-bookable.');
+      ).rejects.toThrow('only approved Aptech commercial or admin-created flights are customer-bookable.');
     });
 
     it('11. existing legacy booking tracking/cancellation remains valid', async () => {
@@ -646,7 +710,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       expect(capturedFilters).toHaveLength(1);
       const query = capturedFilters[0];
       expect(query.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-      expect(query.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(query.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(query.is_bookable).toBe(true);
       expect(query.status).toEqual({ $ne: FlightStatus.CANCELLED });
     });
@@ -666,7 +732,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       expect(capturedFilters).toHaveLength(1);
       const query = capturedFilters[0];
       expect(query.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-      expect(query.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(query.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(query.is_bookable).toBe(true);
       expect(query.status).toBe(FlightStatus.SCHEDULED);
     });
@@ -686,7 +754,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       expect(capturedFilters).toHaveLength(1);
       const query = capturedFilters[0];
       expect(query.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
-      expect(query.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(query.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(query.is_bookable).toBe(true);
       expect(query.status).toBe(FlightStatus.DELAYED);
     });
@@ -764,7 +834,9 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       const query = capturedFilters[0];
       expect(query.origin_iata).toBe('HAN');
       expect(query.dest_iata).toBe('SGN');
-      expect(query.data_source).toBe(CUSTOMER_BOOKABLE_DATA_SOURCE);
+      expect(query.data_source).toEqual({
+        $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+      });
       expect(query.operator).toBe(CUSTOMER_BOOKABLE_OPERATOR);
       expect(query.is_bookable).toBe(true);
     });
@@ -1015,7 +1087,7 @@ describe('Phase C2 — Cut Over Customer Transaction Flow to AirLabs-Commerciali
       expect(filter).toEqual({
         operator: 'APTECH_AIRLINES',
         is_bookable: true,
-        data_source: 'AIRLABS_COMMERCIALIZED',
+        data_source: { $in: ['AIRLABS_COMMERCIALIZED', 'ADMIN_MANUAL'] },
         status: { $ne: FlightStatus.CANCELLED },
       });
 

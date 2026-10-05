@@ -5,7 +5,8 @@ import { getModelToken } from '@nestjs/mongoose';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { AuthService } from './auth.service';
-import { RegisterDto } from './auth.dto';
+import { ForgotPasswordDto, RegisterDto, ResetPasswordDto } from './auth.dto';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { User, UserRole } from '../users/users.schema';
 
@@ -402,6 +403,61 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
 
       await expect(usersService.create(createUserDto as any)).rejects.toThrow(ConflictException);
       await expect(usersService.create(createUserDto as any)).rejects.toThrow('Email already exists');
+    });
+  });
+
+  describe('Password reset by email verification code', () => {
+    let service: AuthService;
+    let users: any;
+    let mail: any;
+
+    beforeEach(() => {
+      users = { findByEmail: jest.fn() };
+      mail = { sendPasswordResetCode: jest.fn().mockResolvedValue(true) };
+      service = new AuthService(users, { sign: jest.fn() } as any, mail);
+    });
+
+    it('does not reveal whether an unknown email exists', async () => {
+      users.findByEmail.mockResolvedValue(null);
+      const result = await service.requestPasswordReset({ email: 'missing@example.com' } as ForgotPasswordDto);
+      expect(result.message).toContain('Nếu email tồn tại');
+      expect(mail.sendPasswordResetCode).not.toHaveBeenCalled();
+    });
+
+    it('stores only a hashed six-digit code and sends the plaintext code by email', async () => {
+      const user: any = {
+        email: 'pilot@example.com', first_name: 'Test', last_name: 'Pilot', username: 'pilot',
+        save: jest.fn().mockResolvedValue(true),
+      };
+      users.findByEmail.mockResolvedValue(user);
+      await service.requestPasswordReset({ email: 'PILOT@example.com' } as ForgotPasswordDto);
+
+      expect(user.password_reset_code_hash).toBeTruthy();
+      expect(user.password_reset_expires_at).toBeInstanceOf(Date);
+      expect(mail.sendPasswordResetCode).toHaveBeenCalledTimes(1);
+      const sent = mail.sendPasswordResetCode.mock.calls[0][0];
+      expect(sent.code).toMatch(/^\d{6}$/);
+      expect(user.password_reset_code_hash).not.toBe(sent.code);
+      expect(await bcrypt.compare(sent.code, user.password_reset_code_hash)).toBe(true);
+    });
+
+    it('accepts the valid code once, replaces the password hash, and clears reset state', async () => {
+      const oldHash = await bcrypt.hash('OldPass@2026', 10);
+      const codeHash = await bcrypt.hash('123456', 10);
+      const user: any = {
+        email: 'pilot@example.com',
+        password_hash: oldHash,
+        password_reset_code_hash: codeHash,
+        password_reset_expires_at: new Date(Date.now() + 5 * 60 * 1000),
+        save: jest.fn().mockResolvedValue(true),
+      };
+      users.findByEmail.mockResolvedValue(user);
+
+      await service.resetPassword({ email: user.email, code: '123456', new_password: 'NewPass@2026' } as ResetPasswordDto);
+      expect(await bcrypt.compare('NewPass@2026', user.password_hash)).toBe(true);
+      expect(user.password_reset_code_hash).toBeUndefined();
+      expect(user.password_reset_expires_at).toBeUndefined();
+      expect(user.save).toHaveBeenCalledTimes(1);
     });
   });
 });

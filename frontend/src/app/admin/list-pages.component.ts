@@ -16,7 +16,6 @@ import { PaginationComponent } from '../shared/pagination.component';
       <div><h1 class="title">{{title}}</h1><p class="subtitle">{{subtitle}}</p></div>
       <div class="head-actions">
         @if(kind==='bookings'&&auth.admin()){
-          <button class="btn btn-outline" (click)="runScheduler('run-reminders')" [disabled]="busy">Gửi nhắc giữ chỗ</button>
           <button class="btn btn-outline" (click)="runScheduler('run-expiry')" [disabled]="busy">Quét vé hết hạn</button>
         }
         @if(kind!=='bookings'){<button class="btn btn-primary" (click)="openCreate()" [disabled]="busy">+ Thêm mới</button>}
@@ -98,8 +97,9 @@ import { PaginationComponent } from '../shared/pagination.component';
               <div><span>Status</span><b>{{selected.status}}</b></div><div><span>Booking type</span><b>{{selected.booking_type}}</b></div>
               <div><span>PNR</span><b>{{selected.pnr_code}}</b></div><div><span>Confirmation / Block</span><b>{{selected.confirmation_number||selected.blocking_number||'—'}}</b></div>
               <div><span>Passengers</span><b>{{selected.passengers?.length||0}}</b></div><div><span>Total</span><b>{{money(selected.total_amount)}}</b></div>
+              <div><span>Email khách hàng</span><b>{{bookingEmail(selected)}}</b></div><div><span>Loại email nhắc</span><b>{{selected.status==='BLOCKED'?'Nhắc thanh toán giữ chỗ':(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'?'Nhắc lịch bay':'Không áp dụng')}}</b></div>
             </div>
-            <div class="detail-actions"><button class="btn btn-outline" (click)="trackBooking(selected)">Tra cứu ticket</button>@if(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'){<button class="btn btn-dark" (click)="rescheduleBooking(selected)">Đổi chuyến</button>}</div>
+            <div class="detail-actions"><button class="btn btn-outline" (click)="trackBooking(selected)">Tra cứu ticket</button>@if(auth.admin()&&selected.status==='BLOCKED'){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">Gửi email nhắc thanh toán</button>}@if(auth.admin()&&(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED')){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">Gửi email nhắc lịch bay</button>}@if(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'){<button class="btn btn-dark" (click)="rescheduleBooking(selected)">Đổi chuyến</button>}</div>
           }@else if(kind==='users'){
             <div class="detail-grid">
               <div><span>Username</span><b>@{{selected.username}}</b></div><div><span>Role</span><b>{{selected.role}}</b></div>
@@ -135,6 +135,8 @@ import { PaginationComponent } from '../shared/pagination.component';
           <div class="field"><span>Trạng thái</span><select class="control" [(ngModel)]="statusEditor.status"><option>SCHEDULED</option><option>DELAYED</option><option>CANCELLED</option><option>COMPLETED</option></select></div>
           @if(statusEditor.status==='DELAYED'){<div class="field"><span>Số phút trễ</span><input class="control" type="number" min="0" [(ngModel)]="statusEditor.delay_minutes"></div>}
           <div class="field"><span>Lý do / ghi chú</span><input class="control" [(ngModel)]="statusEditor.delay_reason"></div>
+          @if(statusEditor.status==='DELAYED'){<p class="info">Khi lưu trạng thái DELAYED, hệ thống tự gửi email thông báo hoãn chuyến đến khách có booking liên quan, gồm giờ cũ, giờ mới và lý do.</p>}
+          @if(statusEditor.status==='CANCELLED'){<p class="info">Khi hủy chuyến, hệ thống xử lý booking liên quan và gửi email thông báo hủy/hoàn tiền theo trạng thái vé.</p>}
           <button class="btn btn-primary save" (click)="saveStatus()" [disabled]="busy">Cập nhật trạng thái</button>
         </section>
       </div>
@@ -292,9 +294,18 @@ export class AdminListComponent implements OnInit{
     const req=this.kind==='users'?this.api.deleteUser(x._id):this.kind==='flights'?this.api.deleteFlight(x._id):this.api.deleteAirport(x.iata_code);
     req.subscribe({next:()=>this.done('Đã xóa '+label+'.'),error:e=>this.fail(e,'Không xóa được dữ liệu.')});
   }
-  runScheduler(job:'run-reminders'|'run-expiry'){
+  runScheduler(job:'run-expiry'){
     this.busy=true;this.error='';
     this.api.runBookingScheduler(job).subscribe({next:r=>{this.busy=false;this.message=r?.message||'Scheduler đã chạy.';this.load()},error:e=>this.fail(e,'Không chạy được scheduler.')});
+  }
+  sendReminder(x:any){
+    if(!x?._id)return;
+    this.busy=true;this.error='';this.message='';
+    const isHold=x.status==='BLOCKED';
+    this.api.sendBookingReminder(x._id).subscribe({
+      next:r=>{this.busy=false;this.message=r?.message||(isHold?'Đã gửi email nhắc thanh toán giữ chỗ.':'Đã gửi email nhắc lịch bay.');this.selected=null;this.load()},
+      error:e=>this.fail(e,isHold?'Không gửi được email nhắc thanh toán giữ chỗ.':'Không gửi được email nhắc lịch bay.')
+    });
   }
   confirmHold(x:any){
     const blocking=x.blocking_number||x.pnr_code;if(!blocking)return;
@@ -324,6 +335,7 @@ export class AdminListComponent implements OnInit{
   }
   primary(x:any){return x.pnr_code||x.username||x.flight_number||x.iata_code||x._id}
   customerLabel(x:any){const u=x.user_id;return typeof u==='object'?(u.username||u.email||u._id):String(u||'—')}
+  bookingEmail(x:any){const u=x?.user_id;return typeof u==='object'?(u.email||'—'):'—'}
   trackBooking(x:any){const code=x.confirmation_number||x.blocking_number||x.pnr_code;this.router.navigate(['/track'],{queryParams:{code}})}
   rescheduleBooking(x:any){const code=x.confirmation_number||x.pnr_code;this.router.navigate(['/reschedule'],{queryParams:{code}})}
   inventory(x:any,cabin:string){return(x?.inventories||[]).find((i:any)=>i.cabin_class===cabin)}

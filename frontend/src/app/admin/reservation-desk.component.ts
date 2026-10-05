@@ -43,14 +43,31 @@ import { PaginationComponent } from '../shared/pagination.component';
 
       <section class="actions-panel">
         <div class="card action-card">
-          <div class="panel-head"><div><span class="step">2</span><strong>Tạo đặt chỗ mới</strong></div></div>
+          <div class="panel-head"><div><span class="step">2</span><strong>Tìm chuyến cho khách</strong></div></div>
           @if(selected){
             <div class="selected-customer">
               <span class="avatar large">{{initials(selected)}}</span>
               <div><strong>{{selected.first_name}} {{selected.last_name}}</strong><small>@{{selected.username}} · {{selected.email}}</small><small>{{selected.phone_number||'Không có số điện thoại'}}</small></div>
             </div>
-            <p class="muted">Luồng tìm chuyến → hành khách → ghế → kiểm tra sẽ giữ đúng khách hàng này làm chủ đặt chỗ.</p>
-            <button class="btn btn-primary full" (click)="startBooking()">Bắt đầu đặt vé cho khách</button>
+            <div class="trip-tabs">
+              <button type="button" [class.on]="!roundTrip" (click)="roundTrip=false;returnDate=''">Một chiều</button>
+              <button type="button" [class.on]="roundTrip" (click)="roundTrip=true">Khứ hồi</button>
+            </div>
+            <div class="route-fields">
+              <div class="field"><span>Nơi đi</span><input class="control" [(ngModel)]="origin" placeholder="SGN"></div>
+              <div class="field"><span>Nơi đến</span><input class="control" [(ngModel)]="destination" placeholder="LAX"></div>
+            </div>
+            <div class="route-fields">
+              <div class="field"><span>Ngày đi</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
+              @if(roundTrip){<div class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departure||minDate" [max]="maxDate"></div>}
+            </div>
+            <div class="party-grid">
+              <div class="field"><span>Người lớn</span><input class="control" type="number" min="1" [(ngModel)]="adults"></div>
+              <div class="field"><span>Trẻ em</span><input class="control" type="number" min="0" [(ngModel)]="children"></div>
+              <div class="field"><span>Cao tuổi</span><input class="control" type="number" min="0" [(ngModel)]="seniors"></div>
+            </div>
+            <p class="muted flow-note">Hệ thống sẽ tìm cả chuyến thẳng và nối chuyến. Khách hàng đã chọn được giữ xuyên suốt các bước hành khách → ghế → báo giá → xác nhận.</p>
+            <button class="btn btn-primary full" (click)="startBooking()">Tìm chuyến & tiếp tục</button>
           }@else{
             <div class="empty muted">Chọn khách hàng ở cột bên trái trước.</div>
           }
@@ -73,7 +90,7 @@ import { PaginationComponent } from '../shared/pagination.component';
     </div>
   `,
   styles:[`
-    .desk-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(340px,.75fr);gap:18px;margin-top:22px}.customer-panel,.action-card,.info-card{padding:20px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.panel-head>div{display:flex;align-items:center;gap:9px;color:#071b2e}.step{width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:#071b2e;color:#f2c85f;font-size:11px;font-weight:900}.search-row{display:flex;gap:8px}.search-row input{flex:1}.customers{display:grid;gap:8px;max-height:570px;overflow:auto;margin-top:14px;padding-right:3px}.customer{border:1px solid #e0e7ed;background:#fff;border-radius:16px;padding:12px;display:grid;grid-template-columns:42px 1fr auto;gap:11px;align-items:center;text-align:left;color:#203446}.customer:hover,.customer.selected{border-color:#d6b35a;background:#fffaf0;box-shadow:0 0 0 3px rgba(214,179,90,.1)}.avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#0e3150;color:#f2c85f;font-weight:900}.avatar.large{width:52px;height:52px}.identity,.meta,.selected-customer>div{display:grid;gap:3px;min-width:0}.identity strong,.selected-customer strong{color:#071b2e}.identity small,.meta small,.selected-customer small{color:#718093;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta{text-align:right}.meta b{font-size:11px;color:#a67717}.actions-panel{display:grid;gap:14px;align-content:start}.selected-customer{display:flex;gap:12px;align-items:center;background:#f7f9fb;border-radius:16px;padding:13px}.action-card p{line-height:1.6}.full{width:100%;margin-top:8px}.ticket-actions{display:flex;gap:8px;margin-top:12px}.ticket-actions .btn{flex:1}.info-card{background:#0b2740;color:#d3e0ea;border:0}.info-card strong{color:#f2c85f}.info-card p{font-size:12px;line-height:1.65;margin-bottom:0}.empty{padding:25px;text-align:center}.btn:disabled{opacity:.45;cursor:not-allowed}@media(max-width:900px){.desk-grid{grid-template-columns:1fr}}@media(max-width:560px){.customer{grid-template-columns:42px 1fr}.meta{grid-column:2;text-align:left}.search-row,.ticket-actions{flex-direction:column}}
+    .desk-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr);gap:18px;margin-top:22px}.customer-panel,.action-card,.info-card{padding:20px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.panel-head>div{display:flex;align-items:center;gap:9px;color:#071b2e}.step{width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:#071b2e;color:#f2c85f;font-size:11px;font-weight:900}.search-row{display:flex;gap:8px}.search-row input{flex:1}.customers{display:grid;gap:8px;max-height:570px;overflow:auto;margin-top:14px;padding-right:3px}.customer{border:1px solid #e0e7ed;background:#fff;border-radius:16px;padding:12px;display:grid;grid-template-columns:42px 1fr auto;gap:11px;align-items:center;text-align:left;color:#203446}.customer:hover,.customer.selected{border-color:#d6b35a;background:#fffaf0;box-shadow:0 0 0 3px rgba(214,179,90,.1)}.avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#0e3150;color:#f2c85f;font-weight:900}.avatar.large{width:52px;height:52px}.identity,.meta,.selected-customer>div{display:grid;gap:3px;min-width:0}.identity strong,.selected-customer strong{color:#071b2e}.identity small,.meta small,.selected-customer small{color:#718093;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta{text-align:right}.meta b{font-size:11px;color:#a67717}.actions-panel{display:grid;gap:14px;align-content:start}.selected-customer{display:flex;gap:12px;align-items:center;background:#f7f9fb;border-radius:16px;padding:13px}.trip-tabs{display:flex;gap:7px;margin:14px 0 10px}.trip-tabs button{border:1px solid #dce4ea;background:#fff;color:#647587;border-radius:999px;padding:8px 12px;font-size:11px;font-weight:800}.trip-tabs button.on{background:#071b2e;border-color:#071b2e;color:#fff}.route-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:9px}.party-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:9px}.flow-note{font-size:11px;background:#f7f9fb;border-radius:12px;padding:10px 11px}.action-card p{line-height:1.6}.full{width:100%;margin-top:8px}.ticket-actions{display:flex;gap:8px;margin-top:12px}.ticket-actions .btn{flex:1}.info-card{background:#0b2740;color:#d3e0ea;border:0}.info-card strong{color:#f2c85f}.info-card p{font-size:12px;line-height:1.65;margin-bottom:0}.empty{padding:25px;text-align:center}.btn:disabled{opacity:.45;cursor:not-allowed}@media(max-width:900px){.desk-grid{grid-template-columns:1fr}}@media(max-width:560px){.customer{grid-template-columns:42px 1fr}.meta{grid-column:2;text-align:left}.search-row,.ticket-actions{flex-direction:column}.route-fields{grid-template-columns:1fr}.party-grid{grid-template-columns:1fr 1fr 1fr}}
   `]
 })
 export class ReservationDeskComponent{
@@ -81,8 +98,19 @@ export class ReservationDeskComponent{
   state=inject(BookingStateService);
   router=inject(Router);
   customers:any[]=[]; selected:any=null; query=''; bookingCode=''; loading=true; error='';page=1;pageSize=20;
+  origin='SGN';destination='HAN';departure='';returnDate='';roundTrip=false;adults=1;children=0;seniors=0;minDate='';maxDate='';
 
-  constructor(){this.load()}
+  constructor(){
+    this.selected=this.state.staffCustomer();
+    const previous=this.state.search();
+    if(previous){
+      this.origin=previous.origin||this.origin;this.destination=previous.destination||this.destination;
+      this.departure=previous.departure_date||'';this.returnDate=previous.return_date||'';this.roundTrip=!!previous.return_date;
+      this.adults=Number(previous.adults||1);this.children=Number(previous.children||0);this.seniors=Number(previous.seniors||0);
+    }
+    this.api.bookingWindow().subscribe({next:r=>{this.minDate=r.current_date||r.min_date||'';this.maxDate=r.max_date||'';if(!this.departure)this.departure=this.minDate},error:()=>{}});
+    this.load();
+  }
   get filtered(){
     const q=this.query.trim().toLowerCase();
     if(!q)return this.customers;
@@ -96,7 +124,20 @@ export class ReservationDeskComponent{
       error:e=>{this.error=this.msg(e,'Không tải được danh sách khách hàng.');this.loading=false}
     })
   }
-  startBooking(){if(!this.selected)return;this.state.beginStaffBooking(this.selected);this.router.navigate(['/'])}
+  startBooking(){
+    if(!this.selected)return;
+    this.error='';
+    const origin=this.origin.trim().toUpperCase(),destination=this.destination.trim().toUpperCase();
+    const adults=Math.max(1,Math.floor(Number(this.adults)||1)),children=Math.max(0,Math.floor(Number(this.children)||0)),seniors=Math.max(0,Math.floor(Number(this.seniors)||0));
+    if(!origin||!destination||!this.departure){this.error='Vui lòng nhập nơi đi, nơi đến và ngày đi.';return}
+    if(origin===destination){this.error='Nơi đi và nơi đến phải khác nhau.';return}
+    if(this.roundTrip&&(!this.returnDate||this.returnDate<this.departure)){this.error='Ngày về phải bằng hoặc sau ngày đi.';return}
+    const q:any={origin,destination,departure_date:this.departure,adults,children,seniors,include_connecting:true};
+    if(this.roundTrip)q.return_date=this.returnDate;
+    this.state.beginStaffBooking(this.selected);
+    this.state.beginSearch(q);
+    this.router.navigate(['/results'],{queryParams:q});
+  }
   track(){const code=this.bookingCode.trim();if(code)this.router.navigate(['/track'],{queryParams:{code}})}
   reschedule(){const code=this.bookingCode.trim();if(code)this.router.navigate(['/reschedule'],{queryParams:{code}})}
   initials(c:any){return`${c?.first_name?.[0]||''}${c?.last_name?.[0]||c?.username?.[0]||''}`.toUpperCase()}

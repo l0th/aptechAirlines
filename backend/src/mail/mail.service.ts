@@ -122,6 +122,22 @@ export interface FlightDisruptionEmailData {
   statusText: string;
 }
 
+export interface PasswordResetEmailData {
+  toEmail: string;
+  passengerName: string;
+  code: string;
+  expiresInMinutes: number;
+}
+
+export interface UpcomingTripEmailData {
+  toEmail: string;
+  passengerName: string;
+  bookingReference: string;
+  confirmationNumber?: string;
+  departureTimeFormatted: string;
+  itinerary: ItineraryLegData[];
+}
+
 /**
  * SMTP configuration is read from environment variables:
  *
@@ -215,6 +231,54 @@ export class MailService {
       'Reminder: Your blocked ticket is awaiting confirmation',
       reminderBody,
     );
+  }
+
+  async sendPasswordResetCode(data: PasswordResetEmailData): Promise<boolean> {
+    const safeName = escapeHtml(data.passengerName);
+    const safeCode = escapeHtml(data.code);
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
+        <div style="background:#071b2e;color:#fff;padding:22px 24px;border-radius:14px 14px 0 0">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f2c85f">APTECH AIRLINES</div>
+          <h2 style="margin:8px 0 0">Mã xác nhận đặt lại mật khẩu</h2>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-top:0;padding:24px;border-radius:0 0 14px 14px">
+          <p>Xin chào ${safeName},</p>
+          <p>Bạn vừa yêu cầu đặt lại mật khẩu cho tài khoản Aptech Airlines. Nhập mã sau tại màn hình đặt lại mật khẩu:</p>
+          <div style="margin:22px 0;padding:18px;text-align:center;background:#fff7df;border:1px solid #efd783;border-radius:12px;font-size:32px;font-weight:900;letter-spacing:.18em;color:#071b2e">${safeCode}</div>
+          <p>Mã có hiệu lực trong <strong>${data.expiresInMinutes} phút</strong>. Nếu bạn không yêu cầu thao tác này, hãy bỏ qua email.</p>
+          <p style="color:#64748b;font-size:12px;margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px">Aptech Airlines • Email tự động • Không chia sẻ mã xác nhận cho người khác.</p>
+        </div>
+      </div>`;
+    return this.sendMail(data.toEmail, 'Aptech Airlines - Mã đặt lại mật khẩu', html);
+  }
+
+  async sendUpcomingTripReminder(data: UpcomingTripEmailData): Promise<boolean> {
+    const safeName = escapeHtml(data.passengerName);
+    const itinerary = data.itinerary.map((leg) => `
+      <div style="padding:12px 0;border-bottom:1px solid #e2e8f0">
+        <strong>${escapeHtml(leg.flightNumber)}</strong> · ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}<br/>
+        <span style="color:#64748b">Khởi hành: ${escapeHtml(leg.departureTimeFormatted)}${leg.cabinClass ? ` · ${escapeHtml(leg.cabinClass)}` : ''}</span>
+      </div>`).join('');
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
+        <div style="background:#071b2e;color:#fff;padding:22px 24px;border-radius:14px 14px 0 0">
+          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f2c85f">APTECH AIRLINES</div>
+          <h2 style="margin:8px 0 0">Chuyến bay của bạn sắp khởi hành</h2>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-top:0;padding:24px;border-radius:0 0 14px 14px">
+          <p>Xin chào ${safeName},</p>
+          <p>Đây là email nhắc lịch cho hành trình đã xác nhận. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(data.departureTimeFormatted)}</strong>.</p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:14px;border-radius:12px;margin:16px 0">
+            <div><strong>PNR:</strong> ${escapeHtml(data.bookingReference)}</div>
+            ${data.confirmationNumber ? `<div><strong>Mã xác nhận:</strong> ${escapeHtml(data.confirmationNumber)}</div>` : ''}
+          </div>
+          ${itinerary}
+          <p style="margin-top:20px">Vui lòng kiểm tra giấy tờ tùy thân, hành lý và có mặt tại sân bay đúng giờ. Bạn có thể vào mục Chuyến đi để xem trạng thái mới nhất.</p>
+          <p style="color:#64748b;font-size:12px;margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px">Aptech Airlines • Thông báo hành trình tự động • Vui lòng không trả lời trực tiếp email này.</p>
+        </div>
+      </div>`;
+    return this.sendMail(data.toEmail, `Aptech Airlines - Nhắc lịch chuyến bay ${data.bookingReference}`, html);
   }
 
   /**

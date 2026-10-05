@@ -25,6 +25,7 @@ export type BookingLeg = {
 
  reset(){this.search.set(null);this.selection.set(null);this.passengers.set([]);this.seatRequests.set([]);this.seatFeeTotal.set(0);this.quote.set(null);this.staffCustomer.set(null)}
  beginStaffBooking(customer:any){this.search.set(null);this.selection.set(null);this.passengers.set([]);this.seatRequests.set([]);this.seatFeeTotal.set(0);this.quote.set(null);this.staffCustomer.set(customer)}
+ endStaffBooking(){this.reset()}
  beginSearch(search:any){this.search.set(search);this.selection.set(null);this.passengers.set([]);this.seatRequests.set([]);this.seatFeeTotal.set(0);this.quote.set(null)}
 
  selectedLegs():BookingLeg[]{return (this.selection()?.legs||[]).filter((l:any)=>l?.flight_id&&l?.inventory_id)}

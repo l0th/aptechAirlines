@@ -48,6 +48,12 @@ export class User {
 
   @Prop({ type: String, enum: UserRole, default: UserRole.CUSTOMER })
   role: UserRole;
+
+  @Prop()
+  password_reset_code_hash?: string;
+
+  @Prop()
+  password_reset_expires_at?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

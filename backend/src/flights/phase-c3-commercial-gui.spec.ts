@@ -16,6 +16,7 @@ import {
   FlightStatus,
   CUSTOMER_BOOKABLE_OPERATOR,
   CUSTOMER_BOOKABLE_DATA_SOURCE,
+  CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE,
   getCustomerBookableFlightFilter,
   isCustomerBookableFlight,
 } from './flights.schema';
@@ -303,11 +304,14 @@ describe('Phase C3.1: AirLabs Commercial Operations GUI Backend Contracts', () =
       expect(filter).toEqual({
         operator: CUSTOMER_BOOKABLE_OPERATOR,
         is_bookable: true,
-        data_source: CUSTOMER_BOOKABLE_DATA_SOURCE,
+        data_source: {
+          $in: [CUSTOMER_BOOKABLE_DATA_SOURCE, CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE],
+        },
         status: { $ne: FlightStatus.CANCELLED },
       });
       expect(CUSTOMER_BOOKABLE_OPERATOR).toBe('APTECH_AIRLINES');
       expect(CUSTOMER_BOOKABLE_DATA_SOURCE).toBe('AIRLABS_COMMERCIALIZED');
+      expect(CUSTOMER_BOOKABLE_MANUAL_DATA_SOURCE).toBe('ADMIN_MANUAL');
     });
 
     it('isCustomerBookableFlight() strictly validates the four invariant criteria', () => {
@@ -316,6 +320,15 @@ describe('Phase C3.1: AirLabs Commercial Operations GUI Backend Contracts', () =
           operator: 'APTECH_AIRLINES',
           is_bookable: true,
           data_source: 'AIRLABS_COMMERCIALIZED',
+          status: FlightStatus.SCHEDULED,
+        }),
+      ).toBe(true);
+
+      expect(
+        isCustomerBookableFlight({
+          operator: 'APTECH_AIRLINES',
+          is_bookable: true,
+          data_source: 'ADMIN_MANUAL',
           status: FlightStatus.SCHEDULED,
         }),
       ).toBe(true);

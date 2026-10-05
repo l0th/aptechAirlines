@@ -226,6 +226,11 @@ export class Booking {
   @Prop({ default: false })
   is_reminder_sent: boolean;
 
+  // Fingerprint of the active itinerary for which the pre-departure reminder
+  // has already been delivered. A changed itinerary can therefore be reminded again.
+  @Prop()
+  departure_reminder_key?: string;
+
   @Prop({ required: true, default: 0 })
   total_amount: number;
 
