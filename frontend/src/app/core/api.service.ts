@@ -59,6 +59,7 @@ export class ApiService{
  createSeatPricingRule(body:any){return this.http.post<any>(`${this.base}/seat-allocation/pricing-rules`,body)}
  updateSeatPricingRule(id:string,body:any){return this.http.put<any>(`${this.base}/seat-allocation/pricing-rules/${encodeURIComponent(id)}`,body)}
  deleteSeatPricingRule(id:string){return this.http.delete<any>(`${this.base}/seat-allocation/pricing-rules/${id}`)}
+ activateSeatPricingRule(id:string){return this.http.post<any>(`${this.base}/seat-allocation/pricing-rules/${encodeURIComponent(id)}/activate`,{})}
  seatPricingProfiles(){return this.http.get<any[]>(`${this.base}/seat-allocation/pricing-profiles`)}
  createSeatPricingProfile(body:any){return this.http.post<any>(`${this.base}/seat-allocation/pricing-profiles`,body)}
  updateSeatPricingProfile(id:string,body:any){return this.http.put<any>(`${this.base}/seat-allocation/pricing-profiles/${encodeURIComponent(id)}`,body)}
@@ -78,4 +79,12 @@ export class ApiService{
  updateCommercialTemplate(id:string,body:any){return this.http.patch<any>(`${this.base}/flights/commercial-templates/${encodeURIComponent(id)}`,body)}
  setCommercialTemplateStatus(id:string,is_active:boolean){return this.http.patch<any>(`${this.base}/flights/commercial-templates/${encodeURIComponent(id)}/status`,{is_active})}
  materializeCommercialTemplate(id:string,days_ahead:number,start_date?:string){return this.http.post<any>(`${this.base}/flights/commercial-templates/${encodeURIComponent(id)}/materialize`,{days_ahead,...(start_date?{start_date}:{})})}
+ customerBookings(userId:string){return this.http.get<any[]>(`${this.base}/bookings`,{params:{user_id:userId}})}
+ setUserStatus(id:string,is_active:boolean){return this.http.patch<any>(`${this.base}/users/${encodeURIComponent(id)}/status`,{is_active})}
+ resetUserPassword(id:string,password:string){return this.http.post<any>(`${this.base}/users/${encodeURIComponent(id)}/reset-password`,{password})}
+ mailTemplates(){return this.http.get<any[]>(`${this.base}/mail/templates`)}
+ mailTemplatePreview(key:string){return this.http.get<{key:string;subject:string;html:string}>(`${this.base}/mail/templates/${encodeURIComponent(key)}/preview`)}
+ sendMailTemplateTest(key:string,to:string){return this.http.post<any>(`${this.base}/mail/templates/${encodeURIComponent(key)}/test`,{to})}
+ setMailTemplateEnabled(key:string,enabled:boolean){return this.http.patch<any>(`${this.base}/mail/templates/${encodeURIComponent(key)}`,{enabled})}
+ mailLogs(params:any={}){let p=new HttpParams();Object.entries(params).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')p=p.set(k,String(v))});return this.http.get<any>(`${this.base}/mail/logs`,{params:p})}
 }

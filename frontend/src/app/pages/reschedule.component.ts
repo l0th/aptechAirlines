@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -27,7 +28,7 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
       <button class="btn btn-dark" (click)="loadBooking(true)" [disabled]="busy||!confirmation.trim()">{{busy?'Đang tra cứu…':'Tải đặt chỗ'}}</button>
     </section>
 
-    @if(error){<p class="error notice-error">{{error}}</p>}
+    
 
     @if(booking){
       <section class="card booking-card">
@@ -179,6 +180,8 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
   `]
 })
 export class RescheduleComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api = inject(ApiService);
   auth = inject(AuthService);
   paypal = inject(PaypalService);
@@ -207,7 +210,7 @@ export class RescheduleComponent {
   payment = 'PAYPAL';
   paypalEnabled = false;
   busy = false;
-  error = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
 
   constructor() {
     this.confirmation = this.route.snapshot.queryParamMap.get('code') || '';

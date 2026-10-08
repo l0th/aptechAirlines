@@ -60,7 +60,7 @@ export class SeatAllocationController {
     if (!body.seat_code || !body.reason || !body.aircraft_type) {
       throw new BadRequestException('seat_code, reason, and aircraft_type are required.');
     }
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.allocationService.blockSeat(
       flightId,
       body.aircraft_type,
@@ -96,7 +96,7 @@ export class SeatAllocationController {
     if (!body.seat_code || body.override_fee === undefined || !body.reason) {
       throw new BadRequestException('seat_code, override_fee, and reason are required.');
     }
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.allocationService.setPriceOverride(
       flightId,
       body.seat_code,
@@ -114,7 +114,7 @@ export class SeatAllocationController {
     @Param('seatCode') seatCode: string,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     await this.allocationService.removePriceOverride(flightId, seatCode, userId);
     return { message: `Price override for seat ${seatCode} removed successfully.` };
   }
@@ -137,7 +137,7 @@ export class SeatAllocationController {
     @Body() dto: CreateSeatPricingProfileDto,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.pricingService.createProfile(dto, userId);
   }
 
@@ -182,7 +182,7 @@ export class SeatAllocationController {
     @Body() dto: CreateSeatPricingRuleDto,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.pricingService.createRule(dto, userId);
   }
 
@@ -194,7 +194,7 @@ export class SeatAllocationController {
     @Body() dto: UpdateSeatPricingRuleDto,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.pricingService.updateRule(ruleId, dto, userId);
   }
 
@@ -205,7 +205,14 @@ export class SeatAllocationController {
     @Param('ruleId') ruleId: string,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId;
+    const userId = req.user?.sub || req.user?._id || req.user?.userId;
     return this.pricingService.deactivateRule(ruleId, userId);
+  }
+
+  @Post('pricing-rules/:ruleId/activate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async activatePricingRule(@Param('ruleId') ruleId: string) {
+    return this.pricingService.activateRule(ruleId);
   }
 }

@@ -21,7 +21,7 @@ import { ToastService } from '../core/toast.service';
       <button class="btn btn-primary" (click)="search()" [disabled]="loading||!code.trim()">{{loading?'Đang tra…':'Tra cứu'}}</button>
     </div>
 
-    @if(error){<p class="error notice">{{error}}</p>}
+    
     @if(result){
       <section class="card ticket">
         <header class="ticket-head">
@@ -81,7 +81,7 @@ import { ToastService } from '../core/toast.service';
         </footer>
       </section>
     }
-    @if(message){<p class="success notice">{{message}}</p>}
+    
   </div>
   `,
   styles:[`
@@ -89,13 +89,15 @@ import { ToastService } from '../core/toast.service';
   `]
 })
 export class TrackComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api=inject(ApiService);
   paypal=inject(PaypalService);
   auth=inject(AuthService);
   toast=inject(ToastService);
   route=inject(ActivatedRoute);
   router=inject(Router);
-  code=''; result:any=null; tracked:any=null; policies:any[]=[]; error=''; message=''; loading=false; busy=false; paypalEnabled=false;
+  code=''; result:any=null; tracked:any=null; policies:any[]=[]; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)}; loading=false; busy=false; paypalEnabled=false;
   get coupons(){return this.tracked?.flight_coupons||this.result?.ticket_coupons||[]}
 
   constructor(){

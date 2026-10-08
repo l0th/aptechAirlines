@@ -27,8 +27,8 @@ import { PaginationComponent } from '../shared/pagination.component';
       <input class="control" [(ngModel)]="query" (ngModelChange)="page=1" [placeholder]="searchPlaceholder">
       <span class="pill pill-gold">{{filtered.length}} bản ghi</span>
     </div>
-    @if(message){<p class="success notice">{{message}}</p>}
-    @if(error){<p class="error notice">{{error}}</p>}
+    
+    
 
     @if(editor){
       <div class="modal" (click)="editor=null">
@@ -52,8 +52,19 @@ import { PaginationComponent } from '../shared/pagination.component';
             @if(editorMode==='create'){<div class="field"><span>Origin IATA</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>Destination IATA</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
             <div class="field"><span>Departure date</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div>
             <div class="field"><span>Máy bay</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">Chọn máy bay</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} ghế</option>}</select></div>
-            <div class="field full"><span>Scheduled departure (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_departure" placeholder="2026-10-01T01:00:00.000Z"></div>
-            <div class="field full"><span>Scheduled arrival (ISO + timezone)</span><input class="control" [(ngModel)]="editor.scheduled_arrival" placeholder="2026-10-01T03:00:00.000Z"></div>
+            <div class="field"><span>Giờ cất cánh (giờ địa phương {{originIata||'nơi đi'}} · {{tzOf(originIata)}})</span><input class="control" type="datetime-local" [(ngModel)]="editor.dep_local" (ngModelChange)="syncDepartureDate()"></div>
+            <div class="field"><span>Thời gian bay (phút)</span><input class="control" type="number" min="1" [(ngModel)]="editor.duration_input"></div>
+            <div class="field full info">
+              @if(previewTimes; as p){
+                Cất cánh <b>{{p.depLocal}}</b> ({{tzOf(originIata)}}) → Hạ cánh <b>{{p.arrLocal}}</b> ({{tzOf(destIata)}}) · UTC {{p.depUtc}} → {{p.arrUtc}}
+              } @else { Nhập nơi đi/đến, giờ cất cánh và thời gian bay để xem giờ hạ cánh theo giờ địa phương. }
+            </div>
+            @if(connectionHints.length){
+              <div class="field full info">
+                <b>Có thể nối chuyến (chờ 45–720 phút):</b>
+                @for(h of connectionHints;track h.id){<div>{{h.text}}</div>}
+              </div>
+            }
             <div class="field"><span>Distance miles</span><input class="control" type="number" min="0" [(ngModel)]="editor.distance_miles" [disabled]="editor.commercial"></div>
           </div>
           <div class="inventory-head"><strong>Inventory theo cabin</strong><small>Available được tự tính lại để giữ nguyên số ghế đã bán.</small></div>
@@ -147,19 +158,47 @@ import { PaginationComponent } from '../shared/pagination.component';
   `]
 })
 export class AdminListComponent implements OnInit{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   @Input() kind='bookings';
   @Input() title='';
   api=inject(ApiService);
   auth=inject(AuthService);
   router=inject(Router);
   toast=inject(ToastService);
-  rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';error='';message='';query='';busy=false;page=1;pageSize=20;
+  rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};query='';busy=false;page=1;pageSize=20;
 
   ngOnInit(){
     this.load();
     if(this.kind==='flights'){
       this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,'Không tải được aircraft layouts.')});
+      this.api.airports().subscribe({next:(r:any)=>{const list=Array.isArray(r)?r:(r?.items||r?.data||[]);for(const a of list)if(a?.iata_code)this.tzMap[a.iata_code]=a.time_zone||'UTC'}});
     }
+  }
+  tzMap:Record<string,string>={};
+  get originIata(){return String(this.editor?.origin_iata||'').trim().toUpperCase()}
+  get destIata(){return String(this.editor?.dest_iata||'').trim().toUpperCase()}
+  tzOf(iata:string){return (iata&&this.tzMap[String(iata).toUpperCase()])||'UTC'}
+  /** Offset (minutes) of a timezone at a given instant, using Intl. */
+  tzOffset(d:Date,tz:string){const parts:any={};for(const p of new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(d))parts[p.type]=p.value;const asUtc=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute,+parts.second);return Math.round((asUtc-d.getTime())/60000)}
+  /** Convert "YYYY-MM-DDTHH:mm" wall-clock time in tz to a UTC Date. */
+  localToUtc(local:string,tz:string){if(!local)return null;const naive=new Date(local+':00Z');if(isNaN(naive.getTime()))return null;let utc=new Date(naive.getTime()-this.tzOffset(naive,tz)*60000);utc=new Date(naive.getTime()-this.tzOffset(utc,tz)*60000);return utc}
+  localInput(d:Date,tz:string){if(isNaN(d.getTime()))return'';return new Date(d.getTime()+this.tzOffset(d,tz)*60000).toISOString().slice(0,16)}
+  fmtLocal(d:Date,tz:string){return this.localInput(d,tz).replace('T',' ')}
+  computeTimes(){const e=this.editor;if(!e)return null;const tz=this.tzOf(e.origin_iata);const dep=this.localToUtc(e.dep_local,tz);const duration=Math.round(Number(e.duration_input||0));if(!dep||duration<1)return null;return{dep,arr:new Date(dep.getTime()+duration*60000),duration}}
+  get previewTimes(){const p=this.computeTimes();if(!p)return null;return{depLocal:this.fmtLocal(p.dep,this.tzOf(this.originIata)),arrLocal:this.fmtLocal(p.arr,this.tzOf(this.destIata)),depUtc:p.dep.toISOString().slice(0,16).replace('T',' '),arrUtc:p.arr.toISOString().slice(0,16).replace('T',' ')}}
+  syncDepartureDate(){if(this.editor?.dep_local)this.editor.departure_date=String(this.editor.dep_local).slice(0,10)}
+  /** Existing flights that can connect to/from the one being edited (45–720 min layover, same rule as backend search). */
+  get connectionHints(){
+    const p=this.computeTimes();const o=this.originIata,d=this.destIata;if(!p||!o||!d)return[];
+    const out:any[]=[];
+    for(const f of this.rows){
+      if(f._id===this.editor._id||f.status==='CANCELLED')continue;
+      const fd=new Date(f.scheduled_departure).getTime(),fa=new Date(f.scheduled_arrival).getTime();
+      if(f.origin_iata===d&&f.dest_iata!==o){const w=(fd-p.arr.getTime())/60000;if(w>=45&&w<=720)out.push({id:f._id,text:`${o} → ${d} → ${f.dest_iata}: nối ${f.flight_number}, chờ ${Math.round(w)} phút`})}
+      if(f.dest_iata===o&&f.origin_iata!==d){const w=(p.dep.getTime()-fa)/60000;if(w>=45&&w<=720)out.push({id:f._id+'-in',text:`${f.origin_iata} → ${o} → ${d}: sau ${f.flight_number}, chờ ${Math.round(w)} phút`})}
+    }
+    return out.slice(0,8);
   }
   get subtitle(){return({bookings:'Các đặt chỗ đang lưu trong hệ thống và các tác vụ theo lịch.',users:'Tài khoản và hồ sơ khách hàng/nhân viên.',flights:'Chuyến bay, lịch vận hành và trạng thái khẩn cấp.',airports:'Danh mục sân bay, múi giờ và phạm vi phục vụ.'} as any)[this.kind]||'Dữ liệu trực tiếp từ máy chủ.'}
   get searchPlaceholder(){return({bookings:'PNR, mã xác nhận, trạng thái',users:'Tên, tên đăng nhập, email, vai trò',flights:'Số hiệu chuyến bay, tuyến bay, trạng thái',airports:'IATA, thành phố, quốc gia'} as any)[this.kind]||'Tìm kiếm'}
@@ -176,7 +215,7 @@ export class AdminListComponent implements OnInit{
     if(this.kind==='users')this.editor={username:'',password:'User@2026',first_name:'',last_name:'',email:'',phone_number:'',address:'',role:'CUSTOMER'};
     else if(this.kind==='airports')this.editor={iata_code:'',icao_code:'',airport_name:'',city_name:'',country_code:'VN',time_zone:'Asia/Ho_Chi_Minh',lat:null,lng:null,is_serviced_directly:true};
     else if(this.kind==='flights'){
-      this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',scheduled_departure:'',scheduled_arrival:'',distance_miles:0,aircraft_code:'A20N',commercial:false,inventory_rows:[]};
+      this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',dep_local:'',duration_input:120,distance_miles:0,aircraft_code:'A20N',commercial:false,inventory_rows:[]};
       this.flightAircraftChanged(true);
     }
   }
@@ -188,8 +227,8 @@ export class AdminListComponent implements OnInit{
       this.editor={
         ...x,
         commercial:x.data_source==='AIRLABS_COMMERCIALIZED',
-        scheduled_departure:this.iso(x.scheduled_departure),
-        scheduled_arrival:this.iso(x.scheduled_arrival),
+        dep_local:this.localInput(new Date(x.scheduled_departure),this.tzOf(x.origin_iata)),
+        duration_input:Math.max(1,Math.round((new Date(x.scheduled_arrival).getTime()-new Date(x.scheduled_departure).getTime())/60000)),
         aircraft_code:x.aircraft?.model_code||'',
         inventory_rows:(x.inventories||[]).map((inv:any)=>({
           cabin_class:inv.cabin_class,
@@ -228,11 +267,11 @@ export class AdminListComponent implements OnInit{
   }
   saveFlight(){
     const e=this.editor;
-    const dep=this.parseIso(e.scheduled_departure),arr=this.parseIso(e.scheduled_arrival);
-    if(!dep||!arr){this.error='Giờ bay phải là ISO hợp lệ có timezone, ví dụ 2026-10-01T01:00:00.000Z.';return}
-    if(arr.getTime()<=dep.getTime()){this.error='Giờ đến phải sau giờ khởi hành.';return}
+    const p=this.computeTimes();
+    if(!p){this.error='Nhập nơi đi/đến, giờ cất cánh (giờ địa phương) và thời gian bay hợp lệ.';return}
+    const dep=p.dep,arr=p.arr;
     if(!e.departure_date){this.error='Departure date là bắt buộc.';return}
-    const duration=Math.max(1,Math.round((arr.getTime()-dep.getTime())/60000));
+    const duration=p.duration;
     if(!e.aircraft_code?.trim()){this.error='Chọn máy bay cho chuyến bay.';return}
     const layout=this.selectedFlightLayout;
     if(!layout){this.error='Loại máy bay không tồn tại trong fleet layout.';return}

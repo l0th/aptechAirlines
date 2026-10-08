@@ -45,3 +45,8 @@ temp/
 
 # Ảnh chụp màn hình phục vụ kiểm thử GUI (không cần đưa vào repo)
 browser-screenshots/
+
+# Local-only artifacts
+/node_modules
+frontend/out-tsc/
+*.rtfd/

@@ -526,15 +526,24 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
             const itinerary = await this.buildItineraryLegs(booking.ticket_coupons);
             const firstLeg = itinerary[0];
 
-            const sent = await this.mailService.sendCancellationEmail({
+            const sent = !wasConfirmed
+              ? await this.mailService.sendHoldCancelledByCustomerEmail({
+                  toEmail: user.email,
+                  passengerName,
+                  bookingReference: booking.pnr_code,
+                  blockingNumber: booking.blocking_number,
+                  cancellationNumber,
+                  itinerary,
+                })
+              : await this.mailService.sendCancellationEmail({
               toEmail: user.email,
               passengerName,
               bookingReference: booking.pnr_code,
               blockingNumber: booking.blocking_number,
               confirmationNumber: booking.confirmation_number,
               cancellationNumber,
-              cancellationType: wasConfirmed ? 'MANUAL_CONFIRMED' : 'MANUAL_BLOCKED',
-              originalBookingStatus: wasConfirmed ? 'CONFIRMED' : 'BLOCKED',
+              cancellationType: 'MANUAL_CONFIRMED',
+              originalBookingStatus: 'CONFIRMED',
               flightNumber: firstLeg?.flightNumber,
               origin: firstLeg?.origin,
               destination: firstLeg?.destination,

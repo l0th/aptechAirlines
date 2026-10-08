@@ -20,8 +20,8 @@ import { PaginationComponent } from '../shared/pagination.component';
       </div>
     </div>
 
-    @if(error){<p class="error notice">{{error}}</p>}
-    @if(message){<p class="success notice">{{message}}</p>}
+    
+    
 
     <section class="card table-card">
       <div class="table-wrap">
@@ -91,9 +91,11 @@ import { PaginationComponent } from '../shared/pagination.component';
   `]
 })
 export class PoliciesComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api=inject(ApiService);
   toast=inject(ToastService);
-  rows:any[]=[]; editing:any=null; detailOpen=false; busy=false; error=''; message='';page=1;pageSize=20;
+  rows:any[]=[]; editing:any=null; detailOpen=false; busy=false; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};page=1;pageSize=20;
   form:any=this.blank();
   constructor(){this.load()}
   get paged(){const start=(this.page-1)*this.pageSize;return this.rows.slice(start,start+this.pageSize)}

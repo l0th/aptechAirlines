@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
@@ -12,7 +13,7 @@ import { AuthService } from '../core/auth.service';
       <button class="btn btn-outline" (click)="load()">Làm mới</button>
     </div>
 
-    @if(error){<p class="error notice">{{error}}</p>}
+    
     <div class="grid grid-4 stats">
       <div class="card"><span>Đặt chỗ</span><strong>{{data?.total_bookings??'—'}}</strong><small>{{data?.status_breakdown?.confirmed||0}} đã xác nhận</small></div>
       <div class="card"><span>Doanh thu ròng</span><strong>{{money(data?.net_revenue_vnd||0)}}</strong><small>Dựa trên sổ giao dịch</small></div>
@@ -61,10 +62,12 @@ import { AuthService } from '../core/auth.service';
   `]
 })
 export class DashboardComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api=inject(ApiService);
   auth=inject(AuthService);
   router=inject(Router);
-  data:any=null;capacity:any=null;error='';
+  data:any=null;capacity:any=null;private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   constructor(){if(!this.auth.admin()){this.router.navigate(['/admin/reservation-desk']);return}this.load()}
   load(){
     this.error='';

@@ -490,6 +490,29 @@ export class SeatPricingService implements OnModuleInit {
     return existing.save();
   }
 
+  /**
+   * Admin: Re-activate a rule that was turned off with deactivateRule.
+   * Only the latest version of a rule chain can be re-activated; versions that were
+   * superseded by an edit (a newer `-Vn` rule points to them) stay archived.
+   */
+  async activateRule(ruleId: string): Promise<SeatPricingRuleDocument> {
+    const existing = await this.ruleModel.findOne({ rule_id: ruleId }).exec();
+    if (!existing) {
+      throw new NotFoundException(`Rule with ID '${ruleId}' not found.`);
+    }
+    if (existing.is_active) return existing;
+    const newer = await this.ruleModel.findOne({ supersedes_rule_id: ruleId }).exec();
+    if (newer) {
+      throw new BadRequestException(
+        `Rule '${ruleId}' đã được thay bằng phiên bản mới '${newer.rule_id}'. Hãy bật/sửa phiên bản mới.`,
+      );
+    }
+    existing.is_active = true;
+    existing.set('deactivated_at', undefined);
+    existing.set('deactivated_by_user_id', undefined);
+    return existing.save();
+  }
+
   private requireProfileModel(): Model<SeatPricingProfileDocument> {
     if (!this.profileModel) throw new BadRequestException('Seat pricing profile storage is not available.');
     return this.profileModel;

@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
@@ -26,7 +27,7 @@ import { PaginationComponent } from '../shared/pagination.component';
         </button>
       </section>
 
-      @if(error){<p class="error notice">{{error}}</p>}
+      
       @if(searched && !loading && !error && !results.length){
         <div class="card empty"><h2>Không có chuyến phù hợp</h2><p class="muted">Kiểm tra lại số hiệu chuyến bay và ngày.</p></div>
       }
@@ -79,11 +80,13 @@ import { PaginationComponent } from '../shared/pagination.component';
   `]
 })
 export class LookupComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   private api = inject(ApiService);
   number = '';
   date = '';
   results: any[] = [];
-  error = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   loading = false;
   searched = false;
   page = 1;

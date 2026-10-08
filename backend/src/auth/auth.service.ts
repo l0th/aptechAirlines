@@ -28,6 +28,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid username or password');
     }
 
+    if (user.is_active === false) {
+      throw new UnauthorizedException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
+    }
+
     const userObj = user.toObject();
     delete userObj.password_hash;
     return userObj;

@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
@@ -171,8 +172,10 @@ import { IconComponent } from '../shared/icon.component';
   `]
 })
 export class SeatsComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api=inject(ApiService); state=inject(BookingStateService); router=inject(Router); lang=inject(LanguageService);
-  legs:BookingLeg[]=[]; legIndex=0; passengerIndex=0; rows:any[]=[]; loading=true; error='';
+  legs:BookingLeg[]=[]; legIndex=0; passengerIndex=0; rows:any[]=[]; loading=true; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   requests:any[]=[]; seatMap:any=null; changingSeat=false; private cache=new Map<string,any>();
 
   constructor(){

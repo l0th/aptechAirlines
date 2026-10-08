@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -130,11 +131,13 @@ import { IconComponent } from '../shared/icon.component';
   `]
 })
 export class ResultsComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   private route=inject(ActivatedRoute);
   private api=inject(ApiService);
   private state=inject(BookingStateService);
   router=inject(Router);
-  q:any={}; data:any; policies:any[]=[]; loading=true; error=''; selectedOutbound:any=null; selectedInbound:any=null;
+  q:any={}; data:any; policies:any[]=[]; loading=true; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; selectedOutbound:any=null; selectedInbound:any=null;
 
   constructor(){this.api.policies().subscribe({next:r=>this.policies=r,error:()=>{}});this.route.queryParamMap.subscribe(p=>{this.q={};p.keys.forEach(k=>this.q[k]=p.get(k));delete this.q['cabin_class'];this.restoreSelection();this.load()})}
   get direct(){return this.groupDirect(this.data?.onward_flights||[])}

@@ -49,6 +49,10 @@ export class User {
   @Prop({ type: String, enum: UserRole, default: UserRole.CUSTOMER })
   role: UserRole;
 
+  // Account lock flag: inactive (locked) users cannot log in
+  @Prop({ default: true })
+  is_active: boolean;
+
   @Prop()
   password_reset_code_hash?: string;
 

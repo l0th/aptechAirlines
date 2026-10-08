@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -48,14 +49,9 @@ export class UsersController {
     @Req() req: { user: { sub: string; role: UserRole } },
     @Body() createUserDto: CreateUserDto,
   ) {
-    // Only SUPER_ADMIN can create SUPER_ADMIN accounts (prevent privilege escalation)
-    if (
-      req.user.role !== UserRole.SUPER_ADMIN &&
-      createUserDto.role === UserRole.SUPER_ADMIN
-    ) {
-      throw new ForbiddenException(
-        'Only SUPER_ADMIN can create SUPER_ADMIN accounts',
-      );
+    // SUPER_ADMIN is a single permanent account: nobody may create another via the API
+    if (createUserDto.role === UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('SUPER_ADMIN accounts cannot be created');
     }
     const user = await this.usersService.create(createUserDto);
     return toSafeUserResponse(user);
@@ -83,11 +79,21 @@ export class UsersController {
       );
     }
 
-    // ADMIN cannot demote/elevate SUPER_ADMIN
-    if (req.user.role === UserRole.ADMIN && updateUserDto.role === UserRole.SUPER_ADMIN) {
-      throw new ForbiddenException(
-        'Only SUPER_ADMIN can promote users to SUPER_ADMIN',
-      );
+    // Nobody can promote to SUPER_ADMIN
+    if (updateUserDto.role === UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Promotion to SUPER_ADMIN is not allowed');
+    }
+    // Users (incl. admins) cannot change their own role
+    if (isSelf && updateUserDto.role !== undefined) {
+      const me = await this.usersService.findById(id);
+      if (updateUserDto.role !== me.role) {
+        throw new ForbiddenException('You cannot change your own role');
+      }
+    }
+    // Admins cannot edit SUPER_ADMIN accounts (SUPER_ADMIN may still edit own profile)
+    if (!isSelf) {
+      const target = await this.usersService.findById(id);
+      this.usersService.assertCanManage(req.user, target, 'edit');
     }
 
     const user = await this.usersService.update(id, updateUserDto);
@@ -110,5 +116,27 @@ export class UsersController {
       }
     }
     return this.usersService.delete(id);
+  }
+
+  @Patch(':id/status')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async setStatus(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('id') id: string,
+    @Body() body: { is_active: boolean },
+  ) {
+    const user = await this.usersService.setActiveStatus(req.user, id, body?.is_active !== false);
+    return toSafeUserResponse(user);
+  }
+
+  @Post(':id/reset-password')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async resetPassword(
+    @Req() req: { user: { sub: string; role: UserRole } },
+    @Param('id') id: string,
+    @Body() body: { password: string },
+  ) {
+    const user = await this.usersService.adminResetPassword(req.user, id, body?.password);
+    return { message: `Password reset for ${user.username}` };
   }
 }

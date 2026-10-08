@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -44,8 +45,8 @@ import { ApiService } from '../core/api.service';
           <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="model.address"></div>
           <div class="checkout-note"><strong>Không cần khai báo thẻ ngân hàng.</strong><span>Khi mua vé hoặc trả chênh lệch đổi chuyến, hệ thống mở PayPal Checkout để bạn thanh toán.</span></div>
           <button class="btn btn-primary" (click)="save()">Lưu thay đổi</button>
-          @if(message){<p class="success">{{message}}</p>}
-          @if(error){<p class="error">{{error}}</p>}
+          
+          
         </section>
       </div>
     }
@@ -55,7 +56,9 @@ import { ApiService } from '../core/api.service';
   `]
 })
 export class ProfileComponent{
-  auth=inject(AuthService);api=inject(ApiService);model:any={};message='';error='';
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
+  auth=inject(AuthService);api=inject(ApiService);model:any={};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   constructor(){this.model={...(this.auth.user()||{})}}
   get initials(){return`${this.auth.user()?.first_name?.[0]||''}${this.auth.user()?.last_name?.[0]||''}`.toUpperCase()}
   save(){

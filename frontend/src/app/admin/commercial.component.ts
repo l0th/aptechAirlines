@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
@@ -26,8 +27,8 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
       <div [class.done]="publishDone" [class.active]="allLegsCommercialized&&!publishDone"><b>4</b><span>Phát hành lịch<small>Materialize flights</small></span></div>
     </section>
 
-    @if(error){<div class="notice error-box">{{error}}</div>}
-    @if(message){<div class="notice success-box">{{message}}</div>}
+    
+    
 
     <section class="card workspace">
       <div class="panel-head">
@@ -164,7 +165,7 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
                 }
               </div>
             }
-            @if(formError){<p class="error">{{formError}}</p>}
+            
             <div class="modal-actions"><button class="btn btn-outline" (click)="commercializingLeg=null">Hủy</button><button class="btn btn-primary" (click)="submitCommercialize()" [disabled]="submittingForm">{{submittingForm?'Đang tạo…':'Tạo mẫu thương mại'}}</button></div>
           </div>
         </section>
@@ -186,7 +187,7 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
               </div>
             }
             <label class="active-toggle"><input type="checkbox" [(ngModel)]="editActive"> Mẫu đang hoạt động</label>
-            @if(formError){<p class="error">{{formError}}</p>}
+            
             <div class="modal-actions"><button class="btn btn-outline" (click)="editingTemplate=null">Hủy</button><button class="btn btn-primary" (click)="saveEdit()" [disabled]="submittingForm">{{submittingForm?'Đang lưu…':'Lưu cấu hình'}}</button></div>
           </div>
         </section>
@@ -198,6 +199,8 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
   `]
 })
 export class CommercialComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   private api = inject(ApiService);
   readonly allCabins: Cabin[] = ['ECONOMY','BUSINESS','CLUB','FIRST'];
 
@@ -221,13 +224,13 @@ export class CommercialComponent {
   publishDays = 330;
   publishStart = '';
   busyId = '';
-  error = '';
-  message = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
+  private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};
 
   commercializingLeg: any = null;
   editingTemplate: any = null;
   submittingForm = false;
-  formError = '';
+  private __formError='';get formError(){return this.__formError}set formError(v:string){this.__formError=v;this.__toast.notifyError(v)};
   formFlightNumber = '';
   formAircraft = '';
   formCabins: Record<Cabin,boolean> = this.boolRecord();

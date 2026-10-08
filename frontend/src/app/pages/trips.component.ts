@@ -78,8 +78,8 @@ import { PaginationComponent } from '../shared/pagination.component';
       @if(!trips().length){<div class="card empty">Bạn chưa có booking nào.</div>}
     }
 
-    @if(message){<p class="success notice">{{message}}</p>}
-    @if(error){<p class="error notice">{{error}}</p>}
+    
+    
 
     @if(selected){
       <div class="modal" (click)="closeDetails()">
@@ -145,6 +145,8 @@ import { PaginationComponent } from '../shared/pagination.component';
   `]
 })
 export class TripsComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   api = inject(ApiService);
   auth = inject(AuthService);
   paypal = inject(PaypalService);
@@ -158,8 +160,8 @@ export class TripsComponent {
   loading = signal(true);
   busy = false;
   paypalEnabled = false;
-  message = '';
-  error = '';
+  private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   page = 1;
   pageSize = 10;
   scheduleLoading = new Set<string>();

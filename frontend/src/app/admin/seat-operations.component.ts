@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
@@ -22,8 +23,8 @@ import { ApiService } from '../core/api.service';
       <button class="btn btn-primary" (click)="loadMap()" [disabled]="busy||!flightId||!aircraftType.trim()">Tải sơ đồ</button>
     </section>
 
-    @if(message){<p class="success notice">{{message}}</p>}
-    @if(error){<p class="error notice">{{error}}</p>}
+    
+    
 
     @if(map){
       <div class="stats">
@@ -97,9 +98,11 @@ import { ApiService } from '../core/api.service';
   `]
 })
 export class SeatOperationsComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   private api=inject(ApiService);
   flights:any[]=[];flightId='';aircraftType='A20N';selectedFlight:any=null;map:any=null;activeSeat:any=null;
-  blockReason='BLOCKED_MAINTENANCE';blockNotes='';overrideFee=0;overrideReason='';busy=false;message='';error='';
+  blockReason='BLOCKED_MAINTENANCE';blockNotes='';overrideFee=0;overrideReason='';busy=false;private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   constructor(){this.loadFlights()}
   get seatCount(){return (this.map?.rows||[]).reduce((sum:number,row:any)=>sum+(row.column_groups||[]).reduce((n:number,g:any[])=>n+g.length,0),0)}
   loadFlights(){this.api.flights().subscribe({next:r=>{this.flights=r||[];if(this.flights.length&&!this.flightId){this.flightId=this.flights[0]._id;this.selectFlight(this.flightId)}},error:e=>this.fail(e,'Không tải được danh sách chuyến bay.')})}

@@ -27,6 +27,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import { StrictCustomerGuard } from '../auth/strict-customer.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/users.schema';
+import { UsersService } from '../users/users.service';
+import { BadRequestException } from '@nestjs/common';
 
 // Staff roles allowed to view all bookings and manage anyone's bookings
 const STAFF_ROLES = [UserRole.CLERK, UserRole.ADMIN, UserRole.SUPER_ADMIN];
@@ -36,7 +38,23 @@ export class BookingsController {
   constructor(
     private readonly bookingsService: BookingsService,
     private readonly bookingsScheduler: BookingsScheduler,
+    private readonly usersService: UsersService,
   ) {}
+
+  /**
+   * Staff (CLERK/ADMIN) book on behalf of a registered customer: the target
+   * user_id must be an existing CUSTOMER account, never the staff member.
+   */
+  private async resolveStaffTargetCustomer(req: { user: { sub: string; role: UserRole } }, userId?: string) {
+    if (!userId || userId === 'self' || userId === req.user.sub) {
+      throw new BadRequestException('Nhân viên phải chọn tài khoản khách hàng (user_id) khi đặt vé hộ.');
+    }
+    const target = await this.usersService.findById(userId);
+    if (target.role !== UserRole.CUSTOMER) {
+      throw new BadRequestException('Chỉ có thể đặt vé hộ cho tài khoản CUSTOMER.');
+    }
+    return String(target._id);
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -47,6 +65,8 @@ export class BookingsController {
     // Customers can only create bookings for themselves
     if (req.user.role === UserRole.CUSTOMER) {
       createBookingDto.user_id = req.user.sub;
+    } else {
+      createBookingDto.user_id = await this.resolveStaffTargetCustomer(req, createBookingDto.user_id);
     }
     return this.bookingsService.createBooking(createBookingDto);
   }
@@ -59,7 +79,7 @@ export class BookingsController {
   ) {
     const targetUserId = req.user.role === UserRole.CUSTOMER
       ? req.user.sub
-      : quoteBookingDto.user_id || req.user.sub;
+      : await this.resolveStaffTargetCustomer(req, quoteBookingDto.user_id);
     quoteBookingDto.user_id = targetUserId;
     return this.bookingsService.quoteBooking(quoteBookingDto, targetUserId);
   }

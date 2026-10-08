@@ -52,6 +52,23 @@ Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Apt
 
 ---
 
+## 🖥️ Chạy trên máy mới (sau khi clone)
+
+Database **không** nằm trong git (dữ liệu nằm trong Docker volume). Repo kèm sẵn bản chụp dữ liệu demo tại `database/snapshot/airline_db.archive.gz`.
+
+```bash
+git clone <repo> && cd <repo> && git checkout frontend-v2
+cp .env.example .env            # hoặc copy .env cũ, nhưng MONGO_URI phải là mongodb://mongodb:27017/airline_db
+docker compose up -d --build
+sh database/import-db.sh        # nạp dữ liệu demo (users, sân bay, chuyến bay, chính sách, giá ghế...)
+docker compose restart backend
+```
+
+- Windows (PowerShell) thay bước import bằng: `Get-Content database/snapshot/airline_db.archive.gz -AsByteStream -Raw | docker exec -i ars-mongodb mongorestore --archive --gzip --drop --nsInclude "airline_db.*"` (hoặc chạy lệnh `sh` trong Git Bash).
+- Cập nhật lại bản chụp sau khi sửa dữ liệu: `sh database/export-db.sh` rồi commit file `.archive.gz`.
+- Lưu ý: `MONGO_URI=mongodb://host.docker.internal:27018/...` chỉ chạy trên Docker Desktop và dễ lỗi kết nối — luôn dùng `mongodb://mongodb:27017/airline_db` khi chạy bằng Docker Compose.
+- `PAYPAL_ENABLED=true` cần internet + key sandbox hợp lệ; để demo offline đặt `false`.
+
 ## Chạy dự án bằng Docker
 
 Docker Compose chỉ khởi chạy đúng 3 service: **MongoDB + Backend + Frontend**. MongoDB được tạo trống và lưu dữ liệu trong Docker volume; hệ thống **không tự bootstrap/seed dữ liệu nghiệp vụ** khi khởi động.

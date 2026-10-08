@@ -5,7 +5,7 @@ import { Model } from 'mongoose';
 import { Booking, BookingDocument, BookingStatus } from './bookings.schema';
 import { BookingsService } from './bookings.service';
 import { FlightsService } from '../flights/flights.service';
-import { ItineraryLegData, MailService, escapeHtml } from '../mail/mail.service';
+import { BlockedReminderLeg, ItineraryLegData, MailService, renderBlockedTicketReminder } from '../mail/mail.service';
 import { formatLocalTime } from '../common/timezone.util';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
@@ -81,7 +81,7 @@ export class BookingsScheduler {
         }
 
         const reminderBody = await this.buildReminderBody(booking, user, earliestDeparture);
-        const mailSent = await this.mailService.sendBlockedTicketReminder(toEmail, reminderBody);
+        const mailSent = await this.mailService.sendBlockedTicketReminder(toEmail, reminderBody, booking.pnr_code);
         if (!mailSent) {
           this.logger.warn(
             `Reminder email delivery returned false for booking ${booking.pnr_code} (${toEmail}); leaving unreminded for retry`,
@@ -143,7 +143,7 @@ export class BookingsScheduler {
     if (booking.status === BookingStatus.BLOCKED) {
       const earliestDeparture = await this.bookingsService.getEarliestDeparture(booking);
       const body = await this.buildReminderBody(booking, user, earliestDeparture);
-      const ok = await this.mailService.sendBlockedTicketReminder(user.email, body);
+      const ok = await this.mailService.sendBlockedTicketReminder(user.email, body, booking.pnr_code);
       if (!ok) throw new BadRequestException('Email delivery failed. Check SMTP configuration/logs.');
       booking.is_reminder_sent = true;
       await booking.save();
@@ -267,7 +267,7 @@ export class BookingsScheduler {
     earliestDeparture: Date,
   ): Promise<string> {
     // Gather the distinct flight legs for the email
-    const lines: string[] = [];
+    const legs: BlockedReminderLeg[] = [];
     const seen = new Set<string>();
     let earliestLegOriginTz: string | undefined;
     let minDepTime = Infinity;
@@ -288,12 +288,15 @@ export class BookingsScheduler {
         const depStr = localDep
           ? `${localDep} (${originTz})`
           : `${new Date(flight.scheduled_departure).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
-        lines.push(
-          `<li>Flight ${escapeHtml(flight.flight_number)}: ${escapeHtml(flight.origin_iata)} → ${escapeHtml(flight.dest_iata)}, ` +
-            `departing ${escapeHtml(depStr)} (${escapeHtml(coupon.cabin_class)})</li>`,
-        );
+        legs.push({
+          flightNumber: flight.flight_number,
+          origin: flight.origin_iata,
+          destination: flight.dest_iata,
+          departureTimeFormatted: depStr,
+          cabinClass: coupon.cabin_class,
+        });
       } catch (e) {
-        lines.push(`<li>Flight ${escapeHtml(coupon.flight_number)} (${escapeHtml(coupon.cabin_class)})</li>`);
+        legs.push({ flightNumber: coupon.flight_number, cabinClass: coupon.cabin_class });
       }
     }
 
@@ -312,25 +315,15 @@ export class BookingsScheduler {
         : `${new Date(booking.time_limit_deadline).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
     }
 
-    return `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
-        <div style="background:#071b2e;color:#fff;padding:22px 24px;border-radius:14px 14px 0 0">
-          <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f2c85f">APTECH AIRLINES</div>
-          <h2 style="margin:8px 0 0">Nhắc thanh toán vé đang giữ chỗ</h2>
-        </div>
-        <div style="border:1px solid #e2e8f0;border-top:0;padding:24px;border-radius:0 0 14px 14px">
-          <p>Xin chào ${escapeHtml(passengerName)},</p>
-          <p>Bạn đang có một vé <strong>giữ chỗ chưa thanh toán</strong>. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(earliestStr)}</strong>.</p>
-          <div style="background:#fff7df;border:1px solid #efd783;padding:14px;border-radius:12px;margin:16px 0">
-            <div><strong>PNR:</strong> ${escapeHtml(booking.pnr_code)}</div>
-            <div><strong>Mã giữ chỗ:</strong> ${escapeHtml(booking.blocking_number || '-')}</div>
-            <div><strong>Payment deadline:</strong> ${escapeHtml(deadlineStr)}<br/><span style="color:#64748b;font-size:12px">Hạn xác nhận & thanh toán</span></div>
-          </div>
-          <p><strong>Hành trình:</strong></p><ul>${lines.join('')}</ul>
-          <p>Vui lòng xác nhận vé trước hạn. Nếu quá hạn, hệ thống sẽ tự động hủy giữ chỗ và hoàn ghế về kho.</p>
-          <p style="color:#64748b;font-size:12px;margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px">Aptech Airlines • Thông báo giữ chỗ tự động • Vui lòng không trả lời trực tiếp email này.</p>
-        </div>
-      </div>`;
+    return renderBlockedTicketReminder({
+      toEmail: user?.email || '',
+      passengerName,
+      bookingReference: booking.pnr_code,
+      blockingNumber: booking.blocking_number,
+      earliestDepartureFormatted: earliestStr,
+      deadlineFormatted: deadlineStr,
+      legs,
+    }).html;
   }
 
   /**

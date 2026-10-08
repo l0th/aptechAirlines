@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { ToastService } from '../core/toast.service';
+import { AuthService } from '../core/auth.service';
 
 @Component({
   standalone:true,
@@ -22,13 +23,14 @@ import { ToastService } from '../core/toast.service';
 
     <section class="card toolbar">
       <input class="control" [(ngModel)]="query" placeholder="Tên, username, email, điện thoại">
+      <select class="control role-filter" [(ngModel)]="statusFilter"><option value="ALL">Mọi trạng thái</option><option value="ACTIVE">Đang hoạt động</option><option value="LOCKED">Đã khóa</option></select>
       <select class="control role-filter" [(ngModel)]="roleFilter">
         <option value="ALL">Tất cả vai trò</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option><option value="SUPER_ADMIN">SUPER_ADMIN</option>
       </select>
       <button class="btn btn-outline" (click)="load()" [disabled]="loading">Làm mới</button>
     </section>
 
-    @if(error){<p class="error notice">{{error}}</p>}
+    
     @if(editor){
       <section class="card editor">
         <div class="editor-head"><div><span class="eyebrow">{{editorMode==='create'?'NEW STAFF':'EDIT STAFF'}}</span><h2>{{editorMode==='create'?'Tạo tài khoản nhân viên':editor.first_name+' '+editor.last_name}}</h2></div><button class="close" (click)="editor=null">×</button></div>
@@ -41,7 +43,7 @@ import { ToastService } from '../core/toast.service';
           <div class="field"><span>Tên</span><input class="control" [(ngModel)]="editor.last_name"></div>
           <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="editor.email"></div>
           <div class="field"><span>Điện thoại</span><input class="control" [(ngModel)]="editor.phone_number"></div>
-          <div class="field"><span>Vai trò</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'"><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
+          <div class="field"><span>Vai trò</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'||isSelf(editor)"><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
           <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="editor.address"></div>
         </div>
         <div class="editor-actions"><button class="btn btn-outline" (click)="editor=null">Đóng</button><button class="btn btn-primary" (click)="save()" [disabled]="busy">{{busy?'Đang lưu…':'Lưu nhân viên'}}</button></div>
@@ -58,7 +60,9 @@ import { ToastService } from '../core/toast.service';
               <span class="avatar">{{initials(x)}}</span>
               <div class="identity"><strong>{{x.first_name}} {{x.last_name}}</strong><small>@{{x.username}} · {{x.email}}</small><small>{{x.phone_number||'Chưa có số điện thoại'}}</small></div>
               <span class="role" [class.admin]="x.role==='ADMIN'||x.role==='SUPER_ADMIN'">{{x.role}}</span>
-              <div class="actions"><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||x.role==='SUPER_ADMIN'">Xóa</button></div>
+              <span class="pill" [class.locked]="x.is_active===false">{{x.is_active===false?'Đã khóa':'Hoạt động'}}</span>
+              @if(x.role==='SUPER_ADMIN'){<div class="actions"><span class="muted">Chỉ xem</span></div>}
+              @else{<div class="actions"><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline" (click)="toggleLock(x)" [disabled]="busy||isSelf(x)">{{x.is_active===false?'Mở khóa':'Khóa'}}</button><button class="btn btn-outline" (click)="resetPw(x)" [disabled]="busy">Đặt lại MK</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||isSelf(x)">Xóa</button></div>}
             </article>
           }
         </div>
@@ -66,14 +70,16 @@ import { ToastService } from '../core/toast.service';
     </section>
   `,
   styles:[`
-    .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px}.page-head .title{margin-bottom:4px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}.stats .card{padding:16px 18px;display:grid;gap:5px}.stats span{font-size:10px;text-transform:uppercase;font-weight:800;color:#718093}.stats strong{font-size:24px;color:#071b2e}.toolbar{display:flex;gap:9px;padding:14px;margin-top:14px}.toolbar input{flex:1}.role-filter{max-width:190px}.notice{margin-top:14px;padding:10px 13px;border-radius:12px;background:#fff0f0;border:1px solid #efcaca}.editor{padding:20px;margin-top:14px}.editor-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}.editor-head h2{margin:4px 0 0;color:#071b2e}.close{border:0;background:#eef3f6;width:32px;height:32px;border-radius:50%;font-size:20px;color:#566979}.editor-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.table-card{padding:8px;margin-top:14px}.staff-list{display:grid}.staff-row{display:grid;grid-template-columns:46px minmax(0,1fr) 130px auto;align-items:center;gap:14px;padding:13px 12px;border-bottom:1px solid #edf1f4}.staff-row:last-child{border-bottom:0}.avatar{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:#0d304e;color:#f2c85f;font-weight:900}.identity{display:grid;gap:3px;min-width:0}.identity strong{color:#102c43}.identity small{color:#718093;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.role{justify-self:start;border-radius:999px;padding:6px 9px;background:#edf2f6;color:#4c6173;font-size:10px;font-weight:900}.role.admin{background:#fff2c9;color:#72540c}.actions{display:flex;gap:7px}.danger{color:#a83030;border-color:#e4bebe}.empty{padding:34px;text-align:center}@media(max-width:900px){.stats{grid-template-columns:1fr 1fr}.staff-row{grid-template-columns:46px 1fr auto}.role{grid-column:2}.actions{grid-column:3;grid-row:1/3}}@media(max-width:620px){.page-head,.toolbar{align-items:stretch;flex-direction:column}.role-filter{max-width:none}.stats{grid-template-columns:1fr 1fr}.staff-row{grid-template-columns:42px 1fr}.role,.actions{grid-column:2;grid-row:auto}.actions{justify-content:flex-start}.editor-actions{flex-direction:column}.editor-actions .btn{width:100%}}
+    .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px}.page-head .title{margin-bottom:4px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}.stats .card{padding:16px 18px;display:grid;gap:5px}.stats span{font-size:10px;text-transform:uppercase;font-weight:800;color:#718093}.stats strong{font-size:24px;color:#071b2e}.toolbar{display:flex;gap:9px;padding:14px;margin-top:14px}.toolbar input{flex:1}.role-filter{max-width:190px}.notice{margin-top:14px;padding:10px 13px;border-radius:12px;background:#fff0f0;border:1px solid #efcaca}.editor{padding:20px;margin-top:14px}.editor-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}.editor-head h2{margin:4px 0 0;color:#071b2e}.close{border:0;background:#eef3f6;width:32px;height:32px;border-radius:50%;font-size:20px;color:#566979}.editor-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.table-card{padding:8px;margin-top:14px}.staff-list{display:grid}.staff-row{display:grid;grid-template-columns:46px minmax(0,1fr) 110px 100px auto;align-items:center;gap:14px;padding:13px 12px;border-bottom:1px solid #edf1f4}.staff-row:last-child{border-bottom:0}.avatar{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:#0d304e;color:#f2c85f;font-weight:900}.identity{display:grid;gap:3px;min-width:0}.identity strong{color:#102c43}.identity small{color:#718093;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.role{justify-self:start;border-radius:999px;padding:6px 9px;background:#edf2f6;color:#4c6173;font-size:10px;font-weight:900}.role.admin{background:#fff2c9;color:#72540c}.actions{display:flex;gap:7px}.pill{justify-self:start;border-radius:999px;padding:5px 9px;background:#e5f6ec;color:#1f7a45;font-size:10px;font-weight:900}.pill.locked{background:#fdeaea;color:#a83030}.actions{flex-wrap:wrap}.danger{color:#a83030;border-color:#e4bebe}.empty{padding:34px;text-align:center}@media(max-width:900px){.stats{grid-template-columns:1fr 1fr}.staff-row{grid-template-columns:46px 1fr auto}.role{grid-column:2}.actions{grid-column:3;grid-row:1/3}}@media(max-width:620px){.page-head,.toolbar{align-items:stretch;flex-direction:column}.role-filter{max-width:none}.stats{grid-template-columns:1fr 1fr}.staff-row{grid-template-columns:42px 1fr}.role,.actions{grid-column:2;grid-row:auto}.actions{justify-content:flex-start}.editor-actions{flex-direction:column}.editor-actions .btn{width:100%}}
   `]
 })
 export class StaffManagementComponent{
-  api=inject(ApiService);toast=inject(ToastService);
-  staff:any[]=[];query='';roleFilter='ALL';loading=true;busy=false;error='';editor:any=null;editorMode:'create'|'edit'='create';
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
+  api=inject(ApiService);toast=inject(ToastService);auth=inject(AuthService);statusFilter='ALL';
+  staff:any[]=[];query='';roleFilter='ALL';loading=true;busy=false;private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};editor:any=null;editorMode:'create'|'edit'='create';
   constructor(){this.load()}
-  get filtered(){const q=this.query.trim().toLowerCase();return this.staff.filter(x=>(this.roleFilter==='ALL'||x.role===this.roleFilter)&&(!q||[x.first_name,x.last_name,x.username,x.email,x.phone_number].some(v=>String(v||'').toLowerCase().includes(q))))}
+  get filtered(){const q=this.query.trim().toLowerCase();return this.staff.filter(x=>(this.roleFilter==='ALL'||x.role===this.roleFilter)&&(this.statusFilter==='ALL'||(this.statusFilter==='LOCKED')===(x.is_active===false))&&(!q||[x.first_name,x.last_name,x.username,x.email,x.phone_number].some(v=>String(v||'').toLowerCase().includes(q))))}
   load(){this.loading=true;this.error='';this.api.users().subscribe({next:r=>{this.staff=(r||[]).filter((u:any)=>u.role!=='CUSTOMER');this.loading=false},error:e=>{this.error=this.msg(e,'Không tải được danh sách nhân viên.');this.loading=false}})}
   count(role:string){return this.staff.filter(x=>x.role===role).length}
   initials(x:any){return`${x?.first_name?.[0]||''}${x?.last_name?.[0]||x?.username?.[0]||''}`.toUpperCase()}
@@ -93,6 +99,18 @@ export class StaffManagementComponent{
     if(x.role==='SUPER_ADMIN')return;
     const ok=await this.toast.confirm({titleVi:'Xóa tài khoản nhân viên',titleEn:'Delete staff account',messageVi:`Xóa tài khoản @${x.username}?`,messageEn:`Delete staff account @${x.username}?`,confirmVi:'Xóa',confirmEn:'Delete'});if(!ok)return;
     this.busy=true;this.api.deleteUser(x._id).subscribe({next:()=>{this.busy=false;this.load()},error:e=>{this.busy=false;this.error=this.msg(e,'Không xóa được nhân viên.')}})
+  }
+  myId(){const u:any=(this.auth as any).user?.();return String(u?._id||u?.id||'')}
+  isSelf(x:any){return !!x&&!!this.myId()&&String(x._id)===this.myId()}
+  async toggleLock(x:any){
+    if(x.role==='SUPER_ADMIN'||this.isSelf(x))return;const lock=x.is_active!==false;
+    const ok=await this.toast.confirm({titleVi:lock?'Khóa tài khoản':'Mở khóa tài khoản',titleEn:lock?'Lock account':'Unlock account',messageVi:`${lock?'Khóa':'Mở khóa'} tài khoản @${x.username}?`,messageEn:`${lock?'Lock':'Unlock'} @${x.username}?`,confirmVi:lock?'Khóa':'Mở khóa',confirmEn:lock?'Lock':'Unlock'});if(!ok)return;
+    this.busy=true;this.api.setUserStatus(x._id,!lock).subscribe({next:()=>{this.busy=false;this.load()},error:e=>{this.busy=false;this.error=this.msg(e,'Không cập nhật được trạng thái.')}})
+  }
+  resetPw(x:any){
+    if(x.role==='SUPER_ADMIN')return;const pw=prompt(`Nhập mật khẩu tạm thời mới cho @${x.username} (tối thiểu 6 ký tự):`,'Temp@2026');if(pw===null)return;
+    if(pw.length<6){this.error='Mật khẩu tạm thời phải có ít nhất 6 ký tự.';return}
+    this.busy=true;this.api.resetUserPassword(x._id,pw).subscribe({next:()=>{this.busy=false;this.error='';alert(`Đã đặt lại mật khẩu cho @${x.username}.`)},error:e=>{this.busy=false;this.error=this.msg(e,'Không đặt lại được mật khẩu.')}})
   }
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
 }

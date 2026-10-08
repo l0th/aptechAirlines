@@ -2744,6 +2744,7 @@ describe('BookingsService', () => {
 
       mailService = {
         sendCancellationEmail: jest.fn().mockResolvedValue(true),
+        sendHoldCancelledByCustomerEmail: jest.fn().mockResolvedValue(true),
         sendExpiredHoldCancellationEmail: jest.fn().mockResolvedValue(true),
       };
 
@@ -2819,7 +2820,7 @@ describe('BookingsService', () => {
       expect(callData.departureTimeFormatted).toContain('(Asia/Ho_Chi_Minh)');
     });
 
-    it('cancelTicket dispatches sendCancellationEmail for BLOCKED booking with 0 refund', async () => {
+    it('cancelTicket dispatches sendHoldCancelledByCustomerEmail for BLOCKED booking', async () => {
       const departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
       const mockBooking: any = {
         _id: 'booking-2',
@@ -2857,14 +2858,13 @@ describe('BookingsService', () => {
       const result = await service.cancelTicket({ identifier: 'PNR-BLOCKED' });
 
       expect(result.cancellation_number).toBeDefined();
-      expect(mailService.sendCancellationEmail).toHaveBeenCalledTimes(1);
-      const [callData] = mailService.sendCancellationEmail.mock.calls[0];
-      expect(callData.cancellationType).toBe('MANUAL_BLOCKED');
+      expect(mailService.sendCancellationEmail).not.toHaveBeenCalled();
+      expect(mailService.sendHoldCancelledByCustomerEmail).toHaveBeenCalledTimes(1);
+      const [callData] = mailService.sendHoldCancelledByCustomerEmail.mock.calls[0];
+      expect(callData.bookingReference).toBe('PNR-BLOCKED');
       expect(callData.blockingNumber).toBe('BLK-123');
-      expect(callData.confirmationNumber).toBeUndefined();
-      expect(callData.refundAmount).toBe(0);
-      expect(callData.refundPercentage).toBe(0);
-      expect(callData.maskedCard).toBeUndefined();
+      expect(callData.cancellationNumber).toBe(result.cancellation_number);
+      expect(callData.itinerary.length).toBeGreaterThan(0);
     });
 
     it('cancelTicket for zero-value CONFIRMED booking passes real refundPercentage (90) and 0 refundAmount without creating REFUND transaction', async () => {

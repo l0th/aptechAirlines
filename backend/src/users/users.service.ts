@@ -157,6 +157,54 @@ export class UsersService {
     return { message: `User ${user.username} successfully deleted` };
   }
 
+  /**
+   * Staff-management rules shared by controller endpoints.
+   * - Nobody may manage (edit/lock/reset/delete) a SUPER_ADMIN account via staff endpoints.
+   * - Nobody may promote/assign SUPER_ADMIN.
+   * - A user cannot change their own role or lock themselves.
+   * Note: the existing rule lets ADMIN create/promote ADMIN accounts; kept as-is.
+   */
+  assertCanManage(
+    actor: { sub: string; role: UserRole },
+    target: { _id: any; role: UserRole },
+    action: 'edit' | 'lock' | 'reset' | 'delete',
+  ): void {
+    if (actor.role !== UserRole.ADMIN && actor.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Only ADMIN/SUPER_ADMIN can manage staff accounts');
+    }
+    if (target.role === UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('SUPER_ADMIN accounts cannot be modified');
+    }
+    if (action === 'lock' && String(actor.sub) === String(target._id)) {
+      throw new ForbiddenException('You cannot lock your own account');
+    }
+  }
+
+  async setActiveStatus(
+    actor: { sub: string; role: UserRole },
+    id: string,
+    isActive: boolean,
+  ): Promise<UserDocument> {
+    const user = await this.findById(id);
+    this.assertCanManage(actor, user, 'lock');
+    user.is_active = !!isActive;
+    return user.save();
+  }
+
+  async adminResetPassword(
+    actor: { sub: string; role: UserRole },
+    id: string,
+    newPassword: string,
+  ): Promise<UserDocument> {
+    if (!newPassword || String(newPassword).length < 6) {
+      throw new BadRequestException('Password must be at least 6 characters');
+    }
+    const user = await this.findById(id);
+    this.assertCanManage(actor, user, 'reset');
+    user.password_hash = await bcrypt.hash(String(newPassword), await bcrypt.genSalt(10));
+    return user.save();
+  }
+
   async addSkyMiles(userId: string, miles: number): Promise<UserDocument> {
     const user = await this.findById(userId);
     user.sky_miles += miles;

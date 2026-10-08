@@ -57,6 +57,18 @@ export class ToastService {
     this.show('info', content, duration);
   }
 
+  /** Show a plain error text (validation or API error) as a toast. Empty text is ignored. */
+  notifyError(text: string) {
+    if (!text) return;
+    this.error({ titleVi: 'Không thể thực hiện', titleEn: 'Action failed', messageVi: text, messageEn: text }, 5500);
+  }
+
+  /** Show a plain success text as a toast. Empty text is ignored. */
+  notifySuccess(text: string) {
+    if (!text) return;
+    this.success({ titleVi: 'Thành công', titleEn: 'Success', messageVi: text, messageEn: text });
+  }
+
   accept() {
     const item = this.current();
     if (item?.kind === 'confirm') item.resolve?.(true);

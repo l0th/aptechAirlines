@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -72,8 +73,8 @@ import { LanguageService } from '../core/language.service';
           <div class="reset-links"><button type="button" class="back-link" (click)="requestResetCode()">Gửi lại mã</button><button type="button" class="back-link" (click)="switchMode('login')">Quay lại đăng nhập</button></div>
         }
 
-        @if(message){<p class="success form-message success-message">{{message}}</p>}
-        @if(error){<p class="error form-message">{{error}}</p>}
+        
+        
         @if(mode==='login'||mode==='register'){
           <button class="btn btn-primary submit" (click)="submit()" [disabled]="busy">
             {{busy?'Đang xử lý…':mode==='login'?'Đăng nhập':'Tạo tài khoản'}}
@@ -100,6 +101,8 @@ import { LanguageService } from '../core/language.service';
   `]
 })
 export class AuthComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   auth = inject(AuthService);
   api = inject(ApiService);
   router = inject(Router);
@@ -107,8 +110,8 @@ export class AuthComponent {
   lang = inject(LanguageService);
 
   mode: 'login' | 'register' | 'forgot' | 'reset' = 'login';
-  error = '';
-  message = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
+  private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};
   busy = false;
   showLoginPassword = false;
   showRegisterPassword = false;

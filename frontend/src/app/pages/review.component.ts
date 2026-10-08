@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -118,7 +119,7 @@ import { PaypalService } from '../core/paypal.service';
             {{busy?'Đang xử lý…':mode==='block'?'Giữ chỗ':'Thanh toán & đặt vé'}}
           </button>
         }
-        @if(error){<p class="error">{{error}}</p>}
+        
       </aside>
     </div>
   </div>
@@ -128,6 +129,8 @@ import { PaypalService } from '../core/paypal.service';
   `]
 })
 export class ReviewComponent{
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   state=inject(BookingStateService);
   api=inject(ApiService);
   auth=inject(AuthService);
@@ -135,7 +138,7 @@ export class ReviewComponent{
   router=inject(Router);
 
   quote:any=null; loadingQuote=true; mode='buy'; payment='PAYPAL';
-  paypalEnabled=false; paypalReady=false; busy=false; error=''; canBlock=false;
+  paypalEnabled=false; paypalReady=false; busy=false; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; canBlock=false;
 
   constructor(){
     if(!this.state.selection()){this.router.navigate(['/']);return}

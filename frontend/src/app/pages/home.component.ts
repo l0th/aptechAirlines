@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -102,7 +103,7 @@ type LocationSuggestion = {
             <div><span>Cao tuổi</span><b><button (click)="seniors=Math.max(0,seniors-1)">−</button>{{seniors}}<button (click)="seniors=seniors+1">+</button></b></div>
           </div>
 
-          @if(error){<p class="error">{{error}}</p>}
+          
           <button class="btn btn-primary full" (click)="search()"><app-icon name="search" [size]="18"/>Tìm chuyến bay</button>
         </div>
       </div>
@@ -152,6 +153,8 @@ type LocationSuggestion = {
   `]
 })
 export class HomeComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   private api = inject(ApiService);
   private router = inject(Router);
   private state = inject(BookingStateService);
@@ -169,7 +172,7 @@ export class HomeComponent {
   adults = 1;
   children = 0;
   seniors = 0;
-  error = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   minDate = this.localDate(new Date());
   maxDate = '';
   suggestions: Record<LocationField, LocationSuggestion[]> = { origin: [], destination: [] };

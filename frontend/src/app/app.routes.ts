@@ -27,6 +27,7 @@ export const routes:Routes=[
   {path:'staff',canActivate:[adminGuard],loadComponent:()=>import('./admin/staff-management.component').then(m=>m.StaffManagementComponent)},
   {path:'flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.FlightsAdminComponent)},
   {path:'airports',canActivate:[adminGuard],loadComponent:()=>import('./admin/list-wrappers.component').then(m=>m.AirportsAdminComponent)},
+  {path:'emails',canActivate:[adminGuard],loadComponent:()=>import('./admin/email-center.component').then(m=>m.EmailCenterComponent)},
   {path:'policies',canActivate:[adminGuard],loadComponent:()=>import('./admin/policies.component').then(m=>m.PoliciesComponent)},
   {path:'commercial',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},
   {path:'commercial-flights',canActivate:[adminGuard],loadComponent:()=>import('./admin/commercial.component').then(m=>m.CommercialComponent)},

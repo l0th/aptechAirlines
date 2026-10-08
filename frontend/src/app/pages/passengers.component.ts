@@ -1,3 +1,4 @@
+import { ToastService } from '../core/toast.service';
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -33,7 +34,7 @@ import { BookingStateService } from '../core/booking-state.service';
         </section>
       }
 
-      @if(error){<p class="error notice">{{error}}</p>}
+      
       <div class="actions">
         <button class="btn btn-outline" (click)="back()">Quay lại</button>
         <button class="btn btn-primary" (click)="next()">Tiếp tục chọn ghế</button>
@@ -54,11 +55,13 @@ import { BookingStateService } from '../core/booking-state.service';
   `]
 })
 export class PassengersComponent {
+  /** Validation/API messages are shown as global toasts instead of inline banners. */
+  private __toast=inject(ToastService);
   state = inject(BookingStateService);
   auth = inject(AuthService);
   router = inject(Router);
   passengers: any[] = [];
-  error = '';
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   today = this.localDate(new Date());
 
   constructor() {
