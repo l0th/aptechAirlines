@@ -31,7 +31,6 @@ import { LanguageService } from '../core/language.service';
       <button class="btn btn-outline" (click)="load()" [disabled]="loading">Làm mới</button>
     </section>
 
-    
     @if(editor){
       <div class="modal" (click)="editor=null">
         <section class="card modal-card" (click)="$event.stopPropagation()">
