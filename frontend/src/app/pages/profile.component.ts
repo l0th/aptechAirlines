@@ -7,6 +7,7 @@ import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
 import { hasCitizenIdBirthYearMismatch, vietnameseCitizenIdBirthYear } from '../core/passenger-profile.util';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { localCalendarDate } from '../core/date-format.util';
 
 @Component({
   standalone:true,
@@ -65,7 +66,7 @@ export class ProfileComponent{
   private __toast=inject(ToastService);
   readonly language=inject(LanguageService);
   auth=inject(AuthService);api=inject(ApiService);model:any={};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
-  today=this.localDate(new Date());
+  today=localCalendarDate();
   constructor(){this.model={...(this.auth.user()||{}),date_of_birth:String(this.auth.user()?.date_of_birth||'').slice(0,10),nationality:this.auth.user()?.nationality||'Vietnam'}}
   get initials(){return`${this.auth.user()?.first_name?.[0]||''}${this.auth.user()?.last_name?.[0]||''}`.toUpperCase()}
   get cccdYear(){return vietnameseCitizenIdBirthYear(this.model.id_card_or_passport)}
@@ -76,5 +77,4 @@ export class ProfileComponent{
     const body:any={first_name:this.model.first_name,last_name:this.model.last_name,email:this.model.email,phone_number:this.model.phone_number,address:this.model.address,sex:this.model.sex,age:Number(this.model.age||0),id_card_or_passport:String(this.model.id_card_or_passport||'').trim(),nationality:String(this.model.nationality||'').trim(),date_of_birth:this.model.date_of_birth||''};
     this.api.updateUser(id,body).subscribe({next:()=>{this.message=this.language.pick('Đã cập nhật hồ sơ.','Profile updated successfully.');this.auth.refresh()},error:e=>this.error=this.language.translateNotice(Array.isArray(e?.error?.message)?e.error.message.join(' · '):(e?.error?.message||this.language.pick('Không cập nhật được hồ sơ.','Unable to update profile.')))})
   }
-  private localDate(date:Date){const y=date.getFullYear();const m=String(date.getMonth()+1).padStart(2,'0');const d=String(date.getDate()).padStart(2,'0');return`${y}-${m}-${d}`}
 }

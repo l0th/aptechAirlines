@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { PaginationComponent } from '../shared/pagination.component';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { localCalendarDate } from '../core/date-format.util';
 
 type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
 
@@ -228,7 +229,7 @@ export class CommercialComponent {
   pageSize = 20;
   origin = 'SGN';
   destination = 'HAN';
-  departureDate = this.localDate(new Date());
+  departureDate = localCalendarDate();
   maxStops = 2;
   publishDays = 330;
   publishStart = '';
@@ -405,5 +406,4 @@ export class CommercialComponent {
   boolRecord():Record<Cabin,boolean>{return{ECONOMY:false,BUSINESS:false,CLUB:false,FIRST:false}}
   numberRecord():Record<Cabin,number|null>{return{ECONOMY:null,BUSINESS:null,CLUB:null,FIRST:null}}
   numOrNull(v:any){return v===null||v===undefined||v===''?null:Number(v)}
-  localDate(date:Date){const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');return`${y}-${m}-${d}`}
 }

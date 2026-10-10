@@ -8,6 +8,7 @@ import { BookingStateService } from '../core/booking-state.service';
 import { LanguageService } from '../core/language.service';
 import { hasCitizenIdBirthYearMismatch, passengerTypeForBirthDate, vietnameseCitizenIdBirthYear } from '../core/passenger-profile.util';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { localCalendarDate } from '../core/date-format.util';
 
 @Component({
   standalone: true,
@@ -74,7 +75,7 @@ export class PassengersComponent {
   savePrimaryProfile = false;
   busy = false;
   private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
-  today = this.localDate(new Date());
+  today = localCalendarDate();
 
   constructor() {
     if (!this.state.selection()) {
@@ -126,7 +127,7 @@ export class PassengersComponent {
       return;
     }
     if (this.passengers.some(p => p.date_of_birth && !/^\d{4}-\d{2}-\d{2}$/.test(p.date_of_birth))) {
-      this.error = this.lang.pick('Ngày sinh phải đúng định dạng YYYY-MM-DD.','Date of birth must use YYYY-MM-DD format.');
+      this.error = this.lang.pick('Ngày sinh phải đúng định dạng dd/mm/yyyy.','Date of birth must use dd/mm/yyyy format.');
       return;
     }
     if (this.passengers.some(p => p.date_of_birth && p.date_of_birth > this.today)) {
@@ -220,10 +221,4 @@ export class PassengersComponent {
     };
   }
 
-  private localDate(date: Date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
 }

@@ -84,6 +84,27 @@ test('single-language known UI copy is translated using the central dictionary',
   toast.dismiss();
 });
 
+test('all toast variants render canonical dates as dd/mm/yyyy', () => {
+  const { toast } = createService();
+  toast.notifyError('Ngày khởi hành không được trước ngày hiện tại (2026-10-10).');
+  assert.match(toast.current().messageVi, /10\/10\/2026/);
+  assert.match(toast.current().messageEn, /10\/10\/2026/);
+  assert.doesNotMatch(toast.current().messageVi, /2026-10-10/);
+  toast.dismiss();
+
+  toast.error({
+    titleVi: 'Không thể đặt ngày 2026-10-09',
+    titleEn: 'Cannot book 2026-10-09',
+    messageVi: 'Định dạng nhập là YYYY-MM-DD.',
+    messageEn: 'Input format is YYYY-MM-DD.',
+  });
+  assert.match(toast.current().titleVi, /09\/10\/2026/);
+  assert.match(toast.current().titleEn, /09\/10\/2026/);
+  assert.match(toast.current().messageVi, /dd\/mm\/yyyy/);
+  assert.match(toast.current().messageEn, /dd\/mm\/yyyy/);
+  toast.dismiss();
+});
+
 test('unrecognized free-form notices never partially rewrite customer notes or identifiers', () => {
   const { toast } = createService();
   const note = 'Booking CNF-007: customer wrote Search flights, Tìm chuyến';

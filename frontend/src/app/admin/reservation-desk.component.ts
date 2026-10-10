@@ -6,7 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
 import { passengerTypeForBirthDate } from '../core/passenger-profile.util';
-import { formatDateTimeDayFirst } from '../core/date-format.util';
+import { formatDateTimeDayFirst, localCalendarDate } from '../core/date-format.util';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 type Step = 1 | 2 | 3 | 4;
@@ -285,7 +285,7 @@ export class ReservationDeskComponent {
   minDate = ''; maxDate = ''; searching = false; results: any = null; outbound: DeskOption | null = null; inbound: DeskOption | null = null;
   // step 3
   passengers: any[] = []; seatRequests: any[] = []; seatLeg: any = null; seatPax = 0; seatMapData: any = null; seatLoading = false; private seatCache = new Map<string, any>();
-  today = new Date().toISOString().slice(0, 10);
+  today = localCalendarDate();
   // step 4
    quote: any = null; quoting = false; result: any = null;
   // bookings panel

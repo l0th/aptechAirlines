@@ -114,10 +114,14 @@ export class ToastService {
 
   /** Explicit language pairs are authoritative; fill only absent fields. */
   private localize<T extends ToastContent>(content: T): T {
-    const messageVi = content.messageVi ?? (content.messageEn == null ? undefined : this.language.translateNotice(content.messageEn, 'vi'));
-    const messageEn = content.messageEn ?? (content.messageVi == null ? undefined : this.language.translateNotice(content.messageVi, 'en'));
+    const sourceVi = content.messageVi ?? content.messageEn;
+    const sourceEn = content.messageEn ?? content.messageVi;
+    const messageVi = sourceVi == null ? undefined : this.language.translateNotice(sourceVi, 'vi');
+    const messageEn = sourceEn == null ? undefined : this.language.translateNotice(sourceEn, 'en');
     return {
       ...content,
+      titleVi: this.language.translateNotice(content.titleVi, 'vi'),
+      titleEn: this.language.translateNotice(content.titleEn, 'en'),
       ...(messageVi != null ? { messageVi } : {}),
       ...(messageEn != null ? { messageEn } : {}),
     };

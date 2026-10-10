@@ -4,6 +4,15 @@ export function normalizeCalendarDate(value: unknown): string {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
 }
 
+/** Return the local calendar day in API-safe form without converting through UTC. */
+export function localCalendarDate(date = new Date()): string {
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function formatCalendarDate(value: unknown, fallback = '—'): string {
   if (!value) return fallback;
   const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -36,4 +45,11 @@ export function formatDateTimeDayFirst(value: unknown, fallback = '—'): string
   return Number.isNaN(parsed.getTime())
     ? String(value)
     : new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(parsed);
+}
+
+/** Format canonical dates embedded in user-facing notices without changing API values. */
+export function formatDayFirstDatesInText(value: string): string {
+  return String(value || '')
+    .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')
+    .replace(/\bYYYY-MM-DD\b/gi, 'dd/mm/yyyy');
 }

@@ -9,6 +9,7 @@ import { LanguageService } from '../core/language.service';
 import { AuthService } from '../core/auth.service';
 import { PaypalService } from '../core/paypal.service';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { localCalendarDate } from '../core/date-format.util';
 
 type RescheduleDirection = 'OUTBOUND' | 'RETURN' | 'BOTH';
 type DirectionKey = 'OUTBOUND' | 'RETURN';
@@ -198,7 +199,7 @@ export class RescheduleComponent {
   returnOrigin = '';
   returnDestination = '';
   returnDate = '';
-  minDate = this.localDate(new Date());
+  minDate = localCalendarDate();
   maxDate = '';
   outboundData: any = null;
   returnData: any = null;
@@ -216,7 +217,7 @@ export class RescheduleComponent {
     this.confirmation = this.route.snapshot.queryParamMap.get('code') || '';
     this.api.bookingWindow().subscribe({
       next: r => { this.minDate = r.min_date; this.maxDate = r.max_date; },
-      error: () => { const d = new Date(); d.setDate(d.getDate() + 330); this.maxDate = this.localDate(d); }
+      error: () => { const d = new Date(); d.setDate(d.getDate() + 330); this.maxDate = localCalendarDate(d); }
     });
     this.api.paypalConfig().subscribe({ next: r => this.paypalEnabled = !!r?.enabled, error: () => {} });
     if (this.confirmation) this.loadBooking(false);
@@ -481,6 +482,5 @@ export class RescheduleComponent {
   duration(v: number) { v = Number(v || 0); return `${Math.floor(v / 60)}h ${v % 60}m`; }
   money(v: number) { return new Intl.NumberFormat(this.language.isEnglish() ? 'en-US' : 'vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(v || 0); }
   signedMoney(v: number) { return `${v > 0 ? '+' : ''}${this.money(v)}`; }
-  localDate(date: Date) { const y=date.getFullYear();const m=String(date.getMonth()+1).padStart(2,'0');const d=String(date.getDate()).padStart(2,'0');return `${y}-${m}-${d}`; }
   msg(e: any, f: string) { const m = e?.error?.message; return Array.isArray(m) ? m.join(' · ') : m || e?.message || f; }
 }

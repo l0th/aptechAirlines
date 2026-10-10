@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { formatDayFirstDatesInText } from './date-format.util';
 
 export type UiLanguage = 'vi' | 'en';
 
@@ -194,7 +195,7 @@ const PAIRS: TranslationPair[] = [
   ['Quay lại', 'Back'],
   ['Tiếp tục chọn ghế', 'Continue to seat selection'],
   ['Vui lòng nhập họ tên cho tất cả hành khách.', 'Enter the full name for every passenger.'],
-  ['Ngày sinh phải đúng định dạng YYYY-MM-DD.', 'Date of birth must use YYYY-MM-DD format.'],
+  ['Ngày sinh phải đúng định dạng dd/mm/yyyy.', 'Date of birth must use dd/mm/yyyy format.'],
   ['Ngày sinh không được nằm trong tương lai.', 'Date of birth cannot be in the future.'],
   ['Chọn chỗ ngồi', 'Seat selection'],
   ['Chọn ghế cho từng hành khách trên từng chặng. Mỗi ô hiển thị mã ghế đầy đủ: ví dụ 18A là hàng 18, ghế A.', 'Choose a seat for each passenger on every leg. Each tile shows the full seat code: for example, 18A means row 18, seat A.'],
@@ -990,22 +991,22 @@ export class LanguageService {
     const core = source.trim();
     if (!core) return source;
     const sameLanguageIndex = language === 'vi' ? 0 : 1;
-    if (PAIRS.some(pair => pair[sameLanguageIndex] === core)) return source;
+    if (PAIRS.some(pair => pair[sameLanguageIndex] === core)) return formatDayFirstDatesInText(source);
     const aliases = language === 'vi' ? TARGET_VI_ALIASES : TARGET_EN_ALIASES;
     const match = PAIRS.find(pair => pair[language === 'vi' ? 1 : 0] === core);
     const translated = aliases[core] ?? match?.[sameLanguageIndex];
-    if (translated) return source.replace(core, translated);
+    if (translated) return formatDayFirstDatesInText(source.replace(core, translated));
 
     const knownDynamic = language === 'vi'
       ? /^(?:No booking found with code .+|No flights found for flight number .+ on .+|\d+ (?:seats? left|passengers?|customers?|records?|confirmed|days? before departure|itinerar(?:y|ies)|options?|legs?))$/i
       : /^(?:Không tìm thấy đặt chỗ với mã .+|Không tìm thấy chuyến bay .+ vào ngày .+|Còn \d+ ghế|\d+ (?:hành khách|khách hàng|bản ghi|đã xác nhận|ngày trước bay|hành trình|lựa chọn|chặng))$/i;
-    if (!knownDynamic.test(core)) return source;
+    if (!knownDynamic.test(core)) return formatDayFirstDatesInText(source);
     const translatedDynamic = language === 'vi'
       ? this.dynamicToVietnamese(core)
       : this.dynamicToEnglish(core)
           .replace(/^Không tìm thấy đặt chỗ với mã (.+)$/i, 'No booking found with code $1')
           .replace(/^Không tìm thấy chuyến bay (.+) vào ngày (.+)$/i, 'No flights found for flight number $1 on $2');
-    return source.replace(core, translatedDynamic);
+    return formatDayFirstDatesInText(source.replace(core, translatedDynamic));
   }
 
   translate(source: string, language: UiLanguage = this.language()) {

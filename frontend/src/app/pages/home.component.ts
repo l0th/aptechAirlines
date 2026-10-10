@@ -8,6 +8,7 @@ import { BookingStateService } from '../core/booking-state.service';
 import { LanguageService } from '../core/language.service';
 import { IconComponent } from '../shared/icon.component';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { localCalendarDate } from '../core/date-format.util';
 
 type LocationField = 'origin' | 'destination';
 type LocationSuggestion = {
@@ -176,7 +177,7 @@ export class HomeComponent {
   children = 0;
   seniors = 0;
   private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
-  minDate = this.localDate(new Date());
+  minDate = localCalendarDate();
   maxDate = '';
   suggestions: Record<LocationField, LocationSuggestion[]> = { origin: [], destination: [] };
   private suggestionSeq: Record<LocationField, number> = { origin: 0, destination: 0 };
@@ -201,11 +202,11 @@ export class HomeComponent {
       },
       error: () => {
         const today = new Date();
-        this.minDate = this.localDate(today);
+        this.minDate = localCalendarDate(today);
         if (!this.departure) this.departure = this.minDate;
         const d = new Date(today);
         d.setDate(d.getDate() + 330);
-        this.maxDate = this.localDate(d);
+        this.maxDate = localCalendarDate(d);
       }
     });
   }
@@ -301,10 +302,4 @@ export class HomeComponent {
     return [...airports, ...cities, ...countries].slice(0, 10);
   }
 
-  private localDate(date: Date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  }
 }

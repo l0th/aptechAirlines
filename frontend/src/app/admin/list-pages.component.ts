@@ -6,7 +6,7 @@ import { AuthService } from '../core/auth.service';
 import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { PaginationComponent } from '../shared/pagination.component';
-import { formatDateTimeDayFirst } from '../core/date-format.util';
+import { formatCalendarDate, formatDateTimeDayFirst, localCalendarDate } from '../core/date-format.util';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 @Component({
@@ -191,18 +191,18 @@ export class AdminListComponent implements OnInit{
   /** Convert "YYYY-MM-DDTHH:mm" wall-clock time in tz to a UTC Date. */
   localToUtc(local:string,tz:string){if(!local)return null;const naive=new Date(local+':00Z');if(isNaN(naive.getTime()))return null;let utc=new Date(naive.getTime()-this.tzOffset(naive,tz)*60000);utc=new Date(naive.getTime()-this.tzOffset(utc,tz)*60000);return utc}
   localInput(d:Date,tz:string){if(isNaN(d.getTime()))return'';return new Date(d.getTime()+this.tzOffset(d,tz)*60000).toISOString().slice(0,16)}
-  fmtLocal(d:Date,tz:string){return this.localInput(d,tz).replace('T',' ')}
+  fmtLocal(d:Date,tz:string){return formatDateTimeDayFirst(this.localInput(d,tz))}
   serverNow(){return new Date(Date.now()+this.serverClockOffsetMs)}
   refreshFlightClock(){
     this.api.bookingWindow().subscribe({
       next:r=>{const serverTime=new Date(r?.server_time);this.serverClockOffsetMs=isNaN(serverTime.getTime())?0:serverTime.getTime()-Date.now();this.flightMinDate=String(r?.current_date||r?.min_date||'');this.flightMaxDate=String(r?.max_date||'')},
-      error:()=>{const now=new Date();this.serverClockOffsetMs=0;this.flightMinDate=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`},
+      error:()=>{this.serverClockOffsetMs=0;this.flightMinDate=localCalendarDate()},
     });
   }
   get departureLocalInput(){const e=this.editor;return e?.departure_date&&e?.dep_time?`${e.departure_date}T${e.dep_time}`:''}
   get minimumDepartureTime(){if(!this.editor?.departure_date)return'';const now=this.serverNow();const local=this.localInput(now,this.tzOf(this.originIata));return this.editor.departure_date===local.slice(0,10)?local.slice(11,16):''}
   computeTimes(){const e=this.editor;if(!e)return null;const tz=this.tzOf(e.origin_iata);const dep=this.localToUtc(this.departureLocalInput,tz);const duration=Math.round(Number(e.duration_input||0));if(!dep||duration<1)return null;return{dep,arr:new Date(dep.getTime()+duration*60000),duration}}
-  get previewTimes(){const p=this.computeTimes();if(!p)return null;return{depLocal:this.fmtLocal(p.dep,this.tzOf(this.originIata)),arrLocal:this.fmtLocal(p.arr,this.tzOf(this.destIata)),depUtc:p.dep.toISOString().slice(0,16).replace('T',' '),arrUtc:p.arr.toISOString().slice(0,16).replace('T',' ')}}
+  get previewTimes(){const p=this.computeTimes();if(!p)return null;return{depLocal:this.fmtLocal(p.dep,this.tzOf(this.originIata)),arrLocal:this.fmtLocal(p.arr,this.tzOf(this.destIata)),depUtc:formatDateTimeDayFirst(p.dep.toISOString().slice(0,16)),arrUtc:formatDateTimeDayFirst(p.arr.toISOString().slice(0,16))}}
   /** Existing flights that can connect to/from the one being edited (45–720 min layover, same rule as backend search). */
   get connectionHints(){
     const p=this.computeTimes();const o=this.originIata,d=this.destIata;if(!p||!o||!d)return[];
@@ -295,7 +295,7 @@ export class AdminListComponent implements OnInit{
     if(!p){this.error=this.t('Nhập nơi đi/đến, giờ cất cánh (giờ địa phương) và thời gian bay hợp lệ.','Enter valid origin, destination, local departure and flight duration.');return}
     const dep=p.dep,arr=p.arr;
     if(!e.departure_date){this.error=this.t('Ngày khởi hành là bắt buộc.','Departure date is required.');return}
-    if(this.flightMinDate&&e.departure_date<this.flightMinDate){this.error=this.t(`Ngày khởi hành không được trước ngày hiện tại (${this.flightMinDate}).`,`Departure date cannot be before the current date (${this.flightMinDate}).`);return}
+    if(this.flightMinDate&&e.departure_date<this.flightMinDate){const min=formatCalendarDate(this.flightMinDate,this.flightMinDate);this.error=this.t(`Ngày khởi hành không được trước ngày hiện tại (${min}).`,`Departure date cannot be before the current date (${min}).`);return}
     if(dep.getTime()<=this.serverNow().getTime()){this.error=this.t('Giờ khởi hành phải sau thời gian hiện tại.','Departure time must be after the current time.');return}
     const duration=p.duration;
     if(!e.aircraft_code?.trim()){this.error=this.t('Chọn máy bay cho chuyến bay.','Choose an aircraft for this flight.');return}
