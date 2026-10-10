@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { ToastService } from '../core/toast.service';
+import { LanguageService } from '../core/language.service';
 import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
@@ -16,16 +17,16 @@ import { PaginationComponent } from '../shared/pagination.component';
       <div><h1 class="title">{{title}}</h1><p class="subtitle">{{subtitle}}</p></div>
       <div class="head-actions">
         @if(kind==='bookings'&&auth.admin()){
-          <button class="btn btn-outline" (click)="runScheduler('run-expiry')" [disabled]="busy">Quét vé hết hạn</button>
+          <button class="btn btn-outline" (click)="runScheduler('run-expiry')" [disabled]="busy">{{t('Quét vé hết hạn','Scan expired holds')}}</button>
         }
-        @if(kind!=='bookings'){<button class="btn btn-primary" (click)="openCreate()" [disabled]="busy">+ Thêm mới</button>}
-        <button class="btn btn-outline" (click)="load()" [disabled]="busy">Làm mới</button>
+        @if(kind!=='bookings'){<button class="btn btn-primary" (click)="openCreate()" [disabled]="busy">+ {{t('Thêm mới','Add new')}}</button>}
+        <button class="btn btn-outline" (click)="load()" [disabled]="busy">{{t('Làm mới','Refresh')}}</button>
       </div>
     </div>
 
     <div class="card toolbar">
       <input class="control" [(ngModel)]="query" (ngModelChange)="page=1" [placeholder]="searchPlaceholder">
-      <span class="pill pill-gold">{{filtered.length}} bản ghi</span>
+      <span class="pill pill-gold">{{filtered.length}} {{t('bản ghi','records')}}</span>
     </div>
     
     
@@ -34,45 +35,45 @@ import { PaginationComponent } from '../shared/pagination.component';
       <div class="modal" (click)="editor=null">
       <section class="card editor-panel" (click)="$event.stopPropagation()">
         <button class="close" (click)="editor=null">×</button>
-        <div class="editor-head"><div><div class="eyebrow">{{editorMode==='create'?'CREATE':'EDIT'}} {{kind.toUpperCase()}}</div><h2>{{editorMode==='create'?'Thêm mới':'Cập nhật'}}</h2></div></div>
+        <div class="editor-head"><div><div class="eyebrow">{{editorMode==='create'?t('TẠO MỚI','CREATE'):t('CHỈNH SỬA','EDIT')}} · {{kindLabel()}}</div><h2>{{editorMode==='create'?t('Thêm mới','Add new'):t('Cập nhật','Update')}}</h2></div></div>
         @if(kind==='users'){
           <div class="form-grid">
-            @if(editorMode==='create'){<div class="field"><span>Username</span><input class="control" [(ngModel)]="editor.username"></div><div class="field"><span>Password</span><input class="control" type="password" [(ngModel)]="editor.password"></div>}
-            <div class="field"><span>Họ</span><input class="control" [(ngModel)]="editor.last_name"></div><div class="field"><span>Tên</span><input class="control" [(ngModel)]="editor.first_name"></div>
-            <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="editor.email"></div><div class="field"><span>Điện thoại</span><input class="control" [(ngModel)]="editor.phone_number"></div>
-            <div class="field full"><span>Địa chỉ</span><input class="control" [(ngModel)]="editor.address"></div><div class="field"><span>Role</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'"><option value="CUSTOMER">CUSTOMER</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
-            @if(editorMode==='edit'){<div class="field"><span>SkyMiles · đặt số dư</span><input class="control" type="number" min="0" step="1" [(ngModel)]="editor.sky_miles"></div>}
+            @if(editorMode==='create'){<div class="field"><span>{{t('Tên đăng nhập','Username')}}</span><input class="control" [(ngModel)]="editor.username"></div><div class="field"><span>{{t('Mật khẩu','Password')}}</span><input class="control" type="password" [(ngModel)]="editor.password"></div>}
+            <div class="field"><span>{{t('Họ','Last name')}}</span><input class="control" [(ngModel)]="editor.last_name"></div><div class="field"><span>{{t('Tên','First name')}}</span><input class="control" [(ngModel)]="editor.first_name"></div>
+            <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="editor.email"></div><div class="field"><span>{{t('Điện thoại','Phone')}}</span><input class="control" [(ngModel)]="editor.phone_number"></div>
+            <div class="field full"><span>{{t('Địa chỉ','Address')}}</span><input class="control" [(ngModel)]="editor.address"></div><div class="field"><span>{{t('Vai trò','Role')}}</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'"><option value="CUSTOMER">CUSTOMER</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
+            @if(editorMode==='edit'){<div class="field"><span>{{t('SkyMiles · đặt số dư','SkyMiles · set balance')}}</span><input class="control" type="number" min="0" step="1" [(ngModel)]="editor.sky_miles"></div>}
           </div>
         }@else if(kind==='airports'){
-          <div class="form-grid"><div class="field"><span>IATA</span><input class="control" [(ngModel)]="editor.iata_code" [disabled]="editorMode==='edit'"></div><div class="field"><span>ICAO</span><input class="control" [(ngModel)]="editor.icao_code"></div><div class="field"><span>Airport</span><input class="control" [(ngModel)]="editor.airport_name"></div><div class="field"><span>City</span><input class="control" [(ngModel)]="editor.city_name"></div><div class="field"><span>Country code</span><input class="control" [(ngModel)]="editor.country_code"></div><div class="field"><span>Timezone</span><input class="control" [(ngModel)]="editor.time_zone"></div><div class="field"><span>Latitude</span><input class="control" type="number" [(ngModel)]="editor.lat"></div><div class="field"><span>Longitude</span><input class="control" type="number" [(ngModel)]="editor.lng"></div><label class="check full"><input type="checkbox" [(ngModel)]="editor.is_serviced_directly"> Phục vụ trực tiếp</label></div>
+          <div class="form-grid"><div class="field"><span>IATA</span><input class="control" [(ngModel)]="editor.iata_code" [disabled]="editorMode==='edit'"></div><div class="field"><span>ICAO</span><input class="control" [(ngModel)]="editor.icao_code"></div><div class="field"><span>{{t('Sân bay','Airport')}}</span><input class="control" [(ngModel)]="editor.airport_name"></div><div class="field"><span>{{t('Thành phố','City')}}</span><input class="control" [(ngModel)]="editor.city_name"></div><div class="field"><span>{{t('Mã quốc gia','Country code')}}</span><input class="control" [(ngModel)]="editor.country_code"></div><div class="field"><span>{{t('Múi giờ','Timezone')}}</span><input class="control" [(ngModel)]="editor.time_zone"></div><div class="field"><span>{{t('Vĩ độ','Latitude')}}</span><input class="control" type="number" [(ngModel)]="editor.lat"></div><div class="field"><span>{{t('Kinh độ','Longitude')}}</span><input class="control" type="number" [(ngModel)]="editor.lng"></div><label class="check full"><input type="checkbox" [(ngModel)]="editor.is_serviced_directly"> {{t('Phục vụ trực tiếp','Serviced directly')}}</label></div>
         }@else if(kind==='flights'){
-          @if(editor.commercial){<p class="info">Chuyến thương mại theo ngày. Có thể đổi máy bay riêng cho ngày này khi chưa có ghế HELD/CONFIRMED; commercial template 330 ngày không bị thay đổi.</p>}
+          @if(editor.commercial){<p class="info">{{t('Chuyến bay thương mại theo ngày. Chỉ có thể đổi máy bay cho ngày này khi không có ghế đang giữ hoặc đã xác nhận. Mẫu lịch thương mại 330 ngày không thay đổi.','Daily commercial flight. The aircraft can be changed for this date only when there are no held or confirmed seats. The 330-day commercial schedule template remains unchanged.')}}</p>}
           <div class="form-grid">
-            <div class="field"><span>Flight number</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>
-            @if(editorMode==='create'){<div class="field"><span>Origin IATA</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>Destination IATA</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
-            <div class="field"><span>Departure date</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div>
-            <div class="field"><span>Máy bay</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">Chọn máy bay</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} ghế</option>}</select></div>
-            <div class="field"><span>Giờ cất cánh (giờ địa phương {{originIata||'nơi đi'}} · {{tzOf(originIata)}})</span><input class="control" type="datetime-local" [(ngModel)]="editor.dep_local" (ngModelChange)="syncDepartureDate()"></div>
-            <div class="field"><span>Thời gian bay (phút)</span><input class="control" type="number" min="1" [(ngModel)]="editor.duration_input"></div>
+            <div class="field"><span>{{t('Số hiệu chuyến bay','Flight number')}}</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>
+            @if(editorMode==='create'){<div class="field"><span>{{t('IATA nơi đi','Origin IATA')}}</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>{{t('IATA nơi đến','Destination IATA')}}</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
+            <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div>
+            <div class="field"><span>{{t('Máy bay','Aircraft')}}</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">{{t('Chọn máy bay','Choose aircraft')}}</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} {{t('ghế','seats')}}</option>}</select></div>
+            <div class="field"><span>{{t('Giờ cất cánh','Departure time')}} ({{originIata||t('nơi đi','origin')}} · {{tzOf(originIata)}})</span><input class="control" type="datetime-local" [(ngModel)]="editor.dep_local" (ngModelChange)="syncDepartureDate()"></div>
+            <div class="field"><span>{{t('Thời gian bay (phút)','Flight duration (minutes)')}}</span><input class="control" type="number" min="1" [(ngModel)]="editor.duration_input"></div>
             <div class="field full info">
               @if(previewTimes; as p){
-                Cất cánh <b>{{p.depLocal}}</b> ({{tzOf(originIata)}}) → Hạ cánh <b>{{p.arrLocal}}</b> ({{tzOf(destIata)}}) · UTC {{p.depUtc}} → {{p.arrUtc}}
-              } @else { Nhập nơi đi/đến, giờ cất cánh và thời gian bay để xem giờ hạ cánh theo giờ địa phương. }
+                {{t('Cất cánh','Departure')}} <b>{{p.depLocal}}</b> ({{tzOf(originIata)}}) → {{t('Hạ cánh','Arrival')}} <b>{{p.arrLocal}}</b> ({{tzOf(destIata)}}) · UTC {{p.depUtc}} → {{p.arrUtc}}
+              } @else { {{t('Nhập nơi đi/đến, giờ cất cánh và thời gian bay để xem giờ hạ cánh theo giờ địa phương.','Enter the origin, destination, departure time and duration to preview the local arrival time.')}} }
             </div>
             @if(connectionHints.length){
               <div class="field full info">
-                <b>Có thể nối chuyến (chờ 45–720 phút):</b>
+                <b>{{t('Chuyến nối khả dụng (chờ 45–720 phút):','Possible connections (45–720-minute layover):')}}</b>
                 @for(h of connectionHints;track h.id){<div>{{h.text}}</div>}
               </div>
             }
-            <div class="field"><span>Distance miles</span><input class="control" type="number" min="0" [(ngModel)]="editor.distance_miles" [disabled]="editor.commercial"></div>
+            <div class="field"><span>{{t('Khoảng cách (dặm)','Distance (miles)')}}</span><input class="control" type="number" min="0" [(ngModel)]="editor.distance_miles" [disabled]="editor.commercial"></div>
           </div>
-          <div class="inventory-head"><strong>Inventory theo cabin</strong><small>Available được tự tính lại để giữ nguyên số ghế đã bán.</small></div>
-          <div class="table-wrap inner-table"><table class="table"><thead><tr><th>Cabin</th><th>Đã bán</th><th>Số ghế bán</th><th>Giá cơ bản</th><th>Sức chứa máy bay</th></tr></thead><tbody>
+          <div class="inventory-head"><strong>{{t('Tồn kho theo hạng ghế','Inventory by cabin')}}</strong><small>{{t('Số ghế còn trống được tự tính để giữ nguyên số ghế đã bán.','Available seats are recalculated to preserve sold seats.')}}</small></div>
+          <div class="table-wrap inner-table"><table class="table"><thead><tr><th>{{t('Hạng ghế','Cabin')}}</th><th>{{t('Đã bán','Sold')}}</th><th>{{t('Số ghế phân bổ','Allocated seats')}}</th><th>{{t('Giá cơ bản','Base fare')}}</th><th>{{t('Sức chứa máy bay','Aircraft capacity')}}</th></tr></thead><tbody>
             @for(inv of editor.inventory_rows;track inv.cabin_class){<tr><td><strong>{{inv.cabin_class}}</strong></td><td>{{soldSeats(inv)}}</td><td><input class="mini-number" type="number" min="0" [(ngModel)]="inv.allocated_seats"></td><td><input class="mini-price" type="number" min="0" [(ngModel)]="inv.base_price"></td><td>{{layoutCapacity(inv.cabin_class)||'—'}}</td></tr>}
           </tbody></table></div>
         }
-        <button class="btn btn-primary save" (click)="saveEditor()" [disabled]="busy">Lưu thay đổi</button>
+        <button class="btn btn-primary save" (click)="saveEditor()" [disabled]="busy">{{t('Lưu thay đổi','Save changes')}}</button>
       </section>
       </div>
     }
@@ -80,17 +81,17 @@ import { PaginationComponent } from '../shared/pagination.component';
     <div class="card table-wrap">
       <table class="table">
         @if(kind==='bookings'){
-          <thead><tr><th>PNR</th><th>Customer</th><th>Type</th><th>Status</th><th>Total</th><th></th></tr></thead>
-          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.pnr_code}}</strong><small>{{x.confirmation_number||x.blocking_number||'—'}}</small></td><td>{{customerLabel(x)}}</td><td>{{x.booking_type}}</td><td><span class="pill" [class.pill-success]="x.status==='CONFIRMED'||x.status==='RESCHEDULED'" [class.pill-gold]="x.status==='BLOCKED'">{{x.status}}</span></td><td>{{money(x.total_amount)}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button>@if(x.status==='BLOCKED'){<button class="btn btn-dark" (click)="confirmHold(x)" [disabled]="busy">Xác nhận</button>}@if(x.status!=='CANCELLED'){<button class="btn btn-outline danger" (click)="cancelBooking(x)" [disabled]="busy">Hủy</button>}</div></td></tr>}</tbody>
+          <thead><tr><th>PNR</th><th>{{t('Khách hàng','Customer')}}</th><th>{{t('Loại','Type')}}</th><th>{{t('Trạng thái','Status')}}</th><th>{{t('Tổng tiền','Total')}}</th><th></th></tr></thead>
+          <tbody>@for(x of paged;track x._id){<tr><td translate="no"><strong>{{x.pnr_code}}</strong><small>{{x.confirmation_number||x.blocking_number||'—'}}</small></td><td translate="no">{{customerLabel(x)}}</td><td>{{language.bookingTypeLabel(x.booking_type)}}</td><td><span class="pill" [class.pill-success]="x.status==='CONFIRMED'||x.status==='RESCHEDULED'" [class.pill-gold]="x.status==='BLOCKED'">{{language.bookingStatusLabel(x.status)}}</span></td><td>{{money(x.total_amount)}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">{{t('Chi tiết','Details')}}</button>@if(x.status==='BLOCKED'){<small>{{t('Chờ khách thanh toán PayPal','Awaiting customer PayPal payment')}}</small>}@if(x.status!=='CANCELLED'){<button class="btn btn-outline danger" (click)="cancelBooking(x)" [disabled]="busy">{{t('Hủy','Cancel')}}</button>}</div></td></tr>}</tbody>
         }@else if(kind==='users'){
-          <thead><tr><th>User</th><th>Contact</th><th>Role</th><th>SkyMiles</th><th></th></tr></thead>
-          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.first_name}} {{x.last_name}}</strong><small>@{{x.username}}</small></td><td>{{x.email}}<small>{{x.phone_number||'—'}}</small></td><td><span class="pill">{{x.role}}</span></td><td><strong>{{num(x.sky_miles)}}</strong><small>{{skyTier(x.sky_miles)}}</small></td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||x.role==='SUPER_ADMIN'">Xóa</button></div></td></tr>}</tbody>
+          <thead><tr><th>{{t('Người dùng','User')}}</th><th>{{t('Liên hệ','Contact')}}</th><th>{{t('Vai trò','Role')}}</th><th>SkyMiles</th><th></th></tr></thead>
+          <tbody>@for(x of paged;track x._id){<tr><td translate="no"><strong>{{x.first_name}} {{x.last_name}}</strong><small>&#64;{{x.username}}</small></td><td translate="no">{{x.email}}<small>{{x.phone_number||'—'}}</small></td><td><span class="pill" translate="no">{{x.role}}</span></td><td><strong>{{num(x.sky_miles)}}</strong><small>{{skyTier(x.sky_miles)}}</small></td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">{{t('Chi tiết','Details')}}</button><button class="btn btn-outline" (click)="openEdit(x)">{{t('Sửa','Edit')}}</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||x.role==='SUPER_ADMIN'">{{t('Xóa','Delete')}}</button></div></td></tr>}</tbody>
         }@else if(kind==='flights'){
-          <thead><tr><th>Số hiệu chuyến bay</th><th>Tuyến</th><th>Khởi hành</th><th>Trạng thái</th><th>Nguồn</th><th></th></tr></thead>
-          <tbody>@for(x of paged;track x._id){<tr><td><strong>{{x.flight_number}}</strong><small>{{x.operator||'APTECH_AIRLINES'}}</small></td><td>{{x.origin_iata}} → {{x.dest_iata}}</td><td>{{dateTime(x.scheduled_departure)}}</td><td><span class="pill" [class.pill-success]="x.status==='SCHEDULED'">{{x.status}}</span></td><td>{{x.data_source||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-dark" (click)="openStatus(x)">Trạng thái</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
+          <thead><tr><th>{{t('Số hiệu chuyến bay','Flight number')}}</th><th>{{t('Tuyến','Route')}}</th><th>{{t('Khởi hành','Departure')}}</th><th>{{t('Trạng thái','Status')}}</th><th>{{t('Nguồn','Source')}}</th><th></th></tr></thead>
+          <tbody>@for(x of paged;track x._id){<tr><td translate="no"><strong>{{x.flight_number}}</strong><small>{{x.operator||'APTECH_AIRLINES'}}</small></td><td translate="no">{{x.origin_iata}} → {{x.dest_iata}}</td><td>{{dateTime(x.scheduled_departure)}}</td><td><span class="pill" [class.pill-success]="x.status==='SCHEDULED'">{{language.flightStatusLabel(x.status)}}</span></td><td translate="no">{{x.data_source||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">{{t('Chi tiết','Details')}}</button><button class="btn btn-outline" (click)="openEdit(x)">{{t('Sửa','Edit')}}</button><button class="btn btn-dark" (click)="openStatus(x)">{{t('Trạng thái','Status')}}</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">{{t('Xóa','Delete')}}</button></div></td></tr>}</tbody>
         }@else{
-          <thead><tr><th>IATA</th><th>Airport</th><th>City</th><th>Country</th><th>Timezone</th><th></th></tr></thead>
-          <tbody>@for(x of paged;track x._id||x.iata_code){<tr><td><strong>{{x.iata_code}}</strong></td><td>{{x.airport_name||x.name||'—'}}</td><td>{{x.city_name||x.city||'—'}}</td><td>{{x.country_code||x.country_name||x.country||'—'}}</td><td>{{x.time_zone||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">Chi tiết</button><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">Xóa</button></div></td></tr>}</tbody>
+          <thead><tr><th>IATA</th><th>{{t('Sân bay','Airport')}}</th><th>{{t('Thành phố','City')}}</th><th>{{t('Quốc gia','Country')}}</th><th>{{t('Múi giờ','Timezone')}}</th><th></th></tr></thead>
+          <tbody>@for(x of paged;track x._id||x.iata_code){<tr><td translate="no"><strong>{{x.iata_code}}</strong></td><td translate="no">{{x.airport_name||x.name||'—'}}</td><td translate="no">{{x.city_name||x.city||'—'}}</td><td translate="no">{{x.country_code||x.country_name||x.country||'—'}}</td><td translate="no">{{x.time_zone||'—'}}</td><td><div class="row-actions"><button class="btn btn-outline" (click)="selected=x">{{t('Chi tiết','Details')}}</button><button class="btn btn-outline" (click)="openEdit(x)">{{t('Sửa','Edit')}}</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy">{{t('Xóa','Delete')}}</button></div></td></tr>}</tbody>
         }
       </table>
     </div>
@@ -100,40 +101,40 @@ import { PaginationComponent } from '../shared/pagination.component';
       <div class="modal">
         <section class="card detail">
           <button class="close" (click)="selected=null">×</button>
-          <div class="eyebrow">{{kind.toUpperCase()}} DETAIL</div>
+          <div class="eyebrow">{{kindLabel()}} · {{t('CHI TIẾT','DETAILS')}}</div>
           <h2>{{primary(selected)}}</h2>
 
           @if(kind==='bookings'){
             <div class="detail-grid">
-              <div><span>Status</span><b>{{selected.status}}</b></div><div><span>Booking type</span><b>{{selected.booking_type}}</b></div>
-              <div><span>PNR</span><b>{{selected.pnr_code}}</b></div><div><span>Confirmation / Block</span><b>{{selected.confirmation_number||selected.blocking_number||'—'}}</b></div>
-              <div><span>Passengers</span><b>{{selected.passengers?.length||0}}</b></div><div><span>Total</span><b>{{money(selected.total_amount)}}</b></div>
-              <div><span>Email khách hàng</span><b>{{bookingEmail(selected)}}</b></div><div><span>Loại email nhắc</span><b>{{selected.status==='BLOCKED'?'Nhắc thanh toán giữ chỗ':(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'?'Nhắc lịch bay':'Không áp dụng')}}</b></div>
+              <div><span>{{t('Trạng thái','Status')}}</span><b>{{language.bookingStatusLabel(selected.status)}}</b></div><div><span>{{t('Loại đặt chỗ','Booking type')}}</span><b>{{language.bookingTypeLabel(selected.booking_type)}}</b></div>
+              <div><span>PNR</span><b>{{selected.pnr_code}}</b></div><div><span>{{t('Xác nhận / Giữ chỗ','Confirmation / Hold')}}</span><b>{{selected.confirmation_number||selected.blocking_number||'—'}}</b></div>
+              <div><span>{{t('Hành khách','Passengers')}}</span><b>{{selected.passengers?.length||0}}</b></div><div><span>{{t('Tổng tiền','Total')}}</span><b>{{money(selected.total_amount)}}</b></div>
+              <div><span>{{t('Email khách hàng','Customer email')}}</span><b>{{bookingEmail(selected)}}</b></div><div><span>{{t('Loại email nhắc','Reminder type')}}</span><b>{{selected.status==='BLOCKED'?t('Nhắc thanh toán giữ chỗ','Hold payment reminder'):(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'?t('Nhắc lịch bay','Flight reminder'):t('Không áp dụng','Not applicable'))}}</b></div>
             </div>
-            <div class="detail-actions"><button class="btn btn-outline" (click)="trackBooking(selected)">Tra cứu ticket</button>@if(auth.admin()&&selected.status==='BLOCKED'){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">Gửi email nhắc thanh toán</button>}@if(auth.admin()&&(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED')){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">Gửi email nhắc lịch bay</button>}@if(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'){<button class="btn btn-dark" (click)="rescheduleBooking(selected)">Đổi chuyến</button>}</div>
+            <div class="detail-actions"><button class="btn btn-outline" (click)="trackBooking(selected)">{{t('Tra cứu vé','Track ticket')}}</button>@if(auth.admin()&&selected.status==='BLOCKED'){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">{{t('Gửi email nhắc thanh toán','Send payment reminder')}}</button>}@if(auth.admin()&&(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED')){<button class="btn btn-outline" (click)="sendReminder(selected)" [disabled]="busy">{{t('Gửi email nhắc lịch bay','Send flight reminder')}}</button>}@if(selected.status==='CONFIRMED'||selected.status==='RESCHEDULED'){<button class="btn btn-dark" (click)="rescheduleBooking(selected)">{{t('Đổi chuyến','Reschedule')}}</button>}</div>
           }@else if(kind==='users'){
             <div class="detail-grid">
-              <div><span>Username</span><b>@{{selected.username}}</b></div><div><span>Role</span><b>{{selected.role}}</b></div>
-              <div><span>Full name</span><b>{{selected.first_name}} {{selected.last_name}}</b></div><div><span>Email</span><b>{{selected.email}}</b></div>
-              <div><span>Phone</span><b>{{selected.phone_number||'—'}}</b></div><div><span>SkyMiles</span><b>{{num(selected.sky_miles)}} · {{skyTier(selected.sky_miles)}}</b></div>
-              <div><span>Address</span><b>{{selected.address||'—'}}</b></div><div><span>Payment</span><b>Customer checkout via PayPal</b></div>
+              <div><span>{{t('Tên đăng nhập','Username')}}</span><b>@{{selected.username}}</b></div><div><span>{{t('Vai trò','Role')}}</span><b>{{selected.role}}</b></div>
+              <div><span>{{t('Họ tên','Full name')}}</span><b>{{selected.first_name}} {{selected.last_name}}</b></div><div><span>Email</span><b>{{selected.email}}</b></div>
+              <div><span>{{t('Điện thoại','Phone')}}</span><b>{{selected.phone_number||'—'}}</b></div><div><span>SkyMiles</span><b>{{num(selected.sky_miles)}} · {{skyTier(selected.sky_miles)}}</b></div>
+              <div><span>{{t('Địa chỉ','Address')}}</span><b>{{selected.address||'—'}}</b></div><div><span>{{t('Thanh toán','Payment')}}</span><b>{{t('Khách hàng thanh toán bằng PayPal','Customer checkout via PayPal')}}</b></div>
             </div>
-            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa tài khoản</button></div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">{{t('Sửa tài khoản','Edit account')}}</button></div>
           }@else if(kind==='flights'){
             <div class="detail-grid">
-              <div><span>Route</span><b>{{selected.origin_iata}} → {{selected.dest_iata}}</b></div><div><span>Status</span><b>{{selected.status}}</b></div>
-              <div><span>Departure</span><b>{{dateTime(selected.scheduled_departure)}}</b></div><div><span>Arrival</span><b>{{dateTime(selected.scheduled_arrival)}}</b></div>
-              <div><span>Aircraft</span><b>{{selected.aircraft?.model_code||selected.aircraft?.type||'—'}}</b></div><div><span>Bookable</span><b>{{selected.is_bookable?'Yes':'No'}}</b></div>
-              <div><span>Source</span><b>{{selected.data_source||'—'}}</b></div><div><span>Operator</span><b>{{selected.operator||'—'}}</b></div>
+              <div><span>{{t('Tuyến bay','Route')}}</span><b>{{selected.origin_iata}} → {{selected.dest_iata}}</b></div><div><span>{{t('Trạng thái','Status')}}</span><b>{{language.flightStatusLabel(selected.status)}}</b></div>
+              <div><span>{{t('Khởi hành','Departure')}}</span><b>{{dateTime(selected.scheduled_departure)}}</b></div><div><span>{{t('Hạ cánh','Arrival')}}</span><b>{{dateTime(selected.scheduled_arrival)}}</b></div>
+              <div><span>{{t('Máy bay','Aircraft')}}</span><b>{{selected.aircraft?.model_code||selected.aircraft?.type||'—'}}</b></div><div><span>{{t('Cho phép đặt','Bookable')}}</span><b>{{selected.is_bookable?t('Có','Yes'):t('Không','No')}}</b></div>
+              <div><span>{{t('Nguồn','Source')}}</span><b>{{selected.data_source||'—'}}</b></div><div><span>{{t('Hãng vận hành','Operator')}}</span><b>{{selected.operator||'—'}}</b></div>
             </div>
-            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa chuyến bay</button></div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">{{t('Sửa chuyến bay','Edit flight')}}</button></div>
           }@else{
             <div class="detail-grid">
-              <div><span>IATA</span><b>{{selected.iata_code}}</b></div><div><span>Timezone</span><b>{{selected.time_zone||'—'}}</b></div>
-              <div><span>Airport</span><b>{{selected.airport_name||selected.name||'—'}}</b></div><div><span>City</span><b>{{selected.city_name||selected.city||'—'}}</b></div>
-              <div><span>Country</span><b>{{selected.country_name||selected.country||'—'}}</b></div><div><span>Coordinates</span><b>{{coords(selected)}}</b></div>
+              <div><span>IATA</span><b>{{selected.iata_code}}</b></div><div><span>{{t('Múi giờ','Timezone')}}</span><b>{{selected.time_zone||'—'}}</b></div>
+              <div><span>{{t('Sân bay','Airport')}}</span><b>{{selected.airport_name||selected.name||'—'}}</b></div><div><span>{{t('Thành phố','City')}}</span><b>{{selected.city_name||selected.city||'—'}}</b></div>
+              <div><span>{{t('Quốc gia','Country')}}</span><b>{{selected.country_name||selected.country||'—'}}</b></div><div><span>{{t('Tọa độ','Coordinates')}}</span><b>{{coords(selected)}}</b></div>
             </div>
-            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">Sửa sân bay</button></div>
+            <div class="detail-actions"><button class="btn btn-primary" (click)="editFromDetail(selected)">{{t('Sửa sân bay','Edit airport')}}</button></div>
           }
         </section>
       </div>
@@ -142,13 +143,13 @@ import { PaginationComponent } from '../shared/pagination.component';
     @if(statusEditor){
       <div class="modal" (click)="statusEditor=null">
         <section class="card status-editor" (click)="$event.stopPropagation()">
-          <button class="close" (click)="statusEditor=null">×</button><div class="eyebrow">FLIGHT STATUS</div><h2>{{statusEditor.flight_number}}</h2>
-          <div class="field"><span>Trạng thái</span><select class="control" [(ngModel)]="statusEditor.status"><option>SCHEDULED</option><option>DELAYED</option><option>CANCELLED</option><option>COMPLETED</option></select></div>
-          @if(statusEditor.status==='DELAYED'){<div class="field"><span>Số phút trễ</span><input class="control" type="number" min="0" [(ngModel)]="statusEditor.delay_minutes"></div>}
-          <div class="field"><span>Lý do / ghi chú</span><input class="control" [(ngModel)]="statusEditor.delay_reason"></div>
-          @if(statusEditor.status==='DELAYED'){<p class="info">Khi lưu trạng thái DELAYED, hệ thống tự gửi email thông báo hoãn chuyến đến khách có booking liên quan, gồm giờ cũ, giờ mới và lý do.</p>}
-          @if(statusEditor.status==='CANCELLED'){<p class="info">Khi hủy chuyến, hệ thống xử lý booking liên quan và gửi email thông báo hủy/hoàn tiền theo trạng thái vé.</p>}
-          <button class="btn btn-primary save" (click)="saveStatus()" [disabled]="busy">Cập nhật trạng thái</button>
+          <button class="close" (click)="statusEditor=null">×</button><div class="eyebrow">{{t('TRẠNG THÁI CHUYẾN BAY','FLIGHT STATUS')}}</div><h2>{{statusEditor.flight_number}}</h2>
+          <div class="field"><span>{{t('Trạng thái','Status')}}</span><select class="control" [(ngModel)]="statusEditor.status"><option value="SCHEDULED">{{language.flightStatusLabel('SCHEDULED')}}</option><option value="DELAYED">{{language.flightStatusLabel('DELAYED')}}</option><option value="CANCELLED">{{language.flightStatusLabel('CANCELLED')}}</option><option value="COMPLETED">{{language.flightStatusLabel('COMPLETED')}}</option></select></div>
+          @if(statusEditor.status==='DELAYED'){<div class="field"><span>{{t('Số phút trễ','Delay (minutes)')}}</span><input class="control" type="number" min="0" [(ngModel)]="statusEditor.delay_minutes"></div>}
+          <div class="field"><span>{{t('Lý do / ghi chú','Reason / notes')}}</span><input class="control" [(ngModel)]="statusEditor.delay_reason"></div>
+          @if(statusEditor.status==='DELAYED'){<p class="info">{{t('Khi lưu trạng thái hoãn chuyến, hệ thống tự gửi email thông báo đến khách hàng có đặt chỗ liên quan, gồm giờ cũ, giờ mới và lý do.','When saving a delayed status, the system automatically emails affected customers the original time, updated time and reason.')}}</p>}
+          @if(statusEditor.status==='CANCELLED'){<p class="info">{{t('Khi hủy chuyến, hệ thống xử lý các đặt chỗ liên quan và gửi email thông báo hủy/hoàn tiền theo trạng thái vé.','When cancelling a flight, the system processes affected bookings and emails cancellation/refund details based on ticket status.')}}</p>}
+          <button class="btn btn-primary save" (click)="saveStatus()" [disabled]="busy">{{t('Cập nhật trạng thái','Update status')}}</button>
         </section>
       </div>
     }
@@ -163,15 +164,17 @@ export class AdminListComponent implements OnInit{
   @Input() kind='bookings';
   @Input() title='';
   api=inject(ApiService);
+  readonly language=inject(LanguageService);
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   auth=inject(AuthService);
   router=inject(Router);
   toast=inject(ToastService);
-  rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};query='';busy=false;page=1;pageSize=20;
+  rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';private __error='';get error(){return this.__error}set error(v:string){this.__error=v;if(v)this.__toast.notifyError(v)};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;if(v)this.__toast.notifySuccess(v)};query='';busy=false;page=1;pageSize=20;
 
   ngOnInit(){
     this.load();
     if(this.kind==='flights'){
-      this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,'Không tải được aircraft layouts.')});
+      this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,this.t('Không tải được sơ đồ máy bay.','Could not load aircraft layouts.'))});
       this.api.airports().subscribe({next:(r:any)=>{const list=Array.isArray(r)?r:(r?.items||r?.data||[]);for(const a of list)if(a?.iata_code)this.tzMap[a.iata_code]=a.time_zone||'UTC'}});
     }
   }
@@ -195,20 +198,25 @@ export class AdminListComponent implements OnInit{
     for(const f of this.rows){
       if(f._id===this.editor._id||f.status==='CANCELLED')continue;
       const fd=new Date(f.scheduled_departure).getTime(),fa=new Date(f.scheduled_arrival).getTime();
-      if(f.origin_iata===d&&f.dest_iata!==o){const w=(fd-p.arr.getTime())/60000;if(w>=45&&w<=720)out.push({id:f._id,text:`${o} → ${d} → ${f.dest_iata}: nối ${f.flight_number}, chờ ${Math.round(w)} phút`})}
-      if(f.dest_iata===o&&f.origin_iata!==d){const w=(p.dep.getTime()-fa)/60000;if(w>=45&&w<=720)out.push({id:f._id+'-in',text:`${f.origin_iata} → ${o} → ${d}: sau ${f.flight_number}, chờ ${Math.round(w)} phút`})}
+      if(f.origin_iata===d&&f.dest_iata!==o){const w=(fd-p.arr.getTime())/60000;if(w>=45&&w<=720)out.push({id:f._id,text:`${o} → ${d} → ${f.dest_iata}: ${this.t('nối chuyến','connect with')} ${f.flight_number}, ${this.t('chờ','layover')} ${Math.round(w)} ${this.t('phút','min')}`})}
+      if(f.dest_iata===o&&f.origin_iata!==d){const w=(p.dep.getTime()-fa)/60000;if(w>=45&&w<=720)out.push({id:f._id+'-in',text:`${f.origin_iata} → ${o} → ${d}: ${this.t('sau chuyến','after flight')} ${f.flight_number}, ${this.t('chờ','layover')} ${Math.round(w)} ${this.t('phút','min')}`})}
     }
     return out.slice(0,8);
   }
-  get subtitle(){return({bookings:'Các đặt chỗ đang lưu trong hệ thống và các tác vụ theo lịch.',users:'Tài khoản và hồ sơ khách hàng/nhân viên.',flights:'Chuyến bay, lịch vận hành và trạng thái khẩn cấp.',airports:'Danh mục sân bay, múi giờ và phạm vi phục vụ.'} as any)[this.kind]||'Dữ liệu trực tiếp từ máy chủ.'}
-  get searchPlaceholder(){return({bookings:'PNR, mã xác nhận, trạng thái',users:'Tên, tên đăng nhập, email, vai trò',flights:'Số hiệu chuyến bay, tuyến bay, trạng thái',airports:'IATA, thành phố, quốc gia'} as any)[this.kind]||'Tìm kiếm'}
+  get subtitle(){return({
+    bookings:this.t('Các đặt chỗ đang lưu trong hệ thống và các tác vụ theo lịch.','Bookings and scheduled system tasks.'),
+    users:this.t('Tài khoản và hồ sơ khách hàng/nhân viên.','Customer and staff accounts and profiles.'),
+    flights:this.t('Chuyến bay, lịch vận hành và trạng thái khẩn cấp.','Flights, operations schedule and disruption status.'),
+    airports:this.t('Danh mục sân bay, múi giờ và phạm vi phục vụ.','Airports, time zones and service coverage.'),
+  } as Record<string,string>)[this.kind]||this.t('Dữ liệu trực tiếp từ máy chủ.','Live data from the server.')}
+  get searchPlaceholder(){return({bookings:this.t('PNR, mã xác nhận, trạng thái','PNR, confirmation number, status'),users:this.t('Tên, tên đăng nhập, email, vai trò','Name, username, email, role'),flights:this.t('Số hiệu chuyến bay, tuyến bay, trạng thái','Flight number, route, status'),airports:this.t('IATA, thành phố, quốc gia','IATA, city, country')} as Record<string,string>)[this.kind]||this.t('Tìm kiếm','Search')}
   get filtered(){const q=this.query.trim().toLowerCase();if(!q)return this.rows;return this.rows.filter(x=>JSON.stringify(this.searchable(x)).toLowerCase().includes(q))}
   get paged(){const start=(this.page-1)*this.pageSize;return this.filtered.slice(start,start+this.pageSize)}
   skyTier(value:any){const miles=Number(value||0);return miles<20000?'MEMBER':miles<50000?'SILVER':miles<100000?'GOLD':'PLATINUM'}
   load(){
     this.error='';
     const req=this.kind==='users'?this.api.users():this.kind==='flights'?this.api.flights():this.kind==='airports'?this.api.airports():this.api.bookings();
-    req.subscribe({next:(r:any)=>{this.rows=Array.isArray(r)?r:(r?.items||r?.data||[]);this.page=1},error:e=>this.error=this.msg(e,'Không tải được dữ liệu.')})
+    req.subscribe({next:(r:any)=>{this.rows=Array.isArray(r)?r:(r?.items||r?.data||[]);this.page=1},error:e=>this.error=this.msg(e,this.t('Không tải được dữ liệu.','Could not load data.'))})
   }
   openCreate(){
     this.editorMode='create';this.error='';this.message='';
@@ -246,7 +254,7 @@ export class AdminListComponent implements OnInit{
   saveEditor(){if(!this.editor)return;if(this.kind==='users')this.saveUser();else if(this.kind==='airports')this.saveAirport();else if(this.kind==='flights')this.saveFlight()}
   saveUser(){
     const e=this.editor;
-    if(!e.first_name?.trim()||!e.last_name?.trim()||!e.email?.trim()||(this.editorMode==='create'&&(!e.username?.trim()||!e.password))){this.error='Vui lòng nhập đủ username/password/họ tên/email.';return}
+    if(!e.first_name?.trim()||!e.last_name?.trim()||!e.email?.trim()||(this.editorMode==='create'&&(!e.username?.trim()||!e.password))){this.error=this.t('Vui lòng nhập đủ tên đăng nhập, mật khẩu, họ tên và email.','Please enter username, password, full name and email.');return}
     const phone=e.phone_number?.trim();
     const body:any={first_name:e.first_name.trim(),last_name:e.last_name.trim(),email:e.email.trim(),address:e.address?.trim()||'',role:e.role};
     if(phone)body.phone_number=phone;
@@ -255,37 +263,37 @@ export class AdminListComponent implements OnInit{
     if(this.editorMode==='edit'&&e.originalRole==='SUPER_ADMIN')delete body.role;
     this.busy=true;
     const req=this.editorMode==='create'?this.api.createUser(body):this.api.updateUser(e._id,body);
-    req.subscribe({next:()=>this.done(this.editorMode==='create'?'Đã tạo tài khoản.':'Đã cập nhật tài khoản.'),error:x=>this.fail(x,'Không lưu được tài khoản.')});
+    req.subscribe({next:()=>this.done(this.editorMode==='create'?this.t('Đã tạo tài khoản.','Account created.'):this.t('Đã cập nhật tài khoản.','Account updated.')),error:x=>this.fail(x,this.t('Không lưu được tài khoản.','Could not save account.'))});
   }
   saveAirport(){
     const e=this.editor;
-    if(!e.iata_code?.trim()||!e.city_name?.trim()||!e.airport_name?.trim()){this.error='IATA, tên sân bay và thành phố là bắt buộc.';return}
+    if(!e.iata_code?.trim()||!e.city_name?.trim()||!e.airport_name?.trim()){this.error=this.t('IATA, tên sân bay và thành phố là bắt buộc.','IATA, airport name and city are required.');return}
     const body:any={city_name:e.city_name.trim(),airport_name:e.airport_name.trim(),is_serviced_directly:!!e.is_serviced_directly,time_zone:e.time_zone?.trim()||undefined,icao_code:e.icao_code?.trim()||undefined,country_code:e.country_code?.trim().toUpperCase()||undefined,lat:e.lat==null||e.lat===''?undefined:Number(e.lat),lng:e.lng==null||e.lng===''?undefined:Number(e.lng)};
     this.busy=true;
     const req=this.editorMode==='create'?this.api.createAirport({iata_code:e.iata_code.trim().toUpperCase(),...body}):this.api.updateAirport(e.iata_code,body);
-    req.subscribe({next:()=>this.done(this.editorMode==='create'?'Đã tạo sân bay.':'Đã cập nhật sân bay.'),error:x=>this.fail(x,'Không lưu được sân bay.')});
+    req.subscribe({next:()=>this.done(this.editorMode==='create'?this.t('Đã tạo sân bay.','Airport created.'):this.t('Đã cập nhật sân bay.','Airport updated.')),error:x=>this.fail(x,this.t('Không lưu được sân bay.','Could not save airport.'))});
   }
   saveFlight(){
     const e=this.editor;
     const p=this.computeTimes();
-    if(!p){this.error='Nhập nơi đi/đến, giờ cất cánh (giờ địa phương) và thời gian bay hợp lệ.';return}
+    if(!p){this.error=this.t('Nhập nơi đi/đến, giờ cất cánh (giờ địa phương) và thời gian bay hợp lệ.','Enter valid origin, destination, local departure and flight duration.');return}
     const dep=p.dep,arr=p.arr;
-    if(!e.departure_date){this.error='Departure date là bắt buộc.';return}
+    if(!e.departure_date){this.error=this.t('Ngày khởi hành là bắt buộc.','Departure date is required.');return}
     const duration=p.duration;
-    if(!e.aircraft_code?.trim()){this.error='Chọn máy bay cho chuyến bay.';return}
+    if(!e.aircraft_code?.trim()){this.error=this.t('Chọn máy bay cho chuyến bay.','Choose an aircraft for this flight.');return}
     const layout=this.selectedFlightLayout;
-    if(!layout){this.error='Loại máy bay không tồn tại trong fleet layout.';return}
+    if(!layout){this.error=this.t('Loại máy bay không tồn tại trong sơ đồ đội bay.','Aircraft type not found in fleet layouts.');return}
     const inventories:any[]=[];
     for(const inv of (e.inventory_rows||[])){
       const target=Math.max(0,Math.round(Number(inv.allocated_seats||0)));
       const sold=this.soldSeats(inv);
       const capacity=this.layoutCapacity(inv.cabin_class);
-      if(target<sold){this.error=`${inv.cabin_class}: không thể giảm dưới ${sold} ghế đã bán.`;return}
-      if(target>0&&!capacity){this.error=`${layout.aircraft_type} không hỗ trợ cabin ${inv.cabin_class}.`;return}
-      if(target>capacity){this.error=`${inv.cabin_class}: tối đa ${capacity} ghế trên ${layout.aircraft_type}.`;return}
+      if(target<sold){this.error=this.t(`${inv.cabin_class}: không thể giảm dưới ${sold} ghế đã bán.`,`${inv.cabin_class}: cannot reduce below ${sold} sold seats.`);return}
+      if(target>0&&!capacity){this.error=this.t(`${layout.aircraft_type} không hỗ trợ hạng ${inv.cabin_class}.`,`${layout.aircraft_type} does not support ${inv.cabin_class}.`);return}
+      if(target>capacity){this.error=this.t(`${inv.cabin_class}: tối đa ${capacity} ghế trên ${layout.aircraft_type}.`,`${inv.cabin_class}: max ${capacity} seats on ${layout.aircraft_type}.`);return}
       if(target>0)inventories.push({cabin_class:inv.cabin_class,is_smoking:false,bucket_code:inv.bucket_code||String(inv.cabin_class||'Y')[0],base_price:Math.max(0,Number(inv.base_price||0)),allocated_seats:target,available_seats:Math.max(0,target-sold)});
     }
-    if(!inventories.length){this.error='Phải có ít nhất một cabin có ghế bán.';return}
+    if(!inventories.length){this.error=this.t('Phải có ít nhất một hạng ghế được phân bổ.','At least one cabin must have allocated seats.');return}
     const base:any={
       departure_date:e.departure_date,
       scheduled_departure:dep.toISOString(),
@@ -296,18 +304,18 @@ export class AdminListComponent implements OnInit{
     };
     let body:any=base;
     if(!e.commercial){
-      if(!e.flight_number?.trim()){this.error='Flight number là bắt buộc.';return}
+      if(!e.flight_number?.trim()){this.error=this.t('Số hiệu chuyến bay là bắt buộc.','Flight number is required.');return}
       body={...base,flight_number:e.flight_number.trim().toUpperCase(),distance_miles:Math.max(0,Math.round(Number(e.distance_miles||0)))};
     }
     if(this.editorMode==='create'){
-      if(!e.origin_iata?.trim()||!e.dest_iata?.trim()){this.error='Origin và destination là bắt buộc.';return}
+      if(!e.origin_iata?.trim()||!e.dest_iata?.trim()){this.error=this.t('Nơi đi và nơi đến là bắt buộc.','Origin and destination are required.');return}
       body.flight_number=e.flight_number.trim().toUpperCase();
       body.origin_iata=e.origin_iata.trim().toUpperCase();body.dest_iata=e.dest_iata.trim().toUpperCase();
       body.distance_miles=Math.max(0,Math.round(Number(e.distance_miles||0)));
     }
     this.busy=true;
     const req=this.editorMode==='create'?this.api.createFlight(body):this.api.updateFlight(e._id,body);
-    req.subscribe({next:()=>this.done(this.editorMode==='create'?'Đã tạo chuyến bay.':'Đã cập nhật chuyến bay.'),error:x=>this.fail(x,'Không lưu được chuyến bay.')});
+    req.subscribe({next:()=>this.done(this.editorMode==='create'?this.t('Đã tạo chuyến bay.','Flight created.'):this.t('Đã cập nhật chuyến bay.','Flight updated.')),error:x=>this.fail(x,this.t('Không lưu được chuyến bay.','Could not save flight.'))});
   }
   openStatus(x:any){this.statusEditor={_id:x._id,flight_number:x.flight_number,status:x.status,delay_minutes:x.delay_minutes||0,delay_reason:x.delay_reason||''}}
   saveStatus(){
@@ -315,10 +323,10 @@ export class AdminListComponent implements OnInit{
     const body:any={status:e.status,delay_reason:e.delay_reason||''};
     if(e.status==='DELAYED')body.delay_minutes=Math.max(0,Math.round(Number(e.delay_minutes||0)));
     this.busy=true;
-    this.api.updateFlightStatus(e._id,body).subscribe({next:()=>{this.statusEditor=null;this.done('Đã cập nhật trạng thái chuyến bay.')},error:x=>this.fail(x,'Không cập nhật được trạng thái.')});
+    this.api.updateFlightStatus(e._id,body).subscribe({next:()=>{this.statusEditor=null;this.done(this.t('Đã cập nhật trạng thái chuyến bay.','Flight status updated.'))},error:x=>this.fail(x,this.t('Không cập nhật được trạng thái.','Could not update status.'))});
   }
   async remove(x:any){
-    if(this.kind==='users'&&x.role==='SUPER_ADMIN'){this.error='SUPER_ADMIN không thể bị xóa.';return}
+    if(this.kind==='users'&&x.role==='SUPER_ADMIN'){this.error=this.t('Không thể xóa SUPER_ADMIN.','SUPER_ADMIN cannot be deleted.');return}
     const label=this.primary(x);
     const confirmed=await this.toast.confirm({
       titleVi:'Xác nhận xóa',
@@ -331,40 +339,35 @@ export class AdminListComponent implements OnInit{
     if(!confirmed)return;
     this.busy=true;
     const req=this.kind==='users'?this.api.deleteUser(x._id):this.kind==='flights'?this.api.deleteFlight(x._id):this.api.deleteAirport(x.iata_code);
-    req.subscribe({next:()=>this.done('Đã xóa '+label+'.'),error:e=>this.fail(e,'Không xóa được dữ liệu.')});
+    req.subscribe({next:()=>this.done(this.t('Đã xóa ','Deleted ')+label+'.'),error:e=>this.fail(e,this.t('Không xóa được dữ liệu.','Could not delete data.'))});
   }
   runScheduler(job:'run-expiry'){
     this.busy=true;this.error='';
-    this.api.runBookingScheduler(job).subscribe({next:r=>{this.busy=false;this.message=r?.message||'Scheduler đã chạy.';this.load()},error:e=>this.fail(e,'Không chạy được scheduler.')});
+    this.api.runBookingScheduler(job).subscribe({next:r=>{this.busy=false;this.message=this.t('Đã chạy tác vụ quét giữ chỗ.','Hold-expiry scan completed.');this.load()},error:e=>this.fail(e,this.t('Không chạy được tác vụ.','Could not run scheduled task.'))});
   }
   sendReminder(x:any){
     if(!x?._id)return;
     this.busy=true;this.error='';this.message='';
     const isHold=x.status==='BLOCKED';
     this.api.sendBookingReminder(x._id).subscribe({
-      next:r=>{this.busy=false;this.message=r?.message||(isHold?'Đã gửi email nhắc thanh toán giữ chỗ.':'Đã gửi email nhắc lịch bay.');this.selected=null;this.load()},
-      error:e=>this.fail(e,isHold?'Không gửi được email nhắc thanh toán giữ chỗ.':'Không gửi được email nhắc lịch bay.')
+      next:()=>{this.busy=false;this.message=isHold?this.t('Đã xử lý yêu cầu gửi email nhắc thanh toán giữ chỗ.','Hold payment reminder request processed.'):this.t('Đã xử lý yêu cầu gửi email nhắc lịch bay.','Flight reminder request processed.');this.selected=null;this.load()},
+      error:e=>this.fail(e,isHold?this.t('Không gửi được email nhắc thanh toán giữ chỗ.','Could not send hold payment reminder.'):this.t('Không gửi được email nhắc lịch bay.','Could not send flight reminder.'))
     });
-  }
-  confirmHold(x:any){
-    const blocking=x.blocking_number||x.pnr_code;if(!blocking)return;
-    this.busy=true;
-    this.api.confirm({blocking_number:blocking,payment_method:'PROFILE_CARD'}).subscribe({next:()=>this.done('Đã xác nhận '+blocking+'.'),error:e=>this.fail(e,'Không xác nhận được booking.')});
   }
   async cancelBooking(x:any){
     const code=x.confirmation_number||x.blocking_number||x.pnr_code;
     if(!code)return;
     const confirmed=await this.toast.confirm({
-      titleVi:'Hủy booking?',
+      titleVi:'Hủy đặt chỗ?',
       titleEn:'Cancel booking?',
-      messageVi:'Hủy booking '+code+' theo chính sách hiện hành?',
+      messageVi:'Hủy đặt chỗ '+code+' theo chính sách hiện hành?',
       messageEn:'Cancel booking '+code+' under the current policy?',
-      confirmVi:'Hủy booking',
+      confirmVi:'Hủy đặt chỗ',
       confirmEn:'Cancel booking',
     });
     if(!confirmed)return;
     this.busy=true;
-    this.api.cancel(code).subscribe({next:r=>this.done('Đã hủy booking. Mã hủy: '+(r?.cancellation_number||'đã tạo')+'.'),error:e=>this.fail(e,'Không hủy được booking.')});
+    this.api.cancel(code).subscribe({next:r=>this.done(this.t('Đã hủy đặt chỗ. Mã hủy: ','Booking cancelled. Cancellation reference: ')+(r?.cancellation_number||this.t('đã tạo','created'))+'. '+this.cancelRefundSummary(r)),error:e=>this.fail(e,this.t('Không hủy được đặt chỗ.','Could not cancel booking.'))});
   }
   searchable(x:any){
     if(this.kind==='bookings')return[x.pnr_code,x.confirmation_number,x.blocking_number,x.status,x.booking_type];
@@ -373,6 +376,7 @@ export class AdminListComponent implements OnInit{
     return[x.iata_code,x.airport_name,x.name,x.city_name,x.city,x.country_name,x.country,x.time_zone];
   }
   primary(x:any){return x.pnr_code||x.username||x.flight_number||x.iata_code||x._id}
+  kindLabel(){const labels:Record<string,[string,string]>={bookings:['ĐẶT CHỖ','BOOKINGS'],users:['NGƯỜI DÙNG','USERS'],flights:['CHUYẾN BAY','FLIGHTS'],airports:['SÂN BAY','AIRPORTS']};const pair=labels[this.kind];return pair?this.t(...pair):this.kind.toUpperCase()}
   customerLabel(x:any){const u=x.user_id;return typeof u==='object'?(u.username||u.email||u._id):String(u||'—')}
   bookingEmail(x:any){const u=x?.user_id;return typeof u==='object'?(u.email||'—'):'—'}
   trackBooking(x:any){const code=x.confirmation_number||x.blocking_number||x.pnr_code;this.router.navigate(['/track'],{queryParams:{code}})}
@@ -405,9 +409,10 @@ export class AdminListComponent implements OnInit{
   parseIso(v:any){const s=String(v||'').trim();if(!/(Z|[+-]\d{2}:\d{2})$/i.test(s))return null;const d=new Date(s);return isNaN(d.getTime())?null:d}
   iso(v:any){if(!v)return'';const d=new Date(v);return isNaN(d.getTime())?String(v):d.toISOString()}
   coords(x:any){const lat=x.latitude??x.lat;const lon=x.longitude??x.lng??x.lon;return lat!=null&&lon!=null?`${lat}, ${lon}`:'—'}
-  dateTime(v:any){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?String(v):new Intl.DateTimeFormat('vi-VN',{dateStyle:'short',timeStyle:'short'}).format(d)}
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
-  num(v:number){return new Intl.NumberFormat('vi-VN').format(v||0)}
+  dateTime(v:any){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?String(v):new Intl.DateTimeFormat(this.language.isEnglish()?'en-US':'vi-VN',{dateStyle:'short',timeStyle:'short'}).format(d)}
+  money(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
+  num(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN').format(v||0)}
+  cancelRefundSummary(r:any){const state=String(r?.refund_status||r?.refund?.status||'').toUpperCase();if(state==='COMPLETED'||state==='SUCCESS'||state==='SUCCEEDED')return this.t('Khoản hoàn đã được PayPal xác nhận.','PayPal refund confirmed.');if(state==='PENDING'||state==='PROCESSING')return this.t('Khoản hoàn đang chờ xử lý.','Refund is pending.');if(state==='FAILED')return this.t('Hoàn tiền chưa thành công; cần kiểm tra lại.','Refund failed; follow-up required.');return this.t('Kiểm tra trạng thái hoàn tiền trong chi tiết đặt chỗ.','Check the refund status in booking details.')}
   done(text:string){this.busy=false;this.editor=null;this.selected=null;this.message=text;this.error='';this.load()}
   fail(e:any,f:string){this.busy=false;this.error=this.msg(e,f)}
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}

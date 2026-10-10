@@ -21,7 +21,7 @@ import {
   CreatePayPalConfirmHoldOrderDto,
   CreatePayPalRescheduleOrderDto,
 } from './bookings.dto';
-import { BookingStatus } from './bookings.schema';
+import { BookingStatus, PaymentMethod } from './bookings.schema';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { StrictCustomerGuard } from '../auth/strict-customer.guard';
@@ -40,6 +40,13 @@ export class BookingsController {
     private readonly bookingsScheduler: BookingsScheduler,
     private readonly usersService: UsersService,
   ) {}
+
+  /** Old saved-card records remain available for historical refunds, never as new payment proof. */
+  private rejectSavedCardPayment(method?: PaymentMethod) {
+    if (method === PaymentMethod.PROFILE_CARD) {
+      throw new BadRequestException('Saved-card payment is no longer supported. The customer must pay through PayPal Checkout.');
+    }
+  }
 
   /**
    * Staff (CLERK/ADMIN) book on behalf of a registered customer: the target
@@ -62,6 +69,7 @@ export class BookingsController {
     @Req() req: { user: { sub: string; role: UserRole } },
     @Body() createBookingDto: CreateBookingDto,
   ) {
+    this.rejectSavedCardPayment(createBookingDto.payment_method);
     // Customers can only create bookings for themselves
     if (req.user.role === UserRole.CUSTOMER) {
       createBookingDto.user_id = req.user.sub;
@@ -187,6 +195,7 @@ export class BookingsController {
     @Req() req: { user: { sub: string; role: UserRole } },
     @Body() confirmTicketDto: ConfirmTicketDto,
   ) {
+    this.rejectSavedCardPayment(confirmTicketDto.payment_method);
     await this.bookingsService.assertOwnership(
       confirmTicketDto.blocking_number,
       req.user.sub,
@@ -201,6 +210,7 @@ export class BookingsController {
     @Req() req: { user: { sub: string; role: UserRole } },
     @Body() rescheduleTicketDto: RescheduleTicketDto,
   ) {
+    this.rejectSavedCardPayment(rescheduleTicketDto.payment_method);
     await this.bookingsService.assertOwnership(
       rescheduleTicketDto.pnr_code || rescheduleTicketDto.confirmation_number || '',
       req.user.sub,
@@ -262,7 +272,12 @@ export class BookingsController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async runReminders() {
     const processed = await this.bookingsScheduler.sendPendingReminders();
-    return { message: `Reminder job finished. ${processed} reminder(s) sent.` };
+    return {
+      processed,
+      message: `Reminder job finished. ${processed} reminder(s) sent.`,
+      messageVi: `Đã hoàn tất tác vụ nhắc thanh toán. Đã gửi ${processed} email.`,
+      messageEn: `Payment-reminder job finished. ${processed} email(s) sent.`,
+    };
   }
 
   @Post('scheduler/run-travel-reminders')
@@ -270,7 +285,12 @@ export class BookingsController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async runTravelReminders() {
     const processed = await this.bookingsScheduler.sendUpcomingTripReminders();
-    return { message: `Upcoming-trip reminder job finished. ${processed} reminder(s) sent.` };
+    return {
+      processed,
+      message: `Upcoming-trip reminder job finished. ${processed} reminder(s) sent.`,
+      messageVi: `Đã hoàn tất tác vụ nhắc chuyến sắp bay. Đã gửi ${processed} email.`,
+      messageEn: `Upcoming-trip reminder job finished. ${processed} email(s) sent.`,
+    };
   }
 
   @Post('scheduler/run-expiry')
@@ -278,7 +298,12 @@ export class BookingsController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async runExpiry() {
     const processed = await this.bookingsScheduler.autoCancelExpiredBlocks();
-    return { message: `Expiry job finished. ${processed} booking(s) auto-cancelled.` };
+    return {
+      processed,
+      message: `Expiry job finished. ${processed} booking(s) auto-cancelled.`,
+      messageVi: `Đã hoàn tất tác vụ hết hạn. Đã tự động hủy ${processed} đặt chỗ.`,
+      messageEn: `Expiry job finished. ${processed} booking(s) auto-cancelled.`,
+    };
   }
 
   @Post(':id/send-reminder')

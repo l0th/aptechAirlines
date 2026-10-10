@@ -199,7 +199,7 @@ describe('PaypalService Specification Tests', () => {
 
       expect(mockOrdersController.createOrder).toHaveBeenCalledWith(
         expect.objectContaining({
-          paypalRequestId: 'CLIENT-REQ-456-create',
+          paypalRequestId: expect.stringMatching(/^create-[a-f0-9]{30}$/),
           body: expect.objectContaining({
             intent: 'CAPTURE',
             purchaseUnits: [
@@ -430,6 +430,28 @@ describe('PaypalService Specification Tests', () => {
           paypalRequestId: 'req-ref-err',
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('exposes a safe PayPal validation issue and debug ID to diagnose rejected orders', async () => {
+      mockOrdersController.createOrder.mockRejectedValue({
+        message: 'Provider returned 422',
+        statusCode: 422,
+        body: JSON.stringify({
+          name: 'UNPROCESSABLE_ENTITY',
+          message: 'The requested action could not be performed',
+          debug_id: 'abc123def456',
+          details: [{ issue: 'PAYEE_ACCOUNT_RESTRICTED', description: 'Sensitive internal text' }],
+        }),
+      });
+
+      await expect(service.createOrder({ amountVnd: 100000, clientRequestId: 'diagnostic-1' }))
+        .rejects.toThrow(/PAYEE_ACCOUNT_RESTRICTED.*abc123def456/);
+    });
+
+    it('rejects VND amounts that round to zero USD before contacting PayPal', async () => {
+      await expect(service.createOrder({ amountVnd: 1, clientRequestId: 'tiny-amount' }))
+        .rejects.toThrow(/minimum.*PayPal/i);
+      expect(mockOrdersController.createOrder).not.toHaveBeenCalled();
     });
   });
 

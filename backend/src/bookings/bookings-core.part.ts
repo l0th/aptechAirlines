@@ -4,6 +4,7 @@ import { FlightDocument } from '../flights/flights.schema';
 import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
+import { MailService } from '../mail/mail.service';
 import { BookingSeatSagaOperationDocument } from '../seat-allocation/booking-seat-saga-operation.schema';
 
 export interface BookingsCoreDependencies {
@@ -12,6 +13,7 @@ export interface BookingsCoreDependencies {
   usersService: UsersService;
   seatAllocationService?: SeatAllocationService;
   sagaModel?: Model<BookingSeatSagaOperationDocument>;
+  mailService?: MailService;
 }
 
 export interface BookingsCoreBridge {
@@ -40,4 +42,5 @@ export abstract class BookingsCorePart {
   protected get usersService() { return this.deps.usersService; }
   protected get seatAllocationService() { return this.deps.seatAllocationService; }
   protected get sagaModel() { return this.deps.sagaModel; }
+  protected get mailService() { return this.deps.mailService; }
 }

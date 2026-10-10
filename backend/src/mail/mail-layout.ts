@@ -3,6 +3,8 @@
  * Visual language: navy header (#071b2e), gold eyebrow, rounded card body,
  * gold highlight box for key identifiers.
  */
+import type { MailLang } from './mail-i18n';
+
 export interface MailLayoutOptions {
   /** Heading shown in the navy header. Plain text (escaped by the caller if dynamic). */
   title: string;
@@ -12,6 +14,8 @@ export interface MailLayoutOptions {
   accent?: string;
   /** Footer text line. */
   footer?: string;
+  /** Email language; controls the default footer. Defaults to Vietnamese. */
+  lang?: MailLang;
 }
 
 export const MAIL_COLORS = {
@@ -27,13 +31,17 @@ export const MAIL_COLORS = {
 };
 
 export function renderLayout(opts: MailLayoutOptions): string {
+  const lang: MailLang = opts.lang === 'en' ? 'en' : 'vi';
   const accent = opts.accent
     ? `<div style="height:4px;background:${opts.accent}"></div>`
     : '';
   const footer =
-    opts.footer || 'Aptech Airlines • Automated Service Notification • Please do not reply directly to this email.';
+    opts.footer ||
+    (lang === 'en'
+      ? 'Aptech Airlines • Automated Service Notification • Please do not reply directly to this email.'
+      : 'Aptech Airlines • Thông báo tự động • Vui lòng không trả lời trực tiếp email này.');
   return `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
+      <div lang="${lang}" style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b;line-height:1.6">
         <div style="background:${MAIL_COLORS.navy};color:#fff;padding:22px 24px;border-radius:14px 14px 0 0">
           <div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:${MAIL_COLORS.gold}">APTECH AIRLINES</div>
           <h2 style="margin:8px 0 0">${opts.title}</h2>

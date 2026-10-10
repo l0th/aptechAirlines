@@ -10,27 +10,18 @@ import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcrypt';
 import { User, UserDocument, UserRole } from './users.schema';
 import { CreateUserDto, UpdateUserDto } from './users.dto';
-import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 
 export function toSafeUserResponse(user: any): any {
   if (!user) return null;
   const raw = typeof user.toObject === 'function' ? user.toObject() : { ...user };
-  const card = typeof raw.preferred_credit_card === 'string' ? raw.preferred_credit_card.trim() : '';
-  const digits = card.replace(/\D/g, '');
-  const hasCard =
-    CREDIT_CARD_REGEX.test(card) &&
-    !/^(CARD-DEFAULT|SAVED-CARD|UNKNOWN|ORIGINAL-PAYMENT-CARD|\*)/i.test(card);
-  const masked = hasCard && digits.length >= 4 ? `**** **** **** ${digits.slice(-4)}` : undefined;
-
   delete raw.password_hash;
   delete raw.password_reset_code_hash;
   delete raw.password_reset_expires_at;
   delete raw.preferred_credit_card;
-  return {
-    ...raw,
-    has_preferred_credit_card: hasCard,
-    preferred_credit_card_masked: masked,
-  };
+  // Historical saved-card data stays in storage only; it is never part of new API responses.
+  delete raw.has_preferred_credit_card;
+  delete raw.preferred_credit_card_masked;
+  return raw;
 }
 
 @Injectable()
@@ -38,6 +29,16 @@ export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
+
+  /** Persist the website language chosen by the user (used for all their emails). */
+  async setPreferredLanguage(id: string, language: unknown): Promise<'vi' | 'en'> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid user ID format');
+    }
+    const lang: 'vi' | 'en' = String(language ?? '').trim().toLowerCase().startsWith('en') ? 'en' : 'vi';
+    await this.userModel.updateOne({ _id: id }, { $set: { preferred_language: lang } }).exec();
+    return lang;
+  }
 
   async findAll(search?: string, role?: UserRole): Promise<any[]> {
     const filter: any = {};
@@ -76,6 +77,9 @@ export class UsersService {
   }
 
   async create(createUserDto: CreateUserDto): Promise<UserDocument> {
+    if (Object.prototype.hasOwnProperty.call(createUserDto, 'preferred_credit_card')) {
+      throw new BadRequestException('Saving credit cards is no longer supported. Use PayPal checkout.');
+    }
     // Check SUPER_ADMIN protection
     if (createUserDto.role === UserRole.SUPER_ADMIN) {
       throw new ForbiddenException('Cannot manually create a SUPER_ADMIN account. Only 1 unique system SUPER_ADMIN is permitted.');
@@ -106,6 +110,9 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<UserDocument> {
+    if (Object.prototype.hasOwnProperty.call(updateUserDto, 'preferred_credit_card')) {
+      throw new BadRequestException('Saving credit cards is no longer supported. Use PayPal checkout.');
+    }
     const user = await this.findById(id);
 
     // Prevent granting SUPER_ADMIN role
@@ -138,7 +145,6 @@ export class UsersService {
     if (updateUserDto.phone_number !== undefined) user.phone_number = updateUserDto.phone_number;
     if (updateUserDto.sex !== undefined) user.sex = updateUserDto.sex;
     if (updateUserDto.age !== undefined) user.age = updateUserDto.age;
-    if (updateUserDto.preferred_credit_card !== undefined) user.preferred_credit_card = updateUserDto.preferred_credit_card;
     if (updateUserDto.sky_miles !== undefined) user.sky_miles = updateUserDto.sky_miles;
     if (updateUserDto.role && user.role !== UserRole.SUPER_ADMIN) user.role = updateUserDto.role;
 

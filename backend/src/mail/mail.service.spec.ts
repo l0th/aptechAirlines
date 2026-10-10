@@ -1,4 +1,5 @@
 import { MailService, escapeHtml, isValidMaskedCard } from './mail.service';
+import { MAIL_TEMPLATES, sampleDataFor } from './mail-templates';
 
 describe('MailService', () => {
   const originalEnv = process.env;
@@ -27,15 +28,15 @@ describe('MailService', () => {
   });
 
   describe('DEV-fallback mode (no SMTP_HOST configured)', () => {
-    it('resolves true and logs email without crashing when SMTP_HOST is not set', async () => {
+    it('reports that email was not delivered when SMTP_HOST is not set', async () => {
       delete process.env.SMTP_HOST;
       const service = new MailService();
 
       const result = await service.sendMail('user@example.com', 'Test Subject', '<p>Test body</p>');
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
-    it('sendCancellationEmail formats and sends in DEV mode without crashing', async () => {
+    it('sendCancellationEmail formats email in DEV mode without claiming delivery', async () => {
       delete process.env.SMTP_HOST;
       const service = new MailService();
 
@@ -57,7 +58,7 @@ describe('MailService', () => {
         policyDeduction: 10,
       });
 
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
     it('sendExpiredHoldCancellationEmail formats and sends in DEV mode without crashing', async () => {
@@ -76,7 +77,7 @@ describe('MailService', () => {
         destination: 'DAD',
       });
 
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
     it('sendFlightDisruptionEmail formats and sends in DEV mode for DELAY', async () => {
@@ -99,7 +100,7 @@ describe('MailService', () => {
         statusText: 'DELAYED',
       });
 
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
   });
 
@@ -111,6 +112,8 @@ describe('MailService', () => {
       delete process.env.SMTP_HOST;
       service = new MailService();
       sendMailSpy = jest.spyOn(service, 'sendMail').mockResolvedValue(true);
+      // These assertions check the English wording: the recipient chose English on the website.
+      jest.spyOn(service, 'resolveLanguage').mockResolvedValue('en');
     });
 
     it('manual BLOCKED cancellation renders PNR + BLK, no CNF, refund 0', async () => {
@@ -415,6 +418,72 @@ describe('MailService', () => {
       expect(html).toContain('2026-10-28 10:00 (Asia/Ho_Chi_Minh)');
       expect(html).toContain('2026-10-28 13:00 (Asia/Ho_Chi_Minh)');
       expect(html).toContain('Please use Track Booking to check the latest flight status and trip details.');
+    });
+  });
+
+  describe('Bilingual emails (Vietnamese above English)', () => {
+    const expiredHold = {
+      toEmail: 'vi@example.com',
+      passengerName: 'Nguyễn Văn An',
+      bookingReference: 'PNR8X2KQ',
+      blockingNumber: 'BLK-1',
+      cancellationNumber: 'CAN-1',
+      holdDeadlineFormatted: '2026-10-19 08:30 (Asia/Ho_Chi_Minh)',
+      itinerary: [{ flightNumber: 'APT1201', origin: 'SGN', destination: 'HAN', departureTimeFormatted: '2026-11-02 08:30', cabinClass: 'ECONOMY' }],
+    };
+
+    it('always renders both sections in order with one send', async () => {
+      const service = new MailService();
+      const spy = jest.spyOn(service, 'sendMail').mockResolvedValue(true);
+      await service.sendExpiredHoldCancellationEmail(expiredHold);
+      const [, subject, html] = spy.mock.calls[0];
+      expect(subject).toContain('Hết hạn giữ chỗ');
+      expect(subject).toContain('Hold Period Expired');
+      expect(html).toContain('Kính gửi');
+      expect(html).toContain('Dear ');
+      expect(html.indexOf('<section lang="vi"')).toBeLessThan(html.indexOf('<section lang="en"'));
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not omit Vietnamese when the recipient prefers English', async () => {
+      const userModel: any = {
+        findOne: jest.fn().mockReturnValue({
+          select: () => ({ lean: () => ({ exec: () => Promise.resolve({ preferred_language: 'en' }) }) }),
+        }),
+      };
+      const service = new MailService(undefined, undefined, userModel);
+      const spy = jest.spyOn(service, 'sendMail').mockResolvedValue(true);
+      await service.sendExpiredHoldCancellationEmail(expiredHold);
+      const [, subject, html] = spy.mock.calls[0];
+      expect(subject).toContain('Hold Period Expired - Booking PNR8X2KQ Cancelled');
+      expect(html).toContain('Kính gửi');
+      expect(html).toContain('Dear ');
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('explicit language does not suppress either section', async () => {
+      const service = new MailService();
+      const spy = jest.spyOn(service, 'sendMail').mockResolvedValue(true);
+      await service.sendPasswordResetCode({ toEmail: 'a@b.c', passengerName: 'An', code: '123456', expiresInMinutes: 10, lang: 'en' });
+      const [, subject, html] = spy.mock.calls[0];
+      expect(subject).toContain('Aptech Airlines - Mã đặt lại mật khẩu');
+      expect(subject).toContain('Aptech Airlines - Password reset code');
+      expect(html).toContain('10 phút');
+      expect(html).toContain('10 minutes');
+      expect(html.indexOf('<section lang="vi"')).toBeLessThan(html.indexOf('<section lang="en"'));
+    });
+
+    it.each(MAIL_TEMPLATES.map((tpl) => [tpl.key, tpl] as const))('%s template uses the shared bilingual renderer', async (_key, tpl) => {
+      const service = new MailService();
+      const spy = jest.spyOn(service, 'sendMail').mockResolvedValue(true);
+      await service.sendTemplate(tpl.key, 'test@example.com', (lang) => tpl.render(sampleDataFor(tpl, lang)));
+      const [, subject, html] = spy.mock.calls[0];
+      expect(subject).toContain(' | ');
+      expect(html.match(/<section lang="vi"/g)).toHaveLength(1);
+      expect(html.match(/<section lang="en"/g)).toHaveLength(1);
+      expect(html.indexOf('<section lang="vi"')).toBeLessThan(html.indexOf('<section lang="en"'));
+      expect(html).not.toMatch(/<html[\s>]/i);
+      expect(spy).toHaveBeenCalledTimes(1);
     });
   });
 

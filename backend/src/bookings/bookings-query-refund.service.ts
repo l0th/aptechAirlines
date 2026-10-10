@@ -7,10 +7,6 @@ import {
 import { BookingDocument, PaymentMethod } from './bookings.schema';
 import { UserRole } from '../users/users.schema';
 import { formatLocalTime } from '../common/timezone.util';
-import {
-  assertPayPalRefundExecutionSnapshot,
-  classifyPayPalRefundStatus,
-} from '../paypal/paypal.service';
 import { AllocatedRefundItem } from './refund-allocation.util';
 import {
   BookingsLifecycleBridge,
@@ -131,6 +127,8 @@ export class BookingsQueryRefundService extends BookingsLifecyclePart {
 
     for (const c of booking.ticket_coupons) {
       if (!c.flight_id) continue;
+      // Only currently usable coupons determine the refund policy window.
+      if (String(c.coupon_status || 'ACTIVE').toUpperCase() !== 'ACTIVE') continue;
       try {
         const flight = await this.flightsService.findById(c.flight_id.toString());
         if (!flight || !flight.scheduled_departure) {
@@ -194,97 +192,42 @@ export class BookingsQueryRefundService extends BookingsLifecyclePart {
     refundAllocations: AllocatedRefundItem[],
     pnrCode: string,
   ): Promise<void> {
-    if (!this.paypalService || !refundAllocations || refundAllocations.length === 0) {
+    if (!this.paypalRefundScheduler || !refundAllocations?.length) {
       return;
     }
 
-    for (const item of refundAllocations) {
-      if (item.payment_method === PaymentMethod.PAYPAL) {
-        try {
-          assertPayPalRefundExecutionSnapshot({
-            payment_reference: item.payment_reference,
-            provider_capture_id: item.provider_capture_id || '',
-            provider_amount: item.provider_amount || '',
-            provider_currency: item.provider_currency || '',
-            exchange_rate_vnd_per_unit: item.exchange_rate_vnd_per_unit,
-            require_fx: true,
-            context: 'executePostCommitRefunds',
-          });
-        } catch (valErr: any) {
-          this.logger.error(
-            `Incomplete PayPal refund provenance for booking ${pnrCode}, ref ${item.payment_reference}: ${valErr?.message}`,
-          );
-          item.status = 'FAILED';
-          if (typeof this.bookingModel?.updateOne === 'function') {
-            await this.bookingModel.updateOne(
-              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
-              {
-                $set: {
-                  'payment_transactions.$.status': 'FAILED',
-                  'payment_transactions.$.failure_reason': 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE',
-                  'payment_transactions.$.next_retry_at': null,
-                },
-              },
-            );
-          }
-          continue;
-        }
+    const paypalRefunds = refundAllocations.filter((item) => item.payment_method === PaymentMethod.PAYPAL);
+    for (const item of paypalRefunds) {
+      // The same atomic claim/lease is used by post-commit, hourly cron and
+      // admin retry. Only the claim winner is allowed to contact PayPal.
+      try {
+        await this.paypalRefundScheduler.processPendingRefunds(
+          String(bookingId),
+          item.payment_reference,
+        );
+      } catch (err: any) {
+        // Booking changes are already committed. The outbox remains PENDING
+        // and the scheduled worker can resume the refund later.
+        this.logger.error(
+          `Post-commit refund processing interrupted for ${pnrCode}, ref ${item.payment_reference}: ${err?.message || err}`,
+        );
+      }
+    }
 
-        try {
-          const refundRes = await this.paypalService.refundCapture({
-            captureId: item.provider_capture_id!,
-            providerAmount: item.provider_amount!,
-            providerCurrency: item.provider_currency!,
-            paypalRequestId: item.payment_reference,
-            note: `Refund for PNR ${pnrCode}`,
-          });
-          const classified = classifyPayPalRefundStatus(refundRes.status);
-          const localStatus = classified.local_status;
-          const isFailed = classified.is_failed;
-          if (typeof this.bookingModel?.updateOne === 'function') {
-            await this.bookingModel.updateOne(
-              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
-              {
-                $set: {
-                  'payment_transactions.$.status': localStatus,
-                  'payment_transactions.$.provider_refund_id': refundRes.refund_id,
-                  'payment_transactions.$.provider_status': classified.provider_status,
-                  ...(isFailed
-                    ? {
-                        'payment_transactions.$.failure_reason': `PayPal refund returned status: ${classified.provider_status}`,
-                        'payment_transactions.$.next_retry_at': null,
-                      }
-                    : {}),
-                },
-              },
-            );
-          }
-          item.status = localStatus;
-          (item as any).provider_refund_id = refundRes.refund_id;
-          (item as any).provider_status = classified.provider_status;
-          if (isFailed) {
-            item.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
-            (item as any).next_retry_at = null;
-          }
-        } catch (ppErr: any) {
-          this.logger.error(
-            `Post-commit PayPal refund failed for booking ${pnrCode}, ref ${item.payment_reference}: ${ppErr?.message || ppErr}`,
-          );
-          item.status = 'PENDING';
-          if (typeof this.bookingModel?.updateOne === 'function') {
-            await this.bookingModel.updateOne(
-              { _id: bookingId, 'payment_transactions.payment_reference': item.payment_reference },
-              {
-                $set: {
-                  'payment_transactions.$.status': 'PENDING',
-                  'payment_transactions.$.provider_status': 'FAILED',
-                  'payment_transactions.$.failure_reason': ppErr?.message || 'PayPal refund call failed',
-                  'payment_transactions.$.next_retry_at': new Date(Date.now() + 60 * 60 * 1000),
-                },
-              },
-            );
-          }
-        }
+    // Surface persisted provider results in the booking cancellation response.
+    const persisted = await this.bookingModel.findById(bookingId)
+      .select('payment_transactions')
+      .lean()
+      .exec();
+    for (const item of paypalRefunds) {
+      const tx = persisted?.payment_transactions?.find(
+        (row) => row.payment_reference === item.payment_reference,
+      );
+      if (tx) {
+        item.status = tx.status as AllocatedRefundItem['status'];
+        item.provider_refund_id = tx.provider_refund_id;
+        item.provider_status = tx.provider_status;
+        item.failure_reason = tx.failure_reason;
       }
     }
   }

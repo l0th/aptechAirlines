@@ -50,5 +50,5 @@ import { ToastService } from '../core/toast.service';
 export class ToastHostComponent {
   readonly toast = inject(ToastService);
   private readonly language = inject(LanguageService);
-  text(vi: string, en: string) { return this.language.language() === 'vi' ? vi : en; }
+  text(vi: string, en: string) { return this.language.pick(vi, en); }
 }

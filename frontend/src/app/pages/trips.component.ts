@@ -5,6 +5,8 @@ import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { PaypalService } from '../core/paypal.service';
 import { ToastService } from '../core/toast.service';
+import { LanguageService } from '../core/language.service';
+import { cancellationOutcomeMessages } from '../core/refund-copy';
 import { PaginationComponent } from '../shared/pagination.component';
 
 @Component({
@@ -12,70 +14,70 @@ import { PaginationComponent } from '../shared/pagination.component';
   imports: [PaginationComponent],
   template: `
   <div class="container page">
-    <div class="eyebrow">MY TRIPS</div>
-    <h1 class="title">Quản lý chuyến đi</h1>
-    <p class="subtitle">Xem hành trình, xác nhận vé đang giữ, đổi chuyến hoặc hủy đặt chỗ.</p>
+    <div class="eyebrow">{{t('CHUYẾN ĐI CỦA TÔI','MY TRIPS')}}</div>
+    <h1 class="title">{{t('Quản lý chuyến đi','Manage trips')}}</h1>
+    <p class="subtitle">{{t('Xem hành trình, xác nhận vé đang giữ, đổi chuyến hoặc hủy đặt chỗ.','Review itineraries, pay for held tickets, reschedule or cancel bookings.')}}</p>
 
     @if(!auth.authenticated()){
-      <div class="card empty"><h2>Cần đăng nhập</h2><p class="muted">Đăng nhập để xem các chuyến đi của bạn.</p></div>
+      <div class="card empty"><h2>{{t('Cần đăng nhập','Sign in required')}}</h2><p class="muted">{{t('Đăng nhập để xem các chuyến đi của bạn.','Sign in to see your trips.')}}</p></div>
     } @else if(loading()) {
-      <div class="card empty">Đang tải chuyến đi…</div>
+      <div class="card empty">{{t('Đang tải chuyến đi…','Loading trips…')}}</div>
     } @else {
       <div class="trip-list">
         @for(b of pagedTrips;track b._id){
           <article class="card trip">
             <div class="trip-main">
               <div class="trip-top">
-                <span class="pill" [class.pill-success]="b.status==='CONFIRMED'" [class.pill-gold]="b.status==='BLOCKED'">{{statusLabel(b.status)}}</span>
-                <span class="type">{{typeLabel(b.booking_type)}}</span>
+                <span class="pill" translate="no" [class.pill-success]="b.status==='CONFIRMED'" [class.pill-gold]="b.status==='BLOCKED'">{{statusLabel(b.status)}}</span>
+                <span class="type" translate="no">{{typeLabel(b.booking_type)}}</span>
               </div>
-              <h3>{{b.pnr_code}}</h3>
-              <p class="reference">{{b.confirmation_number||b.blocking_number||b.cancellation_number||'Chưa có mã xử lý'}}</p>
+              <h3 translate="no">{{b.pnr_code}}</h3>
+              <p class="reference" translate="no">{{b.confirmation_number||b.blocking_number||b.cancellation_number||language.pick('Chưa có mã xử lý', 'No reference yet')}}</p>
               @if(scheduleRows(b).length){
                 <div class="flight-schedule">
                   @for(f of scheduleRows(b);track f.key){
                     <div class="schedule-row">
                       <div>
-                        <span>{{f.label}}</span>
+                        <span translate="no">{{language.translateNotice(f.label)}}</span>
                         <strong>{{f.flight_number}} · {{f.origin_iata||'—'}} → {{f.dest_iata||'—'}}</strong>
                       </div>
                       <div class="departure">
-                        <span>Khởi hành</span>
+                        <span>{{t('Khởi hành','Departure')}}</span>
                         <strong>{{flightDateTime(f)}}</strong>
                       </div>
                     </div>
                   }
                 </div>
               } @else if(scheduleLoading.has(bookingKey(b))){
-                <div class="schedule-loading">Đang tải ngày giờ bay…</div>
+                <div class="schedule-loading">{{t('Đang tải ngày giờ bay…','Loading flight schedules…')}}</div>
               }
               <div class="summary">
-                <span>{{b.passengers?.length||0}} hành khách</span>
+                <span>{{b.passengers?.length||0}} {{t('hành khách','passengers')}}</span>
                 <span>{{money(b.total_amount)}}</span>
-                @if(b.status==='BLOCKED'&&b.time_limit_deadline){<span>Giữ đến {{dateTime(b.time_limit_deadline)}}</span>}
+                @if(b.status==='BLOCKED'&&b.time_limit_deadline){<span>{{t('Giữ đến','Held until')}} {{dateTime(b.time_limit_deadline)}}</span>}
               </div>
             </div>
             <div class="trip-actions">
-              <button class="btn btn-outline" (click)="openDetails(b)" [disabled]="busy">Chi tiết</button>
+              <button class="btn btn-outline" (click)="openDetails(b)" [disabled]="busy">{{t('Chi tiết','Details')}}</button>
               @if(b.status==='BLOCKED'){
                 @if(auth.staff()){
-                  <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard(b)">Xác nhận tại quầy</button>
+                  <span class="muted">{{t('Khách thanh toán PayPal từ email giữ chỗ','Customer pays with PayPal from the hold email')}}</span>
                 }@else{
-                  <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal(b)">Thanh toán PayPal</button>
+                  <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal(b)">{{t('Thanh toán PayPal','Pay with PayPal')}}</button>
                 }
               }
               @if(b.status==='CONFIRMED'){
-                <button class="btn btn-outline" (click)="reschedule(b)">Đổi vé</button>
+                <button class="btn btn-outline" (click)="reschedule(b)">{{t('Đổi vé','Reschedule')}}</button>
               }
               @if(b.status!=='CANCELLED'){
-                <button class="btn btn-outline danger" (click)="cancel(b)" [disabled]="busy">Hủy vé</button>
+                <button class="btn btn-outline danger" (click)="cancel(b)" [disabled]="busy">{{t('Hủy vé','Cancel booking')}}</button>
               }
             </div>
           </article>
         }
       </div>
       <app-pagination [total]="trips().length" [(page)]="page" [(pageSize)]="pageSize" [pageSizeOptions]="[5,10,20,50]" />
-      @if(!trips().length){<div class="card empty">Bạn chưa có booking nào.</div>}
+      @if(!trips().length){<div class="card empty">{{t('Bạn chưa có đặt chỗ nào.','You have no bookings yet.')}}</div>}
     }
 
     
@@ -87,43 +89,43 @@ import { PaginationComponent } from '../shared/pagination.component';
           <button class="x" (click)="closeDetails()">×</button>
           <div class="modal-head">
             <div>
-              <div class="eyebrow">BOOKING DETAIL</div>
-              <h2>{{selected.pnr_code}}</h2>
-              <p>{{typeLabel(selected.booking_type)}} · {{selected.passengers?.length||0}} hành khách</p>
+               <div class="eyebrow">{{t('CHI TIẾT ĐẶT CHỖ','BOOKING DETAILS')}}</div>
+              <h2 translate="no">{{selected.pnr_code}}</h2>
+               <p><span translate="no">{{typeLabel(selected.booking_type)}}</span> · {{selected.passengers?.length||0}} {{t('hành khách','passengers')}}</p>
             </div>
-            <span class="pill" [class.pill-success]="selected.status==='CONFIRMED'" [class.pill-gold]="selected.status==='BLOCKED'">{{statusLabel(selected.status)}}</span>
+            <span class="pill" translate="no" [class.pill-success]="selected.status==='CONFIRMED'" [class.pill-gold]="selected.status==='BLOCKED'">{{statusLabel(selected.status)}}</span>
           </div>
 
           <div class="codes">
             <div><span>PNR</span><strong>{{selected.pnr_code||'—'}}</strong></div>
-            <div><span>Confirmation</span><strong>{{selected.confirmation_number||'—'}}</strong></div>
-            <div><span>Blocking</span><strong>{{selected.blocking_number||'—'}}</strong></div>
-            <div><span>Cancellation</span><strong>{{selected.cancellation_number||'—'}}</strong></div>
+             <div><span>{{t('Mã xác nhận','Confirmation')}}</span><strong>{{selected.confirmation_number||'—'}}</strong></div>
+             <div><span>{{t('Mã giữ chỗ','Hold code')}}</span><strong>{{selected.blocking_number||'—'}}</strong></div>
+             <div><span>{{t('Mã hủy','Cancellation')}}</span><strong>{{selected.cancellation_number||'—'}}</strong></div>
           </div>
 
           @if(selected.status==='BLOCKED'&&selected.time_limit_deadline){
-            <div class="deadline">Vé đang được giữ đến <strong>{{dateTime(selected.time_limit_deadline)}}</strong>.</div>
+             <div class="deadline">{{t('Vé đang được giữ đến','Ticket is held until')}} <strong>{{dateTime(selected.time_limit_deadline)}}</strong>.</div>
           }
 
           <div class="detail-grid">
             <div>
-              <h3>Hành khách</h3>
+               <h3>{{t('Hành khách','Passengers')}}</h3>
               @for(p of selected.passengers||[];track $index){
                 <div class="row-item">
                   <strong>{{$index+1}}. {{p.first_name}} {{p.last_name}}</strong>
-                  <small>{{passengerLabel(p.passenger_type)}} · {{p.nationality||'—'}}</small>
+                  <small><span translate="no">{{passengerLabel(p.passenger_type)}}</span> · <span translate="no">{{p.nationality||'—'}}</span></small>
                 </div>
               }
             </div>
             <div>
-              <h3>Hành trình</h3>
+               <h3>{{t('Hành trình','Itinerary')}}</h3>
               @for(c of selectedCoupons;track c.coupon_number||$index){
                 <div class="coupon">
-                  <div><strong>{{c.flight_number}}</strong><small>{{legLabel(c.leg_type)}} · {{c.cabin_class}}</small></div>
+                  <div><strong translate="no">{{c.flight_number}}</strong><small><span translate="no">{{legLabel(c.leg_type)}}</span> · <span translate="no">{{language.cabinLabel(c.cabin_class)}}</span></small></div>
                   <div>
                     @if(c.origin_iata||c.dest_iata){<b>{{c.origin_iata||'—'}} → {{c.dest_iata||'—'}}</b>}
-                    <small>{{c.scheduled_departure_local||dateTime(c.scheduled_departure)||'Lịch bay sẽ hiển thị khi tra cứu'}}</small>
-                    @if(c.seat_code){<small>Ghế {{c.seat_code}} · phụ phí {{money(c.seat_fee||0)}}</small>}
+                     <small>{{c.scheduled_departure_local||dateTime(c.scheduled_departure)||t('Lịch bay sẽ hiển thị khi tra cứu','Flight schedule will appear when tracked')}}</small>
+                     @if(c.seat_code){<small>{{t('Ghế','Seat')}} {{c.seat_code}} · {{t('phụ phí','fee')}} {{money(c.seat_fee||0)}}</small>}
                   </div>
                 </div>
               }
@@ -131,9 +133,9 @@ import { PaginationComponent } from '../shared/pagination.component';
           </div>
 
           <div class="totals">
-            <div><span>Giá vé</span><strong>{{money(selected.total_fare)}}</strong></div>
-            <div><span>Phụ phí ghế</span><strong>{{money(selected.total_seat_fees)}}</strong></div>
-            <div class="grand"><span>Tổng</span><strong>{{money(selected.total_amount)}}</strong></div>
+             <div><span>{{t('Giá vé','Base fare')}}</span><strong>{{money(selected.total_fare)}}</strong></div>
+             <div><span>{{t('Phụ phí ghế','Seat fees')}}</span><strong>{{money(selected.total_seat_fees)}}</strong></div>
+             <div class="grand"><span>{{t('Tổng','Total')}}</span><strong>{{money(selected.total_amount)}}</strong></div>
           </div>
         </section>
       </div>
@@ -147,6 +149,8 @@ import { PaginationComponent } from '../shared/pagination.component';
 export class TripsComponent {
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language = inject(LanguageService);
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   api = inject(ApiService);
   auth = inject(AuthService);
   paypal = inject(PaypalService);
@@ -160,8 +164,9 @@ export class TripsComponent {
   loading = signal(true);
   busy = false;
   paypalEnabled = false;
-  private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};
-  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
+  private __message='';get message(){return this.__message}set message(v:string){this.__message=v;if(v) this.__toast.notifySuccess(v)};
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;if(v) this.__toast.notifyError(v)};
+  private successPair(vi:string,en:string){this.__message=this.t(vi,en);this.__toast.success({titleVi:'Thành công',titleEn:'Success',messageVi:vi,messageEn:en})}
   page = 1;
   pageSize = 10;
   scheduleLoading = new Set<string>();
@@ -192,7 +197,7 @@ export class TripsComponent {
         this.loading.set(false);
         void this.loadSchedules(this.trips());
       },
-      error: e => { this.error = this.msg(e, 'Không tải được booking.'); this.loading.set(false); },
+      error: e => { this.error = this.msg(e, this.t('Không tải được đặt chỗ.', 'Could not load bookings.')); this.loading.set(false); },
     });
   }
 
@@ -231,7 +236,7 @@ export class TripsComponent {
       rows.push({
         ...first,
         key: 'OUTBOUND',
-        label: booking?.booking_type === 'ROUND_TRIP' ? 'Chiều đi' : 'Chuyến bay',
+        label: booking?.booking_type === 'ROUND_TRIP' ? this.t('Chiều đi', 'Outbound') : this.t('Chuyến bay', 'Flight'),
         origin_iata: first.origin_iata,
         dest_iata: last.dest_iata,
       });
@@ -242,7 +247,7 @@ export class TripsComponent {
       rows.push({
         ...first,
         key: 'INBOUND',
-        label: 'Chiều về',
+        label: this.t('Chiều về', 'Return'),
         origin_iata: first.origin_iata,
         dest_iata: last.dest_iata,
       });
@@ -253,7 +258,9 @@ export class TripsComponent {
   flightDateTime(flight: any) {
     const local = String(flight?.scheduled_departure_local || '').trim();
     const match = local.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
-    if (match) return `${match[3]}/${match[2]}/${match[1]} · ${match[4]}`;
+    if (match) return this.language.isEnglish()
+      ? `${match[2]}/${match[3]}/${match[1]} · ${match[4]}`
+      : `${match[3]}/${match[2]}/${match[1]} · ${match[4]}`;
     return this.dateTime(flight?.scheduled_departure);
   }
 
@@ -277,7 +284,7 @@ export class TripsComponent {
       this.selectedTracked = await firstValueFrom(this.api.track(code));
       this.selected = this.selectedTracked?.booking_info || booking;
     } catch (e: any) {
-      this.error = this.msg(e, 'Không tải được lịch bay chi tiết.');
+      this.error = this.msg(e, this.t('Không tải được lịch bay chi tiết.', 'Could not load flight details.'));
     } finally {
       this.busy = false;
     }
@@ -290,25 +297,6 @@ export class TripsComponent {
 
   reschedule(booking: any) {
     this.router.navigate(['/reschedule'], { queryParams: { code: booking.confirmation_number || booking.pnr_code } });
-  }
-
-  async confirmHoldCard(booking: any) {
-    this.busy = true;
-    this.error = '';
-    this.message = '';
-    try {
-      const result = await firstValueFrom(this.api.confirm({
-        blocking_number: booking.blocking_number,
-        payment_method: 'PROFILE_CARD',
-      }));
-      this.message = `Đã xác nhận vé. Confirmation: ${result?.confirmation_number || result?.booking?.confirmation_number || 'đã tạo'}.`;
-      this.closeDetails();
-      this.load();
-    } catch (e: any) {
-      this.error = this.msg(e, 'Không xác nhận được vé.');
-    } finally {
-      this.busy = false;
-    }
   }
 
   async confirmHoldPaypal(booking: any) {
@@ -331,11 +319,11 @@ export class TripsComponent {
           await firstValueFrom(this.api.paypalConfirmHoldCapture(checkout, orderId));
         },
       );
-      this.message = 'Đã xác nhận vé bằng PayPal.';
+      this.successPair('Đã xác nhận vé bằng PayPal.','Ticket confirmed via PayPal.');
       this.closeDetails();
       this.load();
     } catch (e: any) {
-      this.error = this.msg(e, 'Không xác nhận được vé bằng PayPal.');
+      this.error = this.msg(e, this.t('Không xác nhận được vé bằng PayPal.', 'Could not confirm ticket with PayPal.'));
     } finally {
       this.busy = false;
     }
@@ -366,11 +354,12 @@ export class TripsComponent {
       });
       if (!confirmed) return;
       const result = await firstValueFrom(this.api.cancel(code));
-      this.message = `Đã hủy vé. Mã hủy: ${result.cancellation_number}. Hoàn ${moneyStatic(result.refund_amount)} (${result.refund_percentage}%).`;
+      const outcome = cancellationOutcomeMessages(result);
+      this.successPair(outcome.vi, outcome.en);
       this.closeDetails();
       this.load();
     } catch (e: any) {
-      this.error = this.msg(e, 'Không hủy được vé.');
+      this.error = this.msg(e, this.t('Không hủy được vé.', 'Could not cancel booking.'));
     } finally {
       this.busy = false;
     }
@@ -392,29 +381,25 @@ export class TripsComponent {
   }
 
   statusLabel(value: string) {
-    return ({ BLOCKED: 'Đang giữ chỗ', CONFIRMED: 'Đã xác nhận', RESCHEDULED: 'Đã đổi chuyến', CANCELLED: 'Đã hủy' } as any)[value] || value;
+    return this.language.bookingStatusLabel(value);
   }
-  typeLabel(value: string) { return ({ ONE_WAY: 'Một chiều', ROUND_TRIP: 'Khứ hồi', CONNECTING: 'Nối chuyến' } as any)[value] || value; }
-  passengerLabel(value: string) { return ({ ADULT: 'Người lớn', CHILD: 'Trẻ em', SENIOR: 'Cao tuổi' } as any)[value] || value; }
+  typeLabel(value: string) { return this.language.bookingTypeLabel(value); }
+  passengerLabel(value: string) { return this.language.passengerTypeLabel(value); }
   legLabel(value: string) {
-    if (value === 'OUTBOUND') return 'Chiều đi';
-    if (value === 'INBOUND') return 'Chiều về';
-    if (value?.startsWith('CONNECTING_')) return `Đi · chặng ${value.split('_')[1]}`;
-    if (value?.startsWith('INBOUND_')) return `Về · chặng ${value.split('_')[1]}`;
-    return value || 'Chặng bay';
+    return this.language.itineraryLegLabel(value);
   }
   dateTime(value: any) {
     if (!value) return '—';
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat(this.language.language()==='en'?'en-US':'vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
   }
-  money(value: number) { return moneyStatic(value); }
+  money(value: number) {
+    return new Intl.NumberFormat(this.language.isEnglish() ? 'en-US' : 'vi-VN', {
+      style: 'currency', currency: 'VND', maximumFractionDigits: 0,
+    }).format(value || 0);
+  }
   private msg(e: any, fallback: string) {
     const message = e?.error?.message;
     return Array.isArray(message) ? message.join(' · ') : message || e?.message || fallback;
   }
-}
-
-function moneyStatic(value: number) {
-  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(value || 0);
 }

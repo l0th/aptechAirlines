@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -9,28 +10,28 @@ import { ApiService } from '../core/api.service';
   <div class="service-page">
     <section class="hero">
       <div class="container hero-inner">
-        <div><div class="eyebrow light">MANAGE YOUR TRIP</div><h1>Hủy vé & hoàn tiền,<br><span>rõ ràng trước khi xác nhận.</span></h1><p>Xem mức hoàn dự kiến, hủy vé và theo dõi tiền hoàn về đúng nguồn thanh toán ban đầu.</p><div class="actions"><a class="btn btn-primary" routerLink="/trips">Quản lý chuyến đi</a><a class="btn ghost" routerLink="/track">Tra cứu vé</a></div></div>
-        <div class="refund-card"><span>QUY TRÌNH HOÀN TIỀN</span><div><b>01</b><p>Tra cứu vé đã mua hoặc đang giữ.</p></div><div><b>02</b><p>Hệ thống xác định mức hoàn theo thời điểm khởi hành.</p></div><div><b>03</b><p>Xác nhận hủy và giải phóng ghế.</p></div><div><b>04</b><p>Khoản hoàn được trả về nguồn thanh toán gốc.</p></div></div>
+        <div><div class="eyebrow light">{{lang.pick('QUẢN LÝ HÀNH TRÌNH','MANAGE YOUR TRIP')}}</div><h1>{{lang.pick('Hủy vé & hoàn tiền,','Cancellation & refunds,')}}<br><span>{{lang.pick('rõ ràng trước khi xác nhận.','clear before you confirm.')}}</span></h1><p>{{lang.pick('Xem mức hoàn dự kiến, hủy vé và theo dõi tiền hoàn về đúng nguồn thanh toán ban đầu.','Preview your eligible refund, cancel your ticket and track refunds to the original payment source.')}}</p><div class="actions"><a class="btn btn-primary" routerLink="/trips">{{lang.pick('Quản lý chuyến đi','Manage trips')}}</a><a class="btn ghost" routerLink="/track">{{lang.pick('Tra cứu vé','Track booking')}}</a></div></div>
+        <div class="refund-card"><span>{{lang.pick('QUY TRÌNH HOÀN TIỀN','REFUND PROCESS')}}</span><div><b>01</b><p>{{lang.pick('Tra cứu vé đã mua hoặc đang giữ.','Find your paid or held booking.')}}</p></div><div><b>02</b><p>{{lang.pick('Hệ thống xác định mức hoàn theo thời điểm khởi hành.','The system calculates refund eligibility by departure time.')}}</p></div><div><b>03</b><p>{{lang.pick('Xác nhận hủy và giải phóng ghế.','Confirm cancellation and release seats.')}}</p></div><div><b>04</b><p>{{lang.pick('Khoản hoàn được trả về nguồn thanh toán gốc.','Refunds return to the original payment source.')}}</p></div></div>
       </div>
     </section>
 
     <div class="container body">
       <section class="principles">
-        <article class="card"><span>VÉ ĐANG GIỮ</span><h3>Hủy giữ chỗ</h3><p>Vé đang giữ chưa phát sinh thanh toán. Khi hủy, ghế được giải phóng và không có khoản hoàn tiền.</p></article>
-        <article class="card"><span>VÉ ĐÃ XÁC NHẬN</span><h3>Hoàn theo chính sách</h3><p>Mức hoàn được xác định theo số ngày còn lại trước giờ bay và chính sách đang hoạt động trong hệ thống.</p></article>
-        <article class="card"><span>PAYPAL</span><h3>Hoàn về nguồn gốc</h3><p>Với giao dịch PayPal, khoản hoàn được xử lý về nguồn thanh toán ban đầu của giao dịch.</p></article>
+        <article class="card"><span>{{lang.pick('VÉ ĐANG GIỮ','HELD BOOKINGS')}}</span><h3>{{lang.pick('Hủy giữ chỗ','Cancel a hold')}}</h3><p>{{lang.pick('Vé đang giữ chưa phát sinh thanh toán. Khi hủy, ghế được giải phóng và không có khoản hoàn tiền.','Unpaid holds can be cancelled to release seats; no refund applies.')}}</p></article>
+        <article class="card"><span>{{lang.pick('VÉ ĐÃ XÁC NHẬN','CONFIRMED TICKETS')}}</span><h3>{{lang.pick('Hoàn theo chính sách','Policy-based refunds')}}</h3><p>{{lang.pick('Mức hoàn được xác định theo số ngày còn lại trước giờ bay và chính sách đang hoạt động trong hệ thống.','Refunds depend on time before departure and the currently applicable policy.')}}</p></article>
+        <article class="card"><span>PAYPAL</span><h3>{{lang.pick('Hoàn về nguồn gốc','Original payment source')}}</h3><p>{{lang.pick('Với giao dịch PayPal, khoản hoàn được xử lý về nguồn thanh toán ban đầu của giao dịch.','Eligible PayPal transactions are refunded to their original payment source.')}}</p></article>
       </section>
 
       <section class="policy-section">
-        <div class="section-head"><div><div class="eyebrow">CHÍNH SÁCH HIỆN TẠI</div><h2>Mức hoàn tiền đang áp dụng</h2></div><p>Các mức hoàn bên dưới được cập nhật theo chính sách hiện hành và thời gian còn lại trước giờ khởi hành.</p></div>
-        @if(loading){<div class="card empty">Đang tải chính sách hoàn tiền…</div>}@else if(policies.length){
+        <div class="section-head"><div><div class="eyebrow">{{lang.pick('CHÍNH SÁCH HIỆN TẠI','CURRENT POLICY')}}</div><h2>{{lang.pick('Mức hoàn tiền đang áp dụng','Available refund rates')}}</h2></div><p>{{lang.pick('Các mức hoàn bên dưới được cập nhật theo chính sách hiện hành và thời gian còn lại trước giờ khởi hành.','The refund rates below reflect the active policy and time remaining before departure.')}}</p></div>
+        @if(loading){<div class="card empty">{{lang.pick('Đang tải chính sách hoàn tiền…','Loading refund policy…')}}</div>}@else if(policies.length){
           <div class="policy-grid">
-            @for(p of policies;track $index){<article class="policy"><div><span>Trước giờ bay</span><strong>{{range(p)}}</strong></div><b>{{p.refund_percentage||0}}%</b><small>mức hoàn</small></article>}
+            @for(p of policies;track $index){<article class="policy"><div><span>{{lang.pick('Trước giờ bay','Before departure')}}</span><strong>{{range(p)}}</strong></div><b>{{p.refund_percentage||0}}%</b><small>{{lang.pick('mức hoàn','refunded')}}</small></article>}
           </div>
-        }@else{<div class="card empty">Hiện chưa có chính sách hoàn tiền để hiển thị.</div>}
+        }@else{<div class="card empty">{{lang.pick('Hiện chưa có chính sách hoàn tiền để hiển thị.','No refund policy is currently available.')}}</div>}
       </section>
 
-      <section class="callout"><div><span>Cần xử lý booking ngay?</span><h2>Vào “Chuyến đi của tôi” để xem mức hoàn dự kiến trước khi bấm hủy.</h2></div><a class="btn btn-dark" routerLink="/trips">Mở chuyến đi</a></section>
+      <section class="callout"><div><span>{{lang.pick('Cần xử lý booking ngay?','Need to manage your booking?')}}</span><h2>{{lang.pick('Vào “Chuyến đi của tôi” để xem mức hoàn dự kiến trước khi bấm hủy.','Open My trips to preview your refund before cancelling.')}}</h2></div><a class="btn btn-dark" routerLink="/trips">{{lang.pick('Mở chuyến đi','Open my trips')}}</a></section>
     </div>
   </div>`,
   styles:[`
@@ -38,7 +39,8 @@ import { ApiService } from '../core/api.service';
   `]
 })
 export class CancellationRefundComponent{
+  readonly lang=inject(LanguageService);
   api=inject(ApiService);policies:any[]=[];loading=true;
   constructor(){this.api.policies().subscribe({next:r=>{this.policies=(r||[]).slice().sort((a:any,b:any)=>Number(b.min_days_before||0)-Number(a.min_days_before||0));this.loading=false},error:()=>{this.loading=false}})}
-  range(p:any){const min=Number(p.min_days_before??0);const max=p.max_days_before==null?null:Number(p.max_days_before);if(max==null)return`Từ ${min} ngày`;if(min===max)return`${min} ngày`;return`${min} – ${max} ngày`}
+  range(p:any){const min=Number(p.min_days_before??0);const max=p.max_days_before==null?null:Number(p.max_days_before);const day=this.lang.pick('ngày','days');if(max==null)return this.lang.pick('Từ','From')+' '+min+' '+day;if(min===max)return min+' '+day;return min+' – '+max+' '+day}
 }

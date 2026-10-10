@@ -27,6 +27,7 @@ export class PaypalRefundScheduler {
    */
   async processPendingRefunds(
     targetBookingId?: string,
+    targetPaymentReference?: string,
   ): Promise<{ processed: number; succeeded: number; failed: number }> {
     if (!this.paypalService.isPayPalActive()) {
       return { processed: 0, succeeded: 0, failed: 0 };
@@ -39,6 +40,7 @@ export class PaypalRefundScheduler {
           payment_method: PaymentMethod.PAYPAL,
           transaction_type: { $in: ['REFUND', 'RESCHEDULE_REFUND'] },
           status: 'PENDING',
+          ...(targetPaymentReference ? { payment_reference: targetPaymentReference } : {}),
           $or: [
             { next_retry_at: { $lte: now } },
             { next_retry_at: null },
@@ -58,14 +60,51 @@ export class PaypalRefundScheduler {
     let failed = 0;
 
     for (const booking of bookings) {
-      let modified = false;
-
-      for (const tx of booking.payment_transactions) {
+      for (const [index, tx] of booking.payment_transactions.entries()) {
         if (
           tx.payment_method === PaymentMethod.PAYPAL &&
           (tx.transaction_type === 'REFUND' || tx.transaction_type === 'RESCHEDULE_REFUND') &&
-          tx.status === 'PENDING'
+          tx.status === 'PENDING' &&
+          (!targetPaymentReference || tx.payment_reference === targetPaymentReference) &&
+          // A booking can contain multiple refunds with different retry windows.
+          // The outer $elemMatch only proves that ONE transaction is due.
+          (!tx.next_retry_at || new Date(tx.next_retry_at).getTime() <= now.getTime())
         ) {
+          if (!tx.payment_reference?.trim()) {
+            // Legacy corrupt rows cannot be claimed by reference. Mark just
+            // their array position terminally failed without calling PayPal.
+            await this.bookingModel.updateOne(
+              { _id: booking._id, [`payment_transactions.${index}.status`]: 'PENDING',
+                [`payment_transactions.${index}.payment_reference`]: { $in: [null, ''] } },
+              { $set: { [`payment_transactions.${index}.status`]: 'FAILED',
+                [`payment_transactions.${index}.failure_reason`]: 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE',
+                [`payment_transactions.${index}.next_retry_at`]: null } },
+            );
+            processed++;
+            failed++;
+            continue;
+          }
+
+          // Multiple cron instances or an admin retry must not submit the
+          // same pending refund concurrently. Reclaim after a bounded lease.
+          const leaseUntil = new Date(Date.now() + 30 * 60 * 1000);
+          const claim = await this.bookingModel.updateOne(
+            { _id: booking._id, payment_transactions: { $elemMatch: {
+              payment_reference: tx.payment_reference,
+              payment_method: PaymentMethod.PAYPAL,
+              transaction_type: { $in: ['REFUND', 'RESCHEDULE_REFUND'] },
+              status: 'PENDING',
+              $or: [
+                { next_retry_at: { $lte: now } },
+                { next_retry_at: null },
+                { next_retry_at: { $exists: false } },
+              ],
+            } } },
+            { $set: { 'payment_transactions.$.next_retry_at': leaseUntil } },
+          );
+          if (claim.modifiedCount !== 1) continue;
+          processed++;
+          try {
           // FIX 6 / FIX 11: Validate snapshot provenance first
           try {
             assertPayPalRefundExecutionSnapshot({
@@ -84,12 +123,9 @@ export class PaypalRefundScheduler {
             tx.status = 'FAILED';
             tx.failure_reason = 'INCOMPLETE_PAYPAL_REFUND_PROVENANCE';
             tx.next_retry_at = undefined;
-            modified = true;
             failed++;
             continue;
           }
-
-          processed++;
 
           // FIX 7: Existing provider_refund_id means RECONCILE, NOT RESUBMIT
           if (tx.provider_refund_id && tx.provider_refund_id.trim()) {
@@ -111,10 +147,11 @@ export class PaypalRefundScheduler {
                 );
               } else if (classified.is_pending) {
                 tx.status = 'PENDING';
-                const currentRetries = (tx.retry_count || 0) + 1;
-                tx.retry_count = currentRetries;
-                const delayHours = Math.pow(2, Math.min(currentRetries - 1, 4));
+                // A PayPal PENDING result is not a failed retry. Keep the
+                // failure budget for actual provider/network errors.
+                const delayHours = 1;
                 tx.next_retry_at = new Date(Date.now() + delayHours * 60 * 60 * 1000);
+                tx.failure_reason = undefined;
                 this.logger.log(
                   `PayPal refund remains PENDING for booking ${booking.confirmation_number}: refundId=${tx.provider_refund_id}. Scheduled next check in ${delayHours} hour(s).`,
                 );
@@ -124,7 +161,6 @@ export class PaypalRefundScheduler {
                 tx.next_retry_at = undefined;
                 failed++;
               }
-              modified = true;
             } catch (reconErr: any) {
               failed++;
               const currentRetries = (tx.retry_count || 0) + 1;
@@ -140,7 +176,6 @@ export class PaypalRefundScheduler {
                 const delayHours = Math.pow(2, currentRetries - 1);
                 tx.next_retry_at = new Date(Date.now() + delayHours * 60 * 60 * 1000);
               }
-              modified = true;
             }
             continue;
           }
@@ -170,6 +205,8 @@ export class PaypalRefundScheduler {
               );
             } else if (classified.is_pending) {
               tx.status = 'PENDING';
+              tx.failure_reason = undefined;
+              tx.next_retry_at = new Date(Date.now() + 60 * 60 * 1000);
               this.logger.log(
                 `PayPal refund remains PENDING for booking ${booking.confirmation_number}: refundId=${refundResult.refund_id}`,
               );
@@ -179,7 +216,6 @@ export class PaypalRefundScheduler {
               tx.next_retry_at = undefined;
               failed++;
             }
-            modified = true;
           } catch (err: any) {
             failed++;
             const currentRetries = (tx.retry_count || 0) + 1;
@@ -200,13 +236,31 @@ export class PaypalRefundScheduler {
                 `PayPal refund attempt ${currentRetries} failed for ${booking.confirmation_number}. Scheduled next retry in ${delayHours} hour(s).`,
               );
             }
-            modified = true;
+          }
+          } finally {
+            // Persist each claimed refund immediately, including early returns
+            // from provenance validation and reconciliation. A separate worker
+            // cannot overwrite it without first acquiring the same lease.
+            const persisted = await this.bookingModel.updateOne(
+              { _id: booking._id, payment_transactions: { $elemMatch: {
+                payment_reference: tx.payment_reference,
+                status: 'PENDING',
+                next_retry_at: leaseUntil,
+              } } },
+              { $set: {
+                'payment_transactions.$.status': tx.status,
+                'payment_transactions.$.provider_refund_id': tx.provider_refund_id || null,
+                'payment_transactions.$.provider_status': tx.provider_status || null,
+                'payment_transactions.$.retry_count': tx.retry_count || 0,
+                'payment_transactions.$.failure_reason': tx.failure_reason || null,
+                'payment_transactions.$.next_retry_at': tx.next_retry_at || null,
+              } },
+            );
+            if (persisted.matchedCount !== 1) {
+              this.logger.warn(`Skipped stale PayPal refund state for ${booking.confirmation_number || booking.pnr_code}, ref ${tx.payment_reference}.`);
+            }
           }
         }
-      }
-
-      if (modified) {
-        await booking.save();
       }
     }
 

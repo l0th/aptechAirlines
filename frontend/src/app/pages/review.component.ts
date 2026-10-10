@@ -7,6 +7,7 @@ import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { BookingStateService } from '../core/booking-state.service';
 import { PaypalService } from '../core/paypal.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -20,7 +21,7 @@ import { PaypalService } from '../core/paypal.service';
     @if(isStaffBooking){
       <div class="staff-banner">
         <span>ĐẶT VÉ TẠI QUẦY</span>
-        <div><strong>{{staffCustomer.first_name}} {{staffCustomer.last_name}}</strong><small>@{{staffCustomer.username}} · {{staffCustomer.email}}</small></div>
+        <div translate="no"><strong>{{staffCustomer.first_name}} {{staffCustomer.last_name}}</strong><small>@{{staffCustomer.username}} · {{staffCustomer.email}}</small></div>
       </div>
     }@else if(auth.staff()){
       <div class="staff-banner warning">
@@ -33,13 +34,13 @@ import { PaypalService } from '../core/paypal.service';
     <div class="review-grid">
       <section class="card main">
         <h2>Hành trình</h2>
-        <div class="route-title"><strong>{{routeText}}</strong><span class="pill pill-gold">{{bookingTypeLabel(state.selection()?.booking_type)}}</span></div>
+        <div class="route-title"><strong translate="no">{{routeText}}</strong><span class="pill pill-gold" translate="no">{{bookingTypeLabel(state.selection()?.booking_type)}}</span></div>
         <div class="legs">
           @for(l of state.selectedLegs();track l.flight_id;let i=$index){
             <div class="leg">
               <span class="leg-no">{{i+1}}</span>
-              <div><strong>{{l.flight_number||'Flight'}}</strong><small>{{legLabel(l.leg_type)}}</small></div>
-              <div class="route-pair"><b>{{l.origin_iata||'—'}}</b><span>→</span><b>{{l.dest_iata||'—'}}</b></div>
+              <div translate="no"><strong>{{l.flight_number||'Flight'}}</strong><small>{{legLabel(l.leg_type)}}</small></div>
+              <div class="route-pair" translate="no"><b>{{l.origin_iata||'—'}}</b><span>→</span><b>{{l.dest_iata||'—'}}</b></div>
               <div class="time">{{dateTime(l.scheduled_departure_local||l.scheduled_departure)}}</div>
             </div>
           }
@@ -48,15 +49,15 @@ import { PaypalService } from '../core/paypal.service';
         <h2>Hành khách</h2>
         @for(p of state.passengers();track $index;let i=$index){
           <div class="person">
-            <div><span>{{i+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{passengerTypeLabel(p.passenger_type)}} · {{p.nationality}}</small></div>
-            <small>{{p.id_card_or_passport||'Chưa nhập giấy tờ'}}</small>
+            <div translate="no"><span>{{i+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{passengerTypeLabel(p.passenger_type)}} · {{p.nationality}}</small></div>
+            <small translate="no">{{p.id_card_or_passport||language.pick('Chưa nhập giấy tờ', 'Document not entered')}}</small>
           </div>
         }
 
         <h2>Chỗ ngồi</h2>
         <div class="seat-list">
           @for(l of state.selectedLegs();track l.flight_id){
-            <div><strong>{{l.flight_number}}</strong><span>{{seatTextFor(l.flight_id)}}</span></div>
+            <div><strong translate="no">{{l.flight_number}}</strong><span translate="no">{{seatTextFor(l.flight_id)}}</span></div>
           }
         </div>
       </section>
@@ -90,10 +91,11 @@ import { PaypalService } from '../core/paypal.service';
         }
 
         <div class="choice">
-          <label><input type="radio" name="mode" value="buy" [(ngModel)]="mode"> Mua vé ngay</label>
+          <label [class.disabled]="isStaffBooking"><input type="radio" name="mode" value="buy" [(ngModel)]="mode" [disabled]="isStaffBooking"> Mua vé ngay</label>
           <label [class.disabled]="!canBlock"><input type="radio" name="mode" value="block" [(ngModel)]="mode" [disabled]="!canBlock"> Giữ chỗ</label>
         </div>
-        @if(!canBlock){<p class="hold-note">Giữ chỗ chỉ áp dụng khi chuyến khởi hành sớm nhất còn hơn 14 ngày.</p>}
+        @if(!canBlock){<p class="hold-note">{{language.pick('Giữ chỗ chỉ áp dụng khi chuyến khởi hành sớm nhất còn hơn 14 ngày.','Holding is only available when departure is more than 14 days away.')}}</p>}
+        @if(isStaffBooking&&!canBlock){<p class="hold-note">{{language.pick('Chưa thể gửi yêu cầu thanh toán PayPal cho chuyến trong 14 ngày qua quầy. Khách cần đăng nhập và tự đặt vé bằng PayPal.','Staff cannot issue a pay-later request within 14 days of departure. The customer must sign in and book with PayPal.')}}</p>}
 
         <button class="btn btn-outline full" (click)="router.navigate(['/booking/seats'])" [disabled]="busy">Quay lại chọn ghế</button>
 
@@ -104,19 +106,19 @@ import { PaypalService } from '../core/paypal.service';
         }@else{
           @if(mode==='buy'){
             @if(isStaffBooking){
-              <div class="staff-payment"><strong>Thanh toán hỗ trợ tại quầy</strong><span>Nhân viên xử lý giao dịch tại quầy; PayPal Checkout chỉ mở cho tài khoản khách hàng.</span></div>
+              <div class="staff-payment"><strong>{{language.pick('Không hỗ trợ thanh toán thẻ lưu tại quầy','No saved-card payments at the desk')}}</strong><span>{{language.pick('Với chuyến còn hơn 14 ngày, chọn Giữ chỗ để gửi email mời khách đăng nhập và tự thanh toán PayPal.','For flights more than 14 days away, choose Hold booking to email the customer a link to sign in and pay with PayPal.')}}</span></div>
             }@else{
               <div class="payment-options" [class.disabled]="!paypalEnabled">
                 <div class="paypal-option">
                   <span class="paypal-dot"></span>
-                  <span><b>PayPal Checkout</b><small>{{paypalReady?'Sẵn sàng thanh toán':paypalEnabled?'Đang chuẩn bị PayPal…':'PayPal hiện chưa sẵn sàng'}}</small></span>
+                  <span><b>PayPal Checkout</b><small translate="no">{{paypalReady?language.pick('Sẵn sàng thanh toán', 'Ready to pay'):paypalEnabled?language.pick('Đang chuẩn bị PayPal…', 'Preparing PayPal…'):language.pick('PayPal hiện chưa sẵn sàng', 'PayPal is not ready')}}</small></span>
                 </div>
               </div>
-              <p class="payment-note">Thanh toán được xử lý bảo mật qua PayPal. Aptech Airlines không lưu thông tin thẻ của bạn.</p>
+              <p class="payment-note">{{language.pick('Thanh toán được xử lý bảo mật qua PayPal. Aptech Airlines không lưu thông tin thẻ của bạn.','Payments are securely processed through PayPal. Aptech Airlines does not store your card details.')}}</p>
             }
           }
-          <button class="btn btn-primary full" (click)="submit()" [disabled]="busy">
-            {{busy?'Đang xử lý…':mode==='block'?'Giữ chỗ':'Thanh toán & đặt vé'}}
+          <button class="btn btn-primary full" (click)="submit()" [disabled]="busy||(isStaffBooking&&mode==='buy')" translate="no">
+            {{busy?language.pick('Đang xử lý…', 'Processing…'):mode==='block'?language.pick('Giữ chỗ', 'Hold booking'):language.pick('Thanh toán & đặt vé', 'Pay & book')}}
           </button>
         }
         
@@ -131,6 +133,7 @@ import { PaypalService } from '../core/paypal.service';
 export class ReviewComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language=inject(LanguageService);
   state=inject(BookingStateService);
   api=inject(ApiService);
   auth=inject(AuthService);
@@ -143,6 +146,7 @@ export class ReviewComponent{
   constructor(){
     if(!this.state.selection()){this.router.navigate(['/']);return}
     this.canBlock=this.computeCanBlock();
+    if(this.isStaffBooking&&this.canBlock)this.mode='block';
     if(!this.canBlock&&this.mode==='block')this.mode='buy';
     this.api.paypalConfig().subscribe({next:c=>{
       this.paypalEnabled=!!c?.enabled;
@@ -178,25 +182,26 @@ export class ReviewComponent{
   loadQuote(){
     this.loadingQuote=true;this.error='';
     const customerId=this.isStaffBooking?this.staffCustomer._id:'self';
-    const paymentMethod=this.isStaffBooking?'PROFILE_CARD':'PAYPAL';
+    const paymentMethod='PAYPAL';
     this.api.quoteBooking(this.state.buildPayload(false,paymentMethod,customerId)).subscribe({
       next:q=>{this.quote=q;this.state.quote.set(q);this.loadingQuote=false},
-      error:e=>{this.error=this.msg(e,'Không lấy được báo giá.');this.loadingQuote=false}
+      error:e=>{this.error=this.msg(e,this.language.pick('Không lấy được báo giá.','Unable to retrieve quote.'));this.loadingQuote=false}
     });
   }
 
   login(){this.router.navigate(['/auth'],{queryParams:{next:'/booking/review'}})}
-  bookingTypeLabel(value?:string){return({ONE_WAY:'Một chiều',ROUND_TRIP:'Khứ hồi',CONNECTING:'Nối chuyến'} as Record<string,string>)[value||'']||value||'Hành trình'}
-  passengerTypeLabel(value?:string){return({ADULT:'Người lớn',CHILD:'Trẻ em',SENIOR:'Cao tuổi'} as Record<string,string>)[value||'']||value||'Hành khách'}
-  legLabel(t:string){if(t==='OUTBOUND')return'Chiều đi';if(t==='INBOUND')return'Chiều về';if(t?.startsWith('INBOUND_'))return`Chiều về · chặng ${t.split('_')[1]}`;if(t?.startsWith('CONNECTING_'))return`Chiều đi · chặng ${t.split('_')[1]}`;return t||'Chặng bay'}
-  dateTime(v?:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat('vi-VN',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}).format(d)}
-  seatTextFor(flightId:string){const req=this.state.seatRequests().filter((r:any)=>r.flight_id===flightId).sort((a:any,b:any)=>Number(a.passenger_index)-Number(b.passenger_index));if(!req.length)return'Tự động';return req.map((r:any)=>`HK${Number(r.passenger_index)+1}: ${r.selection_type==='CHOOSE'?r.seat_code:'AUTO'}`).join(' · ')}
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
+  bookingTypeLabel(value?:string){return value?this.language.bookingTypeLabel(value):this.language.pick('Hành trình','Itinerary')}
+  passengerTypeLabel(value?:string){return value?this.language.passengerTypeLabel(value):this.language.pick('Hành khách','Passenger')}
+  legLabel(t:string){return this.language.itineraryLegLabel(t)}
+  dateTime(v?:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat(this.language.language()==='vi'?'vi-VN':'en-US',{dateStyle:'short',timeStyle:'short'}).format(d)}
+  seatTextFor(flightId:string){const req=this.state.seatRequests().filter((r:any)=>r.flight_id===flightId).sort((a:any,b:any)=>Number(a.passenger_index)-Number(b.passenger_index));if(!req.length)return this.language.pick('Tự động','Automatic');return req.map((r:any)=>`${this.language.pick('HK','Passenger ')}${Number(r.passenger_index)+1}: ${r.selection_type==='CHOOSE'?r.seat_code:this.language.pick('Tự động','Automatic')}`).join(' · ')}
+  money(v:number){return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
 
   async submit(){
-    if(this.auth.staff()&&!this.isStaffBooking){this.error='Nhân viên phải chọn khách hàng tại Quầy đặt vé trước.';return}
-    if(this.mode==='block'&&!this.canBlock){this.error='Chuyến này không còn đủ điều kiện giữ chỗ hơn 14 ngày.';return}
-    if(this.mode==='buy'&&!this.isStaffBooking&&!this.paypalEnabled){this.error='Thanh toán PayPal hiện chưa sẵn sàng. Vui lòng thử lại sau.';return}
+    if(this.auth.staff()&&!this.isStaffBooking){this.error=this.language.pick('Nhân viên phải chọn khách hàng tại Quầy đặt vé trước.','Staff must select a customer at the Reservation Desk first.');return}
+    if(this.mode==='block'&&!this.canBlock){this.error=this.language.pick('Chuyến này không còn đủ điều kiện giữ chỗ hơn 14 ngày.','This trip no longer meets the more-than-14-day hold requirement.');return}
+    if(this.mode==='buy'&&this.isStaffBooking){this.error=this.language.pick('Không thể xác nhận thanh toán thay khách bằng thẻ lưu. Hãy giữ chỗ để khách tự thanh toán PayPal (chỉ áp dụng nếu khởi hành sau hơn 14 ngày).','Staff cannot charge a saved card. Hold the booking so the customer can pay via PayPal (more than 14 days before departure only).');return}
+    if(this.mode==='buy'&&!this.isStaffBooking&&!this.paypalEnabled){this.error=this.language.pick('Thanh toán PayPal hiện chưa sẵn sàng. Vui lòng thử lại sau.','PayPal checkout is currently unavailable. Please try again later.');return}
     this.busy=true;this.error='';
     const customerId=this.isStaffBooking?this.staffCustomer._id:'self';
     try{
@@ -221,9 +226,8 @@ export class ReviewComponent{
         );
         return;
       }
-      const b=await firstValueFrom(this.api.createBooking(this.state.buildPayload(false,'PROFILE_CARD',customerId)));
-      this.router.navigate(['/booking/success'],{state:{booking:b,staffCustomer:this.staffCustomer}});
-    }catch(e:any){this.error=this.msg(e,'Không hoàn tất được đặt vé.')}
+      throw new Error(this.language.pick('Thanh toán phải do khách thực hiện qua PayPal.','The customer must complete payment through PayPal.'));
+    }catch(e:any){this.error=this.msg(e,this.language.pick('Không hoàn tất được đặt vé.','Unable to complete booking.'))}
     finally{this.busy=false}
   }
 
@@ -244,5 +248,5 @@ export class ReviewComponent{
     if(this.isStaffBooking)return;
     this.payment='PAYPAL';
   }
-  private msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||e?.message||f}
+  private msg(e:any,f:string){const m=e?.error?.message;return this.language.translateNotice(Array.isArray(m)?m.join(' · '):m||e?.message||f)}
 }

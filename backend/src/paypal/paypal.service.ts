@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, OnModuleInit, Optional } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -42,6 +43,16 @@ export interface ConvertedPresentmentAmount {
   provider_amount: string;
   provider_currency: string;
   exchange_rate_vnd_per_unit: number;
+}
+
+/** PayPal-Request-Id must be at most 38 characters and stable across retries. */
+export function toPayPalRequestId(reference: string): string {
+  const value = String(reference || '').trim();
+  if (!value) {
+    throw new BadRequestException('Missing PayPal idempotency reference.');
+  }
+  if (/^[A-Za-z0-9_-]{1,38}$/.test(value)) return value;
+  return `id-${createHash('sha256').update(value).digest('hex').slice(0, 35)}`;
 }
 
 @Injectable()
@@ -319,10 +330,16 @@ export class PaypalService implements OnModuleInit {
       typeof paramsOrAmountVnd === 'object' ? paramsOrAmountVnd.description : description;
 
     const conv = this.convertVndToPresentment(amountVnd);
+    if (Number(conv.provider_amount) < 0.01) {
+      throw new BadRequestException('Amount is below the minimum 0.01 USD PayPal charge after conversion.');
+    }
 
     try {
       const resp = await this.ordersController.createOrder({
-        paypalRequestId: `${reqId}-create`,
+        // PayPal-Request-Id has a 38-character maximum. The UI sends UUIDs
+        // (36 chars), so appending "-create" would produce an invalid header.
+        // Hashing preserves deterministic retry/idempotency for the same key.
+        paypalRequestId: `create-${createHash('sha256').update(reqId).digest('hex').slice(0, 30)}`,
         prefer: 'return=representation',
         body: {
           intent: CheckoutPaymentIntent.Capture,
@@ -350,9 +367,28 @@ export class PaypalService implements OnModuleInit {
         exchange_rate_vnd_per_unit: conv.exchange_rate_vnd_per_unit,
       };
     } catch (err: any) {
-      this.logger.error(`PayPal createOrder failed: ${err.message}`);
+      // The SDK may expose a PayPal 422 body as JSON in `body` instead of `result`.
+      // Only disclose the documented issue code and debug ID (never payer data or raw body).
+      let provider = err?.result;
+      if (!provider && typeof err?.body === 'string') {
+        try {
+          provider = JSON.parse(err.body);
+        } catch { /* Non-JSON provider errors have no structured diagnostics. */ }
+      }
+      const rawIssue = provider?.details?.[0]?.issue;
+      const issue = typeof rawIssue === 'string' && /^[A-Z][A-Z0-9_]{1,79}$/.test(rawIssue)
+        ? rawIssue : '';
+      const rawDebugId = provider?.debug_id || provider?.debugId;
+      const debugId = typeof rawDebugId === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(rawDebugId)
+        ? rawDebugId : '';
+      const status = Number.isInteger(err?.statusCode) ? err.statusCode : 'unknown';
+      this.logger.error(
+        `PayPal createOrder rejected (status=${status}, issue=${issue || 'unspecified'}, ` +
+        `debug_id=${debugId || 'unavailable'}, amount=${conv.provider_amount} ${conv.provider_currency}).`,
+      );
+      const detail = issue ? `PayPal issue: ${issue}` : 'PayPal provider rejected the request';
       throw new BadRequestException(
-        `Failed to create PayPal order: ${err?.result?.message || err?.message || 'Gateway error'}`,
+        `Failed to create PayPal order: ${detail}${debugId ? ` (debug_id: ${debugId})` : ''}.`,
       );
     }
   }
@@ -404,7 +440,7 @@ export class PaypalService implements OnModuleInit {
     try {
       const resp = await this.ordersController.captureOrder({
         id: orderId,
-        paypalRequestId: reqId || `${orderId}-capture`,
+        paypalRequestId: toPayPalRequestId(reqId || `${orderId}-capture`),
         prefer: 'return=representation',
       });
 
@@ -484,7 +520,7 @@ export class PaypalService implements OnModuleInit {
     try {
       const resp = await this.paymentsController.refundCapturedPayment({
         captureId,
-        paypalRequestId,
+        paypalRequestId: toPayPalRequestId(paypalRequestId),
         prefer: 'return=representation',
         body: {
           amount: {
@@ -627,4 +663,3 @@ export class PaypalService implements OnModuleInit {
     }
   }
 }
-

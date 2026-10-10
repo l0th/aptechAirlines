@@ -17,13 +17,13 @@ export class MailController {
   }
 
   @Get('templates/:key/preview')
-  preview(@Param('key') key: string) {
-    return this.mailAdmin.preview(key);
+  preview(@Param('key') key: string, @Query('lang') lang?: string) {
+    return this.mailAdmin.preview(key, lang);
   }
 
   @Post('templates/:key/test')
-  sendTest(@Param('key') key: string, @Body() body: { to: string }) {
-    return this.mailAdmin.sendTest(key, body?.to);
+  sendTest(@Param('key') key: string, @Body() body: { to: string; lang?: string }) {
+    return this.mailAdmin.sendTest(key, body?.to, body?.lang);
   }
 
   @Patch('templates/:key')

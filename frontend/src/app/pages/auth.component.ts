@@ -6,6 +6,7 @@ import { AuthService } from '../core/auth.service';
 import { ApiService } from '../core/api.service';
 import { IconComponent } from '../shared/icon.component';
 import { LanguageService } from '../core/language.service';
+import { safeReturnPath } from '../core/guards';
 
 @Component({
   standalone: true,
@@ -47,9 +48,9 @@ import { LanguageService } from '../core/language.service';
             <div class="field">
               <span>Giới tính</span>
               <select class="control" [(ngModel)]="reg.sex">
-                <option value="MALE">Nam</option>
-                <option value="FEMALE">Nữ</option>
-                <option value="OTHER">Khác</option>
+                <option value="MALE">{{lang.pick('Nam','Male')}}</option>
+                <option value="FEMALE">{{lang.pick('Nữ','Female')}}</option>
+                <option value="OTHER">{{lang.pick('Khác','Other')}}</option>
               </select>
             </div>
             <div class="field"><span>Tuổi</span><input class="control" type="number" min="0" step="1" [(ngModel)]="reg.age"></div>
@@ -217,7 +218,7 @@ export class AuthComponent {
       next: () => {
         this.busy = false;
         const next = this.route.snapshot.queryParamMap.get('next');
-        this.router.navigateByUrl(next && next.startsWith('/') ? next : '/');
+        this.router.navigateByUrl(safeReturnPath(next));
       },
       error: e => {
         this.busy = false;

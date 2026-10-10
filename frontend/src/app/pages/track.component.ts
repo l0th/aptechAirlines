@@ -6,19 +6,21 @@ import { ApiService } from '../core/api.service';
 import { PaypalService } from '../core/paypal.service';
 import { AuthService } from '../core/auth.service';
 import { ToastService } from '../core/toast.service';
+import { LanguageService } from '../core/language.service';
+import { cancellationOutcomeMessages } from '../core/refund-copy';
 
 @Component({
   standalone:true,
   imports:[FormsModule],
   template:`
   <div class="container page">
-    <div class="eyebrow">TICKET STATUS</div>
-    <h1 class="title">Tra cứu vé</h1>
-    <p class="subtitle">Nhập mã giữ chỗ, mã xác nhận hoặc PNR để xem trạng thái và thông tin hành trình.</p>
+    <div class="eyebrow">{{language.pick('TRẠNG THÁI VÉ','TICKET STATUS')}}</div>
+    <h1 class="title">{{language.pick('Tra cứu vé','Track your booking')}}</h1>
+    <p class="subtitle">{{language.pick('Nhập mã giữ chỗ, mã xác nhận hoặc PNR để xem trạng thái và thông tin hành trình.','Enter your hold code, confirmation number or PNR to view your itinerary and status.')}}</p>
 
     <div class="card finder">
       <input class="control" [(ngModel)]="code" (keyup.enter)="search()" placeholder="BLK-... / CNF-... / PNR">
-      <button class="btn btn-primary" (click)="search()" [disabled]="loading||!code.trim()">{{loading?'Đang tra…':'Tra cứu'}}</button>
+      <button class="btn btn-primary" (click)="search()" [disabled]="loading||!code.trim()">{{loading?language.pick('Đang tra…','Searching…'):language.pick('Tra cứu','Search')}}</button>
     </div>
 
     
@@ -26,39 +28,39 @@ import { ToastService } from '../core/toast.service';
       <section class="card ticket">
         <header class="ticket-head">
           <div>
-            <div class="eyebrow">BOOKING</div>
-            <h2>{{result.pnr_code||result.confirmation_number||result.blocking_number}}</h2>
-            <p>{{bookingTypeLabel(result.booking_type)}} · {{result.passengers?.length||0}} hành khách</p>
+            <div class="eyebrow">{{language.pick('ĐẶT CHỖ','BOOKING')}}</div>
+            <h2 translate="no">{{result.pnr_code||result.confirmation_number||result.blocking_number}}</h2>
+            <p><span>{{bookingTypeLabel(result.booking_type)}}</span> · {{result.passengers?.length||0}} {{language.pick('hành khách','passenger(s)')}}</p>
           </div>
-          <span class="status" [class.ok]="result.status==='CONFIRMED'||result.status==='RESCHEDULED'" [class.warn]="result.status==='BLOCKED'" [class.cancel]="result.status==='CANCELLED'">{{statusLabel(result.status)}}</span>
+          <span class="status" translate="no" [class.ok]="result.status==='CONFIRMED'||result.status==='RESCHEDULED'" [class.warn]="result.status==='BLOCKED'" [class.cancel]="result.status==='CANCELLED'">{{statusLabel(result.status)}}</span>
         </header>
 
         <div class="codes">
           <div><span>PNR</span><b>{{result.pnr_code||'—'}}</b></div>
-          <div><span>Confirmation</span><b>{{result.confirmation_number||'—'}}</b></div>
-          <div><span>Blocking</span><b>{{result.blocking_number||'—'}}</b></div>
-          <div><span>Cancellation</span><b>{{result.cancellation_number||'—'}}</b></div>
-          <div><span>Tổng tiền</span><b>{{money(result.total_amount)}}</b></div>
+          <div><span>{{language.pick('Mã xác nhận','Confirmation')}}</span><b>{{result.confirmation_number||'—'}}</b></div>
+          <div><span>{{language.pick('Mã giữ chỗ','Hold code')}}</span><b>{{result.blocking_number||'—'}}</b></div>
+          <div><span>{{language.pick('Mã hủy','Cancellation')}}</span><b>{{result.cancellation_number||'—'}}</b></div>
+          <div><span>{{language.pick('Tổng tiền','Total fare')}}</span><b>{{money(result.total_amount)}}</b></div>
         </div>
 
         @if(result.status==='BLOCKED'&&(result.time_limit_deadline||result.blocking_deadline)){
-          <div class="deadline">Giữ chỗ đến <strong>{{dateTime(result.time_limit_deadline||result.blocking_deadline)}}</strong></div>
+          <div class="deadline">{{language.pick('Giữ chỗ đến','Hold expires at')}} <strong>{{dateTime(result.time_limit_deadline||result.blocking_deadline)}}</strong></div>
         }
 
-        @if(tracked?.has_emergency_changes){<div class="change-alert">Có thay đổi lịch bay hoặc trạng thái chuyến. Kiểm tra các chặng được đánh dấu bên dưới.</div>}
+        @if(tracked?.has_emergency_changes){<div class="change-alert">{{language.pick('Có thay đổi lịch bay hoặc trạng thái chuyến. Kiểm tra các chặng được đánh dấu bên dưới.','There are changes to your flight schedule or status. Please review the highlighted segments below.')}}</div>}
         <div class="ticket-grid">
           <div>
-            <h3>Hành khách</h3>
+            <h3>{{language.pick('Hành khách','Passengers')}}</h3>
             @for(p of result.passengers||[];track $index){
-              <div class="person"><span>{{$index+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{passengerTypeLabel(p.passenger_type)}} · {{p.nationality}}</small></div>
+              <div class="person"><span translate="no">{{$index+1}}. {{p.first_name}} {{p.last_name}}</span><small><span>{{passengerTypeLabel(p.passenger_type)}}</span> · <span translate="no">{{p.nationality}}</span></small></div>
             }
           </div>
           <div>
-            <h3>Chặng bay & coupon</h3>
+            <h3>{{language.pick('Chặng bay và vé','Flights & coupons')}}</h3>
             @for(c of coupons;track c.coupon_number){
               <div class="coupon" [class.changed]="c.is_highlighted_change">
-                <div><strong>{{c.flight_number}}</strong><small>{{legLabel(c.leg_type)}} · {{c.cabin_class}}</small></div>
-                <div><b>{{c.origin_iata||'—'}} → {{c.dest_iata||'—'}}</b><small>{{dateTime(c.scheduled_departure_local||c.scheduled_departure)}} · {{c.flight_status||c.coupon_status}}</small></div>
+                <div><strong translate="no">{{c.flight_number}}</strong><small><span>{{legLabel(c.leg_type)}}</span> · <span>{{language.cabinLabel(c.cabin_class)}}</span></small></div>
+                <div><b>{{c.origin_iata||'—'}} → {{c.dest_iata||'—'}}</b><small>{{dateTime(c.scheduled_departure_local||c.scheduled_departure)}} · {{c.flight_status?language.flightStatusLabel(c.flight_status):language.couponStatusLabel(c.coupon_status)}}</small></div>
               </div>
             }
           </div>
@@ -67,16 +69,16 @@ import { ToastService } from '../core/toast.service';
         <footer class="ticket-actions">
           @if(result.status==='BLOCKED'){
             @if(auth.staff()){
-              <button class="btn btn-dark" [disabled]="busy" (click)="confirmHoldCard()">Xác nhận tại quầy</button>
+              <span>{{language.pick('Khách thanh toán PayPal từ email giữ chỗ','Customer pays with PayPal using the hold email')}}</span>
             }@else{
-              <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal()">Thanh toán PayPal {{paypalEnabled?'':'(chưa bật)'}}</button>
+              <button class="btn btn-dark" [disabled]="busy||!paypalEnabled" (click)="confirmHoldPaypal()">{{language.pick('Thanh toán PayPal','Pay with PayPal')}} {{paypalEnabled?'':language.pick('(chưa bật)','(unavailable)')}}</button>
             }
           }
           @if(result.status==='CONFIRMED'){
-            <button class="btn btn-outline" (click)="router.navigate(['/reschedule'],{queryParams:{code:result.confirmation_number||result.pnr_code}})">Đổi chuyến</button>
+            <button class="btn btn-outline" (click)="router.navigate(['/reschedule'],{queryParams:{code:result.confirmation_number||result.pnr_code}})">{{language.pick('Đổi chuyến','Reschedule')}}</button>
           }
           @if(result.status!=='CANCELLED'){
-            <button class="btn btn-outline danger" [disabled]="busy" (click)="cancel()">Hủy vé</button>
+            <button class="btn btn-outline danger" [disabled]="busy" (click)="cancel()">{{language.pick('Hủy vé','Cancel booking')}}</button>
           }
         </footer>
       </section>
@@ -91,13 +93,14 @@ import { ToastService } from '../core/toast.service';
 export class TrackComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language=inject(LanguageService);
   api=inject(ApiService);
   paypal=inject(PaypalService);
   auth=inject(AuthService);
   toast=inject(ToastService);
   route=inject(ActivatedRoute);
   router=inject(Router);
-  code=''; result:any=null; tracked:any=null; policies:any[]=[]; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)}; loading=false; busy=false; paypalEnabled=false;
+  code=''; result:any=null; tracked:any=null; policies:any[]=[]; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;if(v)this.__toast.notifyError(v)}; private __message='';get message(){return this.__message}set message(v:string){this.__message=v;if(v)this.__toast.notifySuccess(v)}; loading=false; busy=false; paypalEnabled=false;
   get coupons(){return this.tracked?.flight_coupons||this.result?.ticket_coupons||[]}
 
   constructor(){
@@ -111,18 +114,8 @@ export class TrackComponent{
     this.loading=true;this.error='';this.result=null;
     this.api.track(code).subscribe({
       next:r=>{this.tracked=r;this.result=r?.booking_info||r;this.loading=false},
-      error:e=>{this.tracked=null;this.error=this.msg(e,'Không tìm thấy vé hoặc bạn không có quyền xem đặt chỗ này.');this.loading=false}
+      error:e=>{this.tracked=null;this.error=this.msg(e,this.language.pick('Không tìm thấy vé hoặc bạn không có quyền xem đặt chỗ này.','Booking not found or you do not have permission to view it.'));this.loading=false}
     })
-  }
-  async confirmHoldCard(){
-    if(!this.result?.blocking_number)return;
-    this.busy=true;this.error='';this.message='';
-    try{
-      const r=await firstValueFrom(this.api.confirm({blocking_number:this.result.blocking_number,payment_method:'PROFILE_CARD'}));
-      this.message=`Đã xác nhận vé. Confirmation: ${r?.confirmation_number||r?.booking?.confirmation_number||'đã tạo'}.`;
-      this.search();
-    }catch(e:any){this.error=this.msg(e,'Không xác nhận được vé.')}
-    finally{this.busy=false}
   }
   async confirmHoldPaypal(){
     if(this.auth.staff()||!this.result?.blocking_number)return;
@@ -137,9 +130,9 @@ export class TrackComponent{
         },
         async orderId=>{await firstValueFrom(this.api.paypalConfirmHoldCapture(checkout,orderId))}
       );
-      this.message='Đã xác nhận vé bằng PayPal.';
+      this.message=this.language.pick('Đã xác nhận vé bằng PayPal.','Booking confirmed through PayPal.');
       this.search();
-    }catch(e:any){this.error=this.msg(e,'Không xác nhận được vé bằng PayPal.')}
+    }catch(e:any){this.error=this.msg(e,this.language.pick('Không xác nhận được vé bằng PayPal.','Unable to confirm this booking through PayPal.'))}
     finally{this.busy=false}
   }
   async cancel(){
@@ -164,9 +157,10 @@ export class TrackComponent{
     this.busy=true;this.error='';this.message='';
     try{
       const r=await firstValueFrom(this.api.cancel(id));
-      this.message=`Đã hủy vé. Mã hủy: ${r.cancellation_number}. Hoàn ${this.money(r.refund_amount)} (${r.refund_percentage}%).`;
+      const outcome=cancellationOutcomeMessages(r);
+      this.message=this.language.pick(outcome.vi,outcome.en);
       this.search();
-    }catch(e:any){this.error=this.msg(e,'Không hủy được vé.')}
+    }catch(e:any){this.error=this.msg(e,this.language.pick('Không hủy được vé.','Unable to cancel this booking.'))}
     finally{this.busy=false}
   }
   refundPercent(){
@@ -177,11 +171,11 @@ export class TrackComponent{
     const matched=this.policies.filter(p=>days>=Number(p.min_days_before??0)&&days<=(p.max_days_before==null?Infinity:Number(p.max_days_before))).sort((a,b)=>Number(b.min_days_before)-Number(a.min_days_before))[0];
     return Number(matched?.refund_percentage||0)
   }
-  bookingTypeLabel(v:string){return({ONE_WAY:'Một chiều',ROUND_TRIP:'Khứ hồi',CONNECTING:'Nối chuyến'} as any)[v]||v||'Hành trình'}
-  statusLabel(v:string){return({BLOCKED:'Đang giữ chỗ',CONFIRMED:'Đã xác nhận',RESCHEDULED:'Đã đổi chuyến',CANCELLED:'Đã hủy'} as any)[v]||v}
-  passengerTypeLabel(v:string){return({ADULT:'Người lớn',CHILD:'Trẻ em',SENIOR:'Cao tuổi'} as any)[v]||v||'Hành khách'}
-  legLabel(v:string){if(v==='OUTBOUND')return'Chiều đi';if(v==='INBOUND')return'Chiều về';if(v?.startsWith('CONNECTING_'))return`Đi · chặng ${v.split('_')[1]}`;if(v?.startsWith('INBOUND_'))return`Về · chặng ${v.split('_')[1]}`;return v||'Chặng bay'}
-  dateTime(v:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat('vi-VN',{dateStyle:'medium',timeStyle:'short'}).format(d)}
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
+  bookingTypeLabel(v:string){return this.language.bookingTypeLabel(v)||this.language.pick('Hành trình','Itinerary')}
+  statusLabel(v:string){return this.language.bookingStatusLabel(v)}
+  passengerTypeLabel(v:string){return this.language.passengerTypeLabel(v)||this.language.pick('Hành khách','Passenger')}
+  legLabel(v:string){return this.language.itineraryLegLabel(v)}
+  dateTime(v:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat(this.language.isEnglish()?'en-US':'vi-VN',{dateStyle:'medium',timeStyle:'short'}).format(d)}
+  money(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
 }

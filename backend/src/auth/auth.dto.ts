@@ -1,7 +1,5 @@
-import { IsEmail, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator';
+import { IsEmail, IsEmpty, IsInt, IsNotEmpty, IsString, Matches, Min, MinLength } from 'class-validator';
 import {
-  CREDIT_CARD_MESSAGE,
-  CREDIT_CARD_REGEX,
   PHONE_NUMBER_MESSAGE,
   PHONE_NUMBER_REGEX,
 } from '../common/validation.constants';
@@ -74,8 +72,6 @@ export class RegisterDto {
   @Min(0)
   age: number;
 
-  @IsOptional()
-  @IsString()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
+  @IsEmpty({ message: 'Saving credit cards is no longer supported. Use PayPal checkout.' })
   preferred_credit_card?: string;
 }

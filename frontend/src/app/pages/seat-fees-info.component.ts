@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -9,7 +10,7 @@ import { RouterLink } from '@angular/router';
     <div class="eyebrow">SEAT EXPERIENCE</div><h1 class="title">Chọn ghế theo cách bạn muốn</h1><p class="subtitle intro">Seat map hiển thị phí thực tế theo từng ghế và từng chuyến. Giá dưới đây là các rule Economy mặc định của hệ thống; Admin có thể cấu hình hoặc override theo chuyến.</p>
     <section class="seat-hero card"><div><span>YOUR SEAT · YOUR CHOICE</span><h2>Từ ghế tiêu chuẩn đến extra legroom</h2><p>Mỗi ghế giữ pricing snapshot tại thời điểm đặt để booking không bị thay đổi phí ngoài ý muốn khi catalog giá ghế được Admin cập nhật sau đó.</p><a class="btn btn-primary" routerLink="/">Tìm chuyến để chọn ghế</a></div><div class="mini-cabin"><div class="nose">NOSE</div>@for(row of [1,2,3,4];track row){<div class="seat-row"><b>{{row}}A</b><b>{{row}}B</b><i></i><b>{{row}}C</b><b>{{row}}D</b></div>}<div class="tail">TAIL</div></div></section>
     <section class="fees">
-      @for(f of feeRules;track f.name){<article class="card"><span>{{f.tag}}</span><h3>{{f.name}}</h3><strong>{{money(f.amount)}}</strong><p>{{f.desc}}</p></article>}
+      @for(f of feeRules;track f.name){<article class="card"><span>{{f.tag}}</span><h3>{{language.translate(f.name)}}</h3><strong>{{money(f.amount)}}</strong><p>{{language.translate(f.desc)}}</p></article>}
     </section>
     <section class="explain"><div><span>GIÁ CUỐI CÙNG</span><h2>Luôn xem trực tiếp trên seat map</h2><p>Rule có thể kết hợp theo vị trí, cabin, extra legroom, exit row hoặc cấu hình riêng của Admin. Vì vậy số hiển thị trên ghế trong bước chọn chỗ là nguồn giá cần dùng khi quyết định.</p></div><div class="legend"><p><i class="free"></i><span>Ghế không phụ phí</span></p><p><i class="paid"></i><span>Ghế có phụ phí</span></p><p><i class="locked"></i><span>Ghế không khả dụng / đã khóa</span></p></div></section>
   </div>`,
@@ -18,6 +19,7 @@ import { RouterLink } from '@angular/router';
   `]
 })
 export class SeatFeesInfoComponent{
+  readonly language=inject(LanguageService);
   feeRules=[
     {tag:'STANDARD',name:'Ghế tiêu chuẩn',amount:0,desc:'Ghế không kích hoạt pricing rule hoặc được hệ thống gán tự động có thể không phát sinh phụ phí.'},
     {tag:'AISLE',name:'Ghế lối đi',amount:30000,desc:'Baseline Economy hiện tại cho vị trí aisle.'},
@@ -26,5 +28,5 @@ export class SeatFeesInfoComponent{
     {tag:'EXTRA LEGROOM',name:'Chỗ để chân rộng',amount:100000,desc:'Phụ phí mặc định cho ghế Economy extra legroom.'},
     {tag:'EXIT ROW',name:'Hàng thoát hiểm',amount:150000,desc:'Baseline Economy cho exit row; điều kiện ghế vẫn phụ thuộc seat map.'},
   ];
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v)}
+  money(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v)}
 }

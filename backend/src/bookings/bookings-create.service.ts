@@ -3,15 +3,16 @@ import { Types } from 'mongoose';
 import {
   BookingDocument,
   BookingStatus,
+  HoldEmailStatus,
   BookingType,
   ExternalPaymentProof,
   PassengerType,
   PaymentMethod,
 } from './bookings.schema';
 import { CreateBookingDto } from './bookings.dto';
-import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
 import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
+import { deliverHoldCreatedEmail } from './hold-email-delivery';
 import {
   BookingSeatSagaOperationDocument,
   SagaOperationType,
@@ -208,8 +209,6 @@ export class BookingsCreateService extends BookingsCorePart {
       }
     }
 
-    let maskedProfileCard: string | undefined = undefined;
-
     // Purchase payment preflight before any saga creation or seat reservation mutation
     if (!dto.is_block) {
       if (!dto.payment_method) {
@@ -220,21 +219,7 @@ export class BookingsCreateService extends BookingsCorePart {
           this.bridge.assertPayPalPaymentProof(externalPaymentProof, totalPayable, 'createBooking:preflight');
         }
       } else if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
-        const rawCard = (user.preferred_credit_card || '').trim();
-        const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
-        if (
-          !rawCard ||
-          placeholders.has(rawCard.toUpperCase()) ||
-          rawCard.startsWith('*') ||
-          !CREDIT_CARD_REGEX.test(rawCard)
-        ) {
-          throw new BadRequestException(
-            'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
-          );
-        }
-
-        const digits = rawCard.replace(/\D/g, '');
-        maskedProfileCard = `**** **** **** ${digits.slice(-4)}`;
+        throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
       } else {
         throw new BadRequestException('Unsupported payment method.');
       }
@@ -555,17 +540,7 @@ export class BookingsCreateService extends BookingsCorePart {
             });
           }
         } else {
-          paymentTransactions.push({
-            transaction_type: 'PAYMENT',
-            payment_method: PaymentMethod.PROFILE_CARD,
-            payment_provider: 'PROFILE_CARD',
-            payment_reference: this.bridge.generateCode('PAY'),
-            amount: totalAmount,
-            card_masked: maskedProfileCard!,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
+          throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
         }
         await this.usersService.addSkyMiles(user._id.toString(), totalMiles);
         skyMilesCredited = true;
@@ -580,6 +555,11 @@ export class BookingsCreateService extends BookingsCorePart {
         blocking_number: blockingNumber,
         confirmation_number: confirmationNumber,
         time_limit_deadline: deadline,
+        ...(dto.is_block ? { hold_email: {
+          status: HoldEmailStatus.PENDING,
+          attempt_count: 0,
+          next_retry_at: new Date(),
+        } } : {}),
         total_amount: totalAmount,
         total_fare: totalFare,
         total_seat_fees: totalSeatFees,
@@ -654,6 +634,19 @@ export class BookingsCreateService extends BookingsCorePart {
             sagaOp.completed_at = new Date();
             await sagaOp.save().catch(() => {});
           }
+        }
+      }
+
+      // A newly held booking must notify its owner immediately, including when a
+      // clerk created it on a customer's behalf. Mailing is post-commit only.
+      if (savedBooking.status === BookingStatus.BLOCKED && this.mailService) {
+        try {
+          const sent = await deliverHoldCreatedEmail(
+            this.bookingModel, this.flightsService, this.mailService, savedBooking._id,
+          );
+          if (!sent) this.logger.warn(`Hold-created email queued for retry: ${savedBooking.pnr_code}.`);
+        } catch (mailError) {
+          this.logger.warn(`Hold-created email could not be prepared/sent for ${savedBooking.pnr_code}: ${mailError}`);
         }
       }
 

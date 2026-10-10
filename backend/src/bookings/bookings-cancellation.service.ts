@@ -11,7 +11,7 @@ import {
 } from './bookings.schema';
 import { CancelTicketDto } from './bookings.dto';
 import { formatLocalTime } from '../common/timezone.util';
-import { ItineraryLegData, isValidMaskedCard } from '../mail/mail.service';
+import { ItineraryLegData } from '../mail/mail.service';
 import { FlightDocument } from '../flights/flights.schema';
 import { allocateRefundSources, AllocatedRefundItem } from './refund-allocation.util';
 import {
@@ -67,6 +67,9 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
     const legMap = new Map<string, { flightId: string; inventoryId: string }>();
     for (const coupon of coupons || []) {
       if (!coupon || !coupon.flight_id || !coupon.inventory_id) continue;
+      // A rescheduled coupon already released its old inventory. Releasing it
+      // again when cancelling would create seats that do not actually exist.
+      if (['CANCELLED', 'RESCHEDULED'].includes(String(coupon.coupon_status || 'ACTIVE').toUpperCase())) continue;
       const flightId = coupon.flight_id.toString();
       const inventoryId = coupon.inventory_id.toString();
       legMap.set(`${flightId}_${inventoryId}`, { flightId, inventoryId });
@@ -88,6 +91,7 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
 
     for (const coupon of ticketCoupons || []) {
       if (!coupon.flight_id) continue;
+      if (['CANCELLED', 'RESCHEDULED'].includes(String(coupon.coupon_status || 'ACTIVE').toUpperCase())) continue;
       const key = `${coupon.flight_number || ''}_${coupon.flight_id.toString()}_${coupon.inventory_id || ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -259,6 +263,7 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
       provider_currency?: string;
       status: string;
     }>;
+    refund_status: 'NOT_APPLICABLE' | 'PENDING' | 'SUCCESS' | 'FAILED';
     message: string;
   }> {
     const booking = await this.bookingModel
@@ -282,11 +287,10 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
     let refundAmount = 0;
     let refundPercentage = 0;
     let originalUserSkyMiles = 0;
-    let refundCardMasked: string | undefined = undefined;
-    let refundPaymentMethod: PaymentMethod | undefined = undefined;
     let refundAllocations: AllocatedRefundItem[] = [];
 
-    if (booking.status === BookingStatus.CONFIRMED) {
+    const wasPaidBooking = booking.status === BookingStatus.CONFIRMED || booking.status === BookingStatus.RESCHEDULED;
+    if (wasPaidBooking) {
       const earliestDeparture = await this.bridge.getEarliestDeparture(booking);
       const now = new Date();
       const daysBefore = Math.max(0, (earliestDeparture.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -297,92 +301,14 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
       originalUserSkyMiles = user?.sky_miles || 0;
 
       if (refundAmount > 0) {
-        const placeholders = new Set([
-          'ORIGINAL-PAYMENT-CARD',
-          'SAVED-CARD',
-          'CARD-DEFAULT',
-          'UNKNOWN',
-        ]);
-
-        const normalizeCard = (val?: string | null): string | null => {
-          if (!val || typeof val !== 'string') return null;
-          const trimmed = val.trim();
-          if (trimmed.length === 0 || placeholders.has(trimmed.toUpperCase())) {
-            return null;
-          }
-          const digits = trimmed.replace(/\D/g, '');
-          if (digits.length >= 4) {
-            return `**** **** **** ${digits.slice(-4)}`;
-          }
-          return null;
-        };
-
-        let usableCard: string | undefined = undefined;
-        let usablePaymentMethod: PaymentMethod | undefined = undefined;
-
-        if (Array.isArray(booking.payment_transactions) && booking.payment_transactions.length > 0) {
-          const candidates: Array<{
-            tx: any;
-            index: number;
-            timestamp: number;
-            normalizedCard: string;
-            paymentMethod?: PaymentMethod;
-          }> = [];
-
-          booking.payment_transactions.forEach((tx: any, index: number) => {
-            const txType = (tx?.transaction_type || '').toUpperCase();
-            const txStatus = (tx?.status || 'SUCCESS').toUpperCase();
-            if (txType === 'PAYMENT' && txStatus === 'SUCCESS') {
-              const normalized = normalizeCard(tx?.card_masked);
-              if (normalized) {
-                const rawTime = tx?.created_at ? new Date(tx.created_at).getTime() : NaN;
-                const timestamp = isNaN(rawTime) ? -1 : rawTime;
-                candidates.push({
-                  tx,
-                  index,
-                  timestamp,
-                  normalizedCard: normalized,
-                  paymentMethod: (tx.payment_method as PaymentMethod) || undefined,
-                });
-              }
-            }
-          });
-
-          if (candidates.length > 0) {
-            candidates.sort((a, b) => {
-              if (a.timestamp >= 0 && b.timestamp >= 0) {
-                if (b.timestamp !== a.timestamp) {
-                  return b.timestamp - a.timestamp;
-                }
-                return b.index - a.index;
-              }
-              if (a.timestamp >= 0 && b.timestamp < 0) return -1;
-              if (a.timestamp < 0 && b.timestamp >= 0) return 1;
-              return b.index - a.index;
-            });
-
-            usableCard = candidates[0].normalizedCard;
-            usablePaymentMethod = candidates[0].paymentMethod;
-          }
-        }
-
-        if (!usableCard && user?.preferred_credit_card) {
-          const normalized = normalizeCard(user.preferred_credit_card);
-          if (normalized) {
-            usableCard = normalized;
-            usablePaymentMethod = PaymentMethod.PROFILE_CARD;
-          }
-        }
-
         const hasPaypal = booking.payment_transactions?.some(
           (t) => t.status === 'SUCCESS' && t.payment_method === PaymentMethod.PAYPAL,
         );
-        if (!usableCard && !hasPaypal) {
-          throw new BadRequestException('Cannot process refund: no valid payment card found for this booking.');
+        if (!hasPaypal) {
+          throw new BadRequestException(
+            'Automatic cancellation refund requires a captured PayPal payment. Please contact support for a legacy payment.',
+          );
         }
-
-        refundCardMasked = usableCard;
-        refundPaymentMethod = usablePaymentMethod || (hasPaypal ? PaymentMethod.PAYPAL : undefined);
 
         refundAllocations = allocateRefundSources(
           booking.payment_transactions || [],
@@ -391,31 +317,23 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
           (p) => this.bridge.generateCode(p),
         );
 
-        if (refundAllocations.length > 0) {
-          for (const alloc of refundAllocations) {
-            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
-              const norm = normalizeCard(alloc.card_masked);
-              if (norm) {
-                alloc.card_masked = norm;
-              } else if (usableCard) {
-                alloc.card_masked = usableCard;
-                if (!alloc.payment_method && usablePaymentMethod) {
-                  alloc.payment_method = usablePaymentMethod;
-                }
-              }
-            }
-          }
-          const cardItem = refundAllocations.find((a) => a.card_masked);
-          if (cardItem?.card_masked) {
-            refundCardMasked = cardItem.card_masked;
-            refundPaymentMethod = cardItem.payment_method || refundPaymentMethod;
-          } else {
-            const ppItem = refundAllocations.find((a) => a.payment_method === PaymentMethod.PAYPAL);
-            if (ppItem) {
-              refundPaymentMethod = PaymentMethod.PAYPAL;
-            }
-          }
+        const totalAllocated = refundAllocations.reduce((sum, item) => sum + item.amount, 0);
+        if (
+          totalAllocated !== refundAmount ||
+          refundAllocations.length === 0 ||
+          refundAllocations.some((item) =>
+            item.payment_method !== PaymentMethod.PAYPAL ||
+            !item.provider_capture_id ||
+            !item.provider_amount ||
+            !(Number(item.provider_amount) > 0) ||
+            !item.provider_currency,
+          )
+        ) {
+          throw new BadRequestException(
+            'Refund cannot be safely allocated to the original PayPal capture. No ticket was cancelled; please contact support.',
+          );
         }
+
       }
     } else if (booking.status === BookingStatus.BLOCKED) {
       refundPercentage = 0;
@@ -440,15 +358,15 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
     };
 
     const cancellationNumber = this.bridge.generateCode('CAN');
-    const wasConfirmed = booking.status === BookingStatus.CONFIRMED;
     let seatsReleased = false;
     let skyMilesAdjusted = false;
+    let bookingCommitted = false;
 
     try {
       await this.releaseSeatsForCouponsStrict(passengerCount, originalCoupons);
       seatsReleased = true;
 
-      if (booking.status === BookingStatus.CONFIRMED) {
+      if (wasPaidBooking) {
         if (refundAmount > 0) {
           if (refundAllocations.length > 0) {
             for (const alloc of refundAllocations) {
@@ -467,21 +385,12 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
                 provider_currency: alloc.provider_currency,
                 exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
                 status: alloc.status,
+                // Post-commit dispatch runs immediately; the recovery worker can
+                // retry or reconcile only after its first one-hour grace period.
+                next_retry_at: alloc.status === 'PENDING' ? new Date() : undefined,
                 created_at: new Date(),
               });
             }
-          } else {
-            booking.payment_transactions.push({
-              transaction_type: 'REFUND',
-              payment_reference: this.bridge.generateCode('REF'),
-              ...(refundPaymentMethod ? { payment_method: refundPaymentMethod } : {}),
-              payment_provider: refundPaymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
-              amount: refundAmount,
-              card_masked: refundCardMasked!,
-              currency: 'VND',
-              status: 'SUCCESS',
-              created_at: new Date(),
-            });
           }
         }
 
@@ -492,7 +401,7 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
         }
       }
 
-      if (booking.status === BookingStatus.CONFIRMED && refundAmount > 0) {
+      if (wasPaidBooking && refundAmount > 0) {
         if (refundAllocations.length > 0) {
           const totalAllocated = refundAllocations.reduce((sum, a) => sum + a.amount, 0);
           if (totalAllocated !== refundAmount) {
@@ -504,18 +413,28 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
       }
 
       booking.ticket_coupons.forEach((coupon: any) => {
-        coupon.coupon_status = 'CANCELLED';
+        // Preserve historical rescheduled/cancelled coupons for audit and refund calculations.
+        if (String(coupon.coupon_status || 'ACTIVE').toUpperCase() === 'ACTIVE') {
+          coupon.coupon_status = 'CANCELLED';
+        }
       });
 
       booking.status = BookingStatus.CANCELLED;
       booking.cancellation_number = cancellationNumber;
       await booking.save();
+      bookingCommitted = true;
       if (this.seatAllocationService) {
         await this.seatAllocationService.releaseAllocations(booking._id).catch(() => {});
       }
 
       if (this.paypalService && refundAllocations.length > 0) {
-        await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        try {
+          await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        } catch (refundErr: any) {
+          // Cancellation is committed. Refunds remain PENDING for reconciliation;
+          // never restore seats after a PayPal refund may have been submitted.
+          this.logger.error(`Post-commit refund processing interrupted for ${booking.pnr_code}: ${refundErr?.message || refundErr}`);
+        }
       }
 
       if (this.mailService) {
@@ -523,10 +442,10 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
           const user = await this.usersService.findById(booking.user_id.toString());
           if (user?.email) {
             const passengerName = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'Customer';
-            const itinerary = await this.buildItineraryLegs(booking.ticket_coupons);
+            const itinerary = await this.buildItineraryLegs(originalCoupons);
             const firstLeg = itinerary[0];
 
-            const sent = !wasConfirmed
+            const sent = !wasPaidBooking
               ? await this.mailService.sendHoldCancelledByCustomerEmail({
                   toEmail: user.email,
                   passengerName,
@@ -543,17 +462,16 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
               confirmationNumber: booking.confirmation_number,
               cancellationNumber,
               cancellationType: 'MANUAL_CONFIRMED',
-              originalBookingStatus: 'CONFIRMED',
+              originalBookingStatus: snapshot.status,
               flightNumber: firstLeg?.flightNumber,
               origin: firstLeg?.origin,
               destination: firstLeg?.destination,
               departureTimeFormatted: firstLeg?.departureTimeFormatted,
               itinerary,
-              refundAmount: wasConfirmed ? refundAmount : 0,
-              refundPercentage: wasConfirmed ? refundPercentage : 0,
+              refundAmount: wasPaidBooking ? refundAmount : 0,
+              refundPercentage: wasPaidBooking ? refundPercentage : 0,
               currency: 'VND',
-              maskedCard: wasConfirmed && isValidMaskedCard(refundCardMasked) ? refundCardMasked : undefined,
-              policyDeduction: wasConfirmed ? (100 - refundPercentage) : undefined,
+              policyDeduction: wasPaidBooking ? (100 - refundPercentage) : undefined,
               refundDetails: refundAllocations.length > 0 ? refundAllocations.map((a) => ({
                 paymentMethod: a.payment_method,
                 payment_method: a.payment_method,
@@ -565,6 +483,8 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
                 provider_amount: a.provider_amount,
                 providerCurrency: a.provider_currency,
                 provider_currency: a.provider_currency,
+                providerRefundId: a.provider_refund_id,
+                provider_refund_id: a.provider_refund_id,
                 status: a.status,
               })) : undefined,
             });
@@ -581,15 +501,22 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
         }
       }
 
-      const message = `Ticket successfully cancelled. Cancellation number: ${cancellationNumber}. Refund: ${refundAmount.toLocaleString('vi-VN')} VND (${refundPercentage}%).`;
+      const refundStatus = refundAmount === 0
+        ? 'NOT_APPLICABLE'
+        : refundAllocations.some((item) => item.status === 'FAILED')
+          ? 'FAILED'
+          : refundAllocations.every((item) => item.status === 'SUCCESS')
+            ? 'SUCCESS'
+            : 'PENDING';
+      const message = `Ticket cancelled. Cancellation number: ${cancellationNumber}. Refund amount: ${refundAmount.toLocaleString('vi-VN')} VND (${refundPercentage}%). Refund status: ${refundStatus}.`;
 
       return {
         booking,
         refund_amount: refundAmount,
         refund_percentage: refundPercentage,
+        refund_status: refundStatus,
         cancellation_number: cancellationNumber,
         currency: 'VND',
-        ...(refundCardMasked ? { refund_card_masked: refundCardMasked } : {}),
         refund_details: refundAllocations.length > 0 ? refundAllocations.map((a) => ({
           payment_reference: a.payment_reference,
           payment_method: a.payment_method,
@@ -604,6 +531,12 @@ export class BookingsCancellationService extends BookingsLifecyclePart {
         message,
       };
     } catch (error: any) {
+      if (bookingCommitted) {
+        this.logger.error(`Cancellation already committed for ${booking.pnr_code}; rollback skipped: ${error?.message || error}`);
+        throw new InternalServerErrorException(
+          'Booking is already cancelled; refund may still be processing. Check its status before taking further action.',
+        );
+      }
       const rollbackErrors: string[] = [];
       if (skyMilesAdjusted) {
         try {

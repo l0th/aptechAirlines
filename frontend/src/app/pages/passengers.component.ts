@@ -4,40 +4,41 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { BookingStateService } from '../core/booking-state.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone: true,
   imports: [FormsModule],
   template: `
     <div class="container page">
-      <div class="eyebrow">BƯỚC 2 / 4</div>
-      <h1 class="title">Thông tin hành khách</h1>
-      <p class="subtitle">Loại hành khách được giữ đúng theo tìm kiếm để giá và booking luôn nhất quán.</p>
+      <div class="eyebrow">{{lang.pick('BƯỚC 2 / 4','STEP 2 / 4')}}</div>
+      <h1 class="title">{{lang.pick('Thông tin hành khách','Passenger details')}}</h1>
+      <p class="subtitle">{{lang.pick('Loại hành khách được giữ đúng theo tìm kiếm để giá và booking luôn nhất quán.','Passenger types match your search so that fares and bookings stay consistent.')}}</p>
 
       @for(p of passengers;track $index;let i=$index){
         <section class="card passenger">
           <div class="pass-head">
             <div>
-              <h2>Hành khách {{i+1}}</h2>
+              <h2>{{lang.pick('Hành khách','Passenger')}} {{i+1}}</h2>
               <small>{{typeHelp(p.passenger_type)}}</small>
             </div>
             <span class="pill pill-gold">{{typeLabel(p.passenger_type)}}</span>
           </div>
           <div class="grid grid-3">
-            <div class="field"><span>Họ</span><input class="control" [(ngModel)]="p.first_name" autocomplete="family-name"></div>
-            <div class="field"><span>Tên</span><input class="control" [(ngModel)]="p.last_name" autocomplete="given-name"></div>
-            <div class="field locked-field"><span>Loại hành khách</span><strong>{{typeLabel(p.passenger_type)}}</strong><small>Được xác định từ bước tìm chuyến.</small></div>
+            <div class="field"><span>{{lang.pick('Họ','Family name')}}</span><input class="control" [(ngModel)]="p.first_name" autocomplete="family-name"></div>
+            <div class="field"><span>{{lang.pick('Tên','Given name')}}</span><input class="control" [(ngModel)]="p.last_name" autocomplete="given-name"></div>
+            <div class="field locked-field"><span>{{lang.pick('Loại hành khách','Passenger type')}}</span><strong>{{typeLabel(p.passenger_type)}}</strong><small>{{lang.pick('Được xác định từ bước tìm chuyến.','Determined by your flight search.')}}</small></div>
             <div class="field"><span>CCCD / Passport</span><input class="control" [(ngModel)]="p.id_card_or_passport"></div>
-            <div class="field"><span>Quốc tịch</span><input class="control" [(ngModel)]="p.nationality" autocomplete="country-name"></div>
-            <div class="field"><span>Ngày sinh</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" [max]="today"></div>
+            <div class="field"><span>{{lang.pick('Quốc tịch','Nationality')}}</span><input class="control" [(ngModel)]="p.nationality" autocomplete="country-name"></div>
+            <div class="field"><span>{{lang.pick('Ngày sinh','Date of birth')}}</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" [max]="today"></div>
           </div>
         </section>
       }
 
       
       <div class="actions">
-        <button class="btn btn-outline" (click)="back()">Quay lại</button>
-        <button class="btn btn-primary" (click)="next()">Tiếp tục chọn ghế</button>
+        <button class="btn btn-outline" (click)="back()">{{lang.pick('Quay lại','Back')}}</button>
+        <button class="btn btn-primary" (click)="next()">{{lang.pick('Tiếp tục chọn ghế','Continue to seat selection')}}</button>
       </div>
     </div>
   `,
@@ -55,6 +56,7 @@ import { BookingStateService } from '../core/booking-state.service';
   `]
 })
 export class PassengersComponent {
+  readonly lang = inject(LanguageService);
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   state = inject(BookingStateService);
@@ -90,11 +92,11 @@ export class PassengersComponent {
   }
 
   typeLabel(type: string) {
-    return type === 'ADULT' ? 'Người lớn' : type === 'CHILD' ? 'Trẻ em' : 'Cao tuổi';
+    return type === 'ADULT' ? this.lang.pick('Người lớn','Adult') : type === 'CHILD' ? this.lang.pick('Trẻ em','Child') : this.lang.pick('Cao tuổi','Senior');
   }
 
   typeHelp(type: string) {
-    return type === 'ADULT' ? 'Adult' : type === 'CHILD' ? 'Child' : 'Senior citizen';
+    return type === 'ADULT' ? this.lang.pick('Người lớn (từ 12 tuổi)','Adult (12+)') : type === 'CHILD' ? this.lang.pick('Trẻ em (2–11 tuổi)','Child (ages 2–11)') : this.lang.pick('Hành khách cao tuổi','Senior passenger');
   }
 
   back() {
@@ -105,15 +107,15 @@ export class PassengersComponent {
   next() {
     this.error = '';
     if (this.passengers.some(p => !String(p.first_name || '').trim() || !String(p.last_name || '').trim())) {
-      this.error = 'Vui lòng nhập họ tên cho tất cả hành khách.';
+      this.error = this.lang.pick('Vui lòng nhập họ tên cho tất cả hành khách.','Enter the full name of every passenger.');
       return;
     }
     if (this.passengers.some(p => p.date_of_birth && !/^\d{4}-\d{2}-\d{2}$/.test(p.date_of_birth))) {
-      this.error = 'Ngày sinh phải đúng định dạng YYYY-MM-DD.';
+      this.error = this.lang.pick('Ngày sinh phải đúng định dạng YYYY-MM-DD.','Date of birth must use YYYY-MM-DD format.');
       return;
     }
     if (this.passengers.some(p => p.date_of_birth && p.date_of_birth > this.today)) {
-      this.error = 'Ngày sinh không được nằm trong tương lai.';
+      this.error = this.lang.pick('Ngày sinh không được nằm trong tương lai.','Date of birth cannot be in the future.');
       return;
     }
 

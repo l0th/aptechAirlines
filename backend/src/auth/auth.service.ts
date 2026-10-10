@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger, Optional, UnauthorizedExceptio
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
-import { UsersService, toSafeUserResponse } from '../users/users.service';
+import { UsersService } from '../users/users.service';
 import { ForgotPasswordDto, LoginDto, RegisterDto, ResetPasswordDto } from './auth.dto';
 import { UserRole } from '../users/users.schema';
 import { MailService } from '../mail/mail.service';
@@ -48,8 +48,6 @@ export class AuthService {
       last_name: user.last_name,
     };
 
-    const safeUser = toSafeUserResponse(user);
-
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -63,8 +61,6 @@ export class AuthService {
         last_name: user.last_name,
         sky_miles: user.sky_miles,
         role: user.role,
-        has_preferred_credit_card: safeUser?.has_preferred_credit_card ?? false,
-        preferred_credit_card_masked: safeUser?.preferred_credit_card_masked,
       },
     };
   }
@@ -81,7 +77,7 @@ export class AuthService {
     });
   }
 
-  async requestPasswordReset(dto: ForgotPasswordDto) {
+  async requestPasswordReset(dto: ForgotPasswordDto, lang?: string) {
     const email = dto.email.trim().toLowerCase();
     const genericMessage = 'Nếu email tồn tại trong hệ thống, mã xác nhận 6 số đã được gửi và có hiệu lực trong 10 phút.';
     const user = await this.usersService.findByEmail(email);
@@ -97,6 +93,8 @@ export class AuthService {
       passengerName: [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username,
       code,
       expiresInMinutes: 10,
+      // Email language follows the page the reset was requested from; falls back to the account preference.
+      lang: lang ? (String(lang).toLowerCase().startsWith('en') ? 'en' : 'vi') : undefined,
     });
     if (sent === false) {
       this.logger.warn(`Password reset email delivery failed for ${user.email}`);

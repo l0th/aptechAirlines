@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EmailLog, EmailLogDocument, EmailSetting, EmailSettingDocument } from './email-log.schema';
-import { MAIL_TEMPLATES, MailTemplateDefinition, findMailTemplate } from './mail-templates';
+import { MAIL_TEMPLATES, MailTemplateDefinition, findMailTemplate, sampleDataFor } from './mail-templates';
 import { MailService } from './mail.service';
+import { normalizeMailLang, renderBilingualMail } from './mail-i18n';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -41,29 +42,47 @@ export class MailAdminService {
       name: t.name,
       description: t.description,
       trigger: t.trigger,
+      nameEn: t.nameEn,
+      descriptionEn: t.descriptionEn,
+      triggerEn: t.triggerEn,
       enabled: map.has(t.key) ? map.get(t.key) : true,
     }));
   }
 
-  preview(key: string) {
+  /** The preview always matches the bilingual email actually sent to customers. */
+  preview(key: string, lang?: string) {
     const tpl = this.getTemplate(key);
-    const { subject, html } = tpl.render(tpl.sampleData);
-    return { key: tpl.key, subject, html };
+    const { subject, html } = renderBilingualMail((language) => tpl.render(sampleDataFor(tpl, language)));
+    return { key: tpl.key, lang: 'vi-en', subject, html };
   }
 
-  async sendTest(key: string, to: string) {
+  async sendTest(key: string, to: string, lang?: string) {
+    const language = normalizeMailLang(lang);
     const email = String(to || '').trim();
-    if (!EMAIL_RE.test(email)) throw new BadRequestException('Địa chỉ email không hợp lệ.');
+    if (!EMAIL_RE.test(email)) {
+      throw new BadRequestException(language === 'en' ? 'Invalid email address.' : 'Địa chỉ email không hợp lệ.');
+    }
     const tpl = this.getTemplate(key);
-    const { subject, html } = tpl.render({ ...tpl.sampleData, toEmail: email });
+    const { subject, html } = renderBilingualMail((partLang) =>
+      tpl.render({ ...sampleDataFor(tpl, partLang), toEmail: email }),
+    );
     // Test sends bypass the enable toggle on purpose so admins can preview disabled templates.
     const ok = await this.mailService.sendMail(email, `[TEST] ${subject}`, html, {
       templateKey: tpl.key,
       bookingReference: tpl.sampleData?.bookingReference,
     });
+    const message = ok
+      ? language === 'en'
+        ? `Test email sent to ${email}.`
+        : `Đã gửi email thử tới ${email}.`
+      : language === 'en'
+        ? 'Failed to send the email. Check the SMTP configuration / delivery history.'
+        : 'Gửi email thất bại. Kiểm tra cấu hình SMTP / lịch sử gửi.';
     return {
       success: ok,
-      message: ok ? `Đã gửi email thử tới ${email}.` : 'Gửi email thất bại. Kiểm tra cấu hình SMTP / lịch sử gửi.',
+      message,
+      messageVi: ok ? `Đã gửi email thử tới ${email}.` : 'Gửi email thất bại. Kiểm tra cấu hình SMTP / lịch sử gửi.',
+      messageEn: ok ? `Test email sent to ${email}.` : 'Failed to send the email. Check the SMTP configuration / delivery history.',
     };
   }
 

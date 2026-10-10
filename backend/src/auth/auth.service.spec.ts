@@ -21,7 +21,6 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
     phone_number: '+1-800-555-0199',
     sex: 'FEMALE',
     age: 28,
-    preferred_credit_card: '4111222233334444',
   };
 
   // =========================================================================
@@ -119,32 +118,20 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
       expect(ageError).toBeDefined();
     });
 
-    it('Case F: Missing preferred_credit_card is allowed', async () => {
-      const payload: any = { ...validRegisterPayload };
-      delete payload.preferred_credit_card;
-
-      const dto = plainToInstance(RegisterDto, payload);
+    it('Case F: Registration without saved credit card is allowed', async () => {
+      const dto = plainToInstance(RegisterDto, validRegisterPayload);
       const errors = await validate(dto);
 
       const cardError = errors.find((e) => e.property === 'preferred_credit_card');
       expect(cardError).toBeUndefined();
     });
 
-    it('Case F2: Invalid preferred_credit_card format rejects validation (< 12 digits, letters, or punctuation only)', async () => {
-      // 1. Too short (< 12 digits)
-      const p1: any = { ...validRegisterPayload, preferred_credit_card: '12345' };
-      const errs1 = await validate(plainToInstance(RegisterDto, p1));
-      expect(errs1.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
-
-      // 2. Letters included
-      const p2: any = { ...validRegisterPayload, preferred_credit_card: '4111-2222-3333-abcd' };
-      const errs2 = await validate(plainToInstance(RegisterDto, p2));
-      expect(errs2.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
-
-      // 3. Punctuation only
-      const p3: any = { ...validRegisterPayload, preferred_credit_card: '    -   ' };
-      const errs3 = await validate(plainToInstance(RegisterDto, p3));
-      expect(errs3.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('matches');
+    it('Case F2: Saved credit cards are rejected, including previously valid numbers', async () => {
+      for (const value of ['4111222233334444', '12345', '']) {
+        const dto = plainToInstance(RegisterDto, { ...validRegisterPayload, preferred_credit_card: value });
+        const errors = await validate(dto);
+        expect(errors.find((e) => e.property === 'preferred_credit_card')?.constraints).toHaveProperty('isEmpty');
+      }
     });
 
     describe('Case G: Invalid/non-integer/negative age rejects as appropriate to DTO contract', () => {
@@ -267,7 +254,6 @@ describe('AuthService & Requirement §3.2 Test Suite', () => {
         phone_number: validRegisterPayload.phone_number,
         sex: validRegisterPayload.sex,
         age: validRegisterPayload.age,
-        preferred_credit_card: validRegisterPayload.preferred_credit_card,
         role: UserRole.CUSTOMER,
       });
     });

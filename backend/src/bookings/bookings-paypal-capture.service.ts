@@ -82,6 +82,12 @@ export class BookingsPayPalCaptureService extends BookingsPayPalPart {
       if (!blockingNumber) throw new BadRequestException('Missing blocking number in session payload.');
       const booking = await this.bookingModel.findOne({ blocking_number: blockingNumber }).exec();
       if (!booking) throw new NotFoundException(`Booking with blocking number ${blockingNumber} not found.`);
+      if (String(booking.user_id) !== String(session.user_id)) {
+        throw new ForbiddenException('This reservation does not belong to the checkout customer.');
+      }
+      if (booking.status !== BookingStatus.BLOCKED) {
+        throw new BadRequestException('This reservation is no longer awaiting hold payment.');
+      }
       if (booking.time_limit_deadline && new Date() > booking.time_limit_deadline) {
         await this.bridge.cancelExpiredBlockStrict(booking);
         session.status = PayPalCheckoutStatus.CANCELLED;

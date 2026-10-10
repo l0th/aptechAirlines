@@ -57,6 +57,16 @@ export class UsersController {
     return toSafeUserResponse(user);
   }
 
+  // The website VI/EN switch: remembers the language so emails are sent in it.
+  @Patch('me/language')
+  async setMyLanguage(
+    @Req() req: { user: { sub: string } },
+    @Body() body: { language: string },
+  ) {
+    const language = await this.usersService.setPreferredLanguage(req.user.sub, body?.language);
+    return { language };
+  }
+
   // Requirement 3.8 / least privilege: a user may update their own profile; only ADMIN/SUPER_ADMIN may update anyone
   @Put(':id')
   async update(

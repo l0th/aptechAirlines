@@ -193,31 +193,26 @@ describe('Payment Phase 1A Specification Tests', () => {
           passengers: [{ first_name: 'A', last_name: 'B' } as any],
           legs: [{ flight_id: 'f1', inventory_id: 'i1' }],
         }),
-      ).rejects.toThrow('Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.');
+      ).rejects.toThrow('Saved card payments are no longer supported');
 
       expect(flightsService.reserveSeats).not.toHaveBeenCalled();
     });
 
-    it('Scenario 6: purchase with PROFILE_CARD and valid card succeeds and records transaction with payment_method PROFILE_CARD', async () => {
+    it('Scenario 6: purchase with PROFILE_CARD cannot charge even when a profile card exists', async () => {
       flightsService.findById.mockResolvedValue(validFlight);
       flightsService.reserveSeats.mockResolvedValue(true);
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '4111222233334444', sky_miles: 0 });
 
-      const res = await service.createBooking({
+      await expect(service.createBooking({
         user_id: 'u1',
         booking_type: BookingType.ONE_WAY,
         is_block: false,
         payment_method: PaymentMethod.PROFILE_CARD,
         passengers: [{ first_name: 'A', last_name: 'B' } as any],
         legs: [{ flight_id: 'f1', inventory_id: 'i1' }],
-      });
+      })).rejects.toThrow('Saved card payments are no longer supported');
 
-      expect(res.status).toBe(BookingStatus.CONFIRMED);
-      expect(flightsService.reserveSeats).toHaveBeenCalledWith('f1', 'i1', 1);
-      expect(res.payment_transactions).toBeDefined();
-      expect(res.payment_transactions.length).toBe(1);
-      expect(res.payment_transactions[0].payment_method).toBe(PaymentMethod.PROFILE_CARD);
-      expect(res.payment_transactions[0].card_masked).toBe('**** **** **** 4444');
+      expect(flightsService.reserveSeats).not.toHaveBeenCalled();
     });
 
     it('Scenario 7: hold with is_block=true succeeds without payment_method and creates no payment transaction', async () => {
@@ -289,7 +284,7 @@ describe('Payment Phase 1A Specification Tests', () => {
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1);
     });
 
-    it('valid hold requires PROFILE_CARD and valid profile card', async () => {
+    it('valid hold cannot be confirmed by an uncharged stored card', async () => {
       const mockBooking: any = {
         status: BookingStatus.BLOCKED,
         time_limit_deadline: new Date(Date.now() + 100000), // active hold!
@@ -304,15 +299,14 @@ describe('Payment Phase 1A Specification Tests', () => {
       flightsService.findById.mockResolvedValue({ distance_miles: 500 });
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '4111222233334444' });
 
-      const res = await service.confirmTicket({
+      await expect(service.confirmTicket({
         blocking_number: 'BLK-1',
         payment_method: PaymentMethod.PROFILE_CARD,
-      });
+      })).rejects.toThrow('Saved card payments are no longer supported');
 
-      expect(res.status).toBe(BookingStatus.CONFIRMED);
-      expect(mockBooking.payment_transactions.length).toBe(1);
-      expect(mockBooking.payment_transactions[0].payment_method).toBe(PaymentMethod.PROFILE_CARD);
-      expect(mockBooking.payment_transactions[0].card_masked).toBe('**** **** **** 4444');
+      expect(mockBooking.status).toBe(BookingStatus.BLOCKED);
+      expect(mockBooking.payment_transactions).toHaveLength(0);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
   });
 
@@ -335,7 +329,7 @@ describe('Payment Phase 1A Specification Tests', () => {
       inventories: [{ _id: 'i1', id: 'i1', available_seats: 10, base_price: 100 }],
     };
 
-    it('reschedule surcharge (priceDiff > 0) requires payment_method PROFILE_CARD', async () => {
+    it('reschedule surcharge (priceDiff > 0) rejects PROFILE_CARD without capturing a payment', async () => {
       const moreExpensiveFlight = {
         ...oldFlight,
         _id: 'f2',
@@ -368,21 +362,18 @@ describe('Payment Phase 1A Specification Tests', () => {
         } as any),
       ).rejects.toThrow('Payment method is required for reschedule fare difference.');
 
-      // With PROFILE_CARD succeeds and tags transaction
-      const res = await service.rescheduleTicket({
+      // A profile card is not proof of payment.
+      await expect(service.rescheduleTicket({
         confirmation_number: 'CNF-1',
         new_flight_id: 'f2',
         new_inventory_id: 'i2',
         payment_method: PaymentMethod.PROFILE_CARD,
-      });
+      })).rejects.toThrow('Saved card payments are no longer supported');
 
-      expect(res.booking.status).toBe(BookingStatus.CONFIRMED);
-      const chargeTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'RESCHEDULE_CHARGE');
-      expect(chargeTx).toBeDefined();
-      expect(chargeTx.payment_method).toBe(PaymentMethod.PROFILE_CARD);
+      expect(mockBooking.payment_transactions.some((t: any) => t.transaction_type === 'RESCHEDULE_CHARGE' && t.status === 'SUCCESS')).toBe(false);
     });
 
-    it('Requirement 11: reschedule refund from historical transaction retains its source method', async () => {
+    it('Requirement 11: reschedule refuses refund from a card-only historical payment', async () => {
       const cheaperFlight = {
         ...oldFlight,
         _id: 'f3',
@@ -412,21 +403,18 @@ describe('Payment Phase 1A Specification Tests', () => {
       flightsService.reserveSeats.mockResolvedValue(true);
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '' }); // User has no card in profile!
 
-      // Call reschedule WITHOUT payment_method when priceDiff < 0
-      const res = await service.rescheduleTicket({
+      await expect(service.rescheduleTicket({
         confirmation_number: 'CNF-2',
         new_flight_id: 'f3',
         new_inventory_id: 'i3',
-      });
+      })).rejects.toThrow('Cannot refund the full reschedule difference to verified PayPal captures');
 
-      expect(res.booking.status).toBe(BookingStatus.CONFIRMED);
-      const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'RESCHEDULE_REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.card_masked).toBe('**** **** **** 9999');
-      expect(refundTx.payment_method).toBe(PaymentMethod.PROFILE_CARD);
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.payment_transactions).toHaveLength(1);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
-    it('Requirement 12: reschedule refund falling back to actual preferred profile card records PROFILE_CARD', async () => {
+    it('Requirement 12: reschedule never falls back to a preferred profile card for refunds', async () => {
       const cheaperFlight = {
         ...oldFlight,
         _id: 'f3',
@@ -455,17 +443,15 @@ describe('Payment Phase 1A Specification Tests', () => {
       flightsService.reserveSeats.mockResolvedValue(true);
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '4111222233338888' });
 
-      const res = await service.rescheduleTicket({
+      await expect(service.rescheduleTicket({
         confirmation_number: 'CNF-3',
         new_flight_id: 'f3',
         new_inventory_id: 'i3',
-      });
+      })).rejects.toThrow('Cannot refund the full reschedule difference to verified PayPal captures');
 
-      expect(res.booking.status).toBe(BookingStatus.CONFIRMED);
-      const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'RESCHEDULE_REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.payment_method).toBe(PaymentMethod.PROFILE_CARD);
-      expect(refundTx.card_masked).toBe('**** **** **** 8888');
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.payment_transactions).toHaveLength(1);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
   });
 
@@ -478,7 +464,7 @@ describe('Payment Phase 1A Specification Tests', () => {
       expect(pmPath?.options?.default).toBeUndefined();
     });
 
-    it('Requirement 8: manual cancellation REFUND copies PROFILE_CARD method when source PAYMENT explicitly has PROFILE_CARD', async () => {
+    it('Requirement 8: manual cancellation cannot automatically refund legacy profile-card payment', async () => {
       const mockBooking: any = {
         status: BookingStatus.CONFIRMED,
         total_amount: 1000,
@@ -504,12 +490,12 @@ describe('Payment Phase 1A Specification Tests', () => {
       policiesService.calculateRefundPercentage.mockReturnValue(80);
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '4111222233334444' });
 
-      await service.cancelTicket({ identifier: 'CNF-1' });
+      await expect(service.cancelTicket({ identifier: 'CNF-1' }))
+        .rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
 
-      const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.payment_method).toBe(PaymentMethod.PROFILE_CARD);
-      expect(refundTx.card_masked).toBe('**** **** **** 4444');
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.payment_transactions).toHaveLength(1);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
     it('Requirement 9: historical source PAYMENT without payment_method does not get falsely classified', async () => {
@@ -538,12 +524,12 @@ describe('Payment Phase 1A Specification Tests', () => {
       policiesService.calculateRefundPercentage.mockReturnValue(80);
       usersService.findById.mockResolvedValue({ _id: 'u1', preferred_credit_card: '' }); // no profile card fallback either
 
-      await service.cancelTicket({ identifier: 'CNF-HISTORICAL' });
+      await expect(service.cancelTicket({ identifier: 'CNF-HISTORICAL' }))
+        .rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
 
-      const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.payment_method).toBeUndefined();
-      expect(refundTx.card_masked).toBe('**** **** **** 1234');
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.payment_transactions).toHaveLength(1);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
     it('Requirement 10: emergency cancellation REFUND copies source payment_method when present', async () => {

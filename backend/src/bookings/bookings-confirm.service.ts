@@ -6,7 +6,6 @@ import {
   PaymentMethod,
 } from './bookings.schema';
 import { ConfirmTicketDto } from './bookings.dto';
-import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { BookingsCoreBridge, BookingsCoreDependencies, BookingsCorePart } from './bookings-core.part';
 
 export class BookingsConfirmService extends BookingsCorePart {
@@ -75,34 +74,7 @@ export class BookingsConfirmService extends BookingsCorePart {
         });
       }
     } else if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
-      const user = await this.usersService.findById(booking.user_id.toString());
-      const rawCard = (user?.preferred_credit_card || '').trim();
-      const placeholders = new Set(['CARD-DEFAULT', 'SAVED-CARD', 'UNKNOWN', 'ORIGINAL-PAYMENT-CARD']);
-      if (
-        !rawCard ||
-        placeholders.has(rawCard.toUpperCase()) ||
-        rawCard.startsWith('*') ||
-        !CREDIT_CARD_REGEX.test(rawCard)
-      ) {
-        throw new BadRequestException(
-          'Cannot process payment: no valid preferred credit card found in user profile. Please update your profile.',
-        );
-      }
-
-      const digits = rawCard.replace(/\D/g, '');
-      const maskedCard = `**** **** **** ${digits.slice(-4)}`;
-
-      booking.payment_transactions.push({
-        transaction_type: 'PAYMENT',
-        payment_method: PaymentMethod.PROFILE_CARD,
-        payment_provider: 'PROFILE_CARD',
-        payment_reference: this.bridge.generateCode('PAY'),
-        amount: booking.total_amount,
-        card_masked: maskedCard,
-        currency: 'VND',
-        status: 'SUCCESS',
-        created_at: new Date(),
-      });
+      throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
     } else {
       throw new BadRequestException('Unsupported payment method.');
     }

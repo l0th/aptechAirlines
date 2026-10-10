@@ -12,6 +12,7 @@ import {
 import { FlightDocument, FlightStatus } from '../flights/flights.schema';
 import { applyPricing, inventoryLoadFactor } from '../common/pricing.util';
 import { ConvertedPresentmentAmount } from '../paypal/paypal.service';
+import { validateRescheduleSeatRequests } from './reschedule-seat-requests.util';
 import {
   BookingsQuoteBridge,
   BookingsQuoteDependencies,
@@ -222,11 +223,44 @@ export class BookingsQuoteService extends BookingsQuotePart {
       throw new BadRequestException('Only confirmed tickets can be rescheduled.');
     }
 
+    // Quote and commit must reject the same incomplete/ambiguous replacement payloads.
+    const outDirect = Boolean(dto.new_flight_id || dto.new_inventory_id);
+    const retDirect = Boolean(dto.new_return_flight_id || dto.new_return_inventory_id);
+    const outLegs = dto.new_legs !== undefined;
+    const retLegs = dto.new_return_legs !== undefined;
+    if (Boolean(dto.new_flight_id) !== Boolean(dto.new_inventory_id) ||
+        Boolean(dto.new_return_flight_id) !== Boolean(dto.new_return_inventory_id)) {
+      throw new BadRequestException('Both flight and inventory IDs must be provided for each direct direction.');
+    }
+    if ((outDirect && outLegs) || (retDirect && retLegs)) {
+      throw new BadRequestException('Select either a direct flight or a full connecting itinerary for each direction.');
+    }
+    if ((outLegs && (dto.new_legs!.length < 2 || dto.new_legs!.length > 3)) ||
+        (retLegs && (dto.new_return_legs!.length < 2 || dto.new_return_legs!.length > 3))) {
+      throw new BadRequestException('A connecting direction must contain 2 or 3 flights.');
+    }
+    if (!outDirect && !outLegs && !retDirect && !retLegs) {
+      throw new BadRequestException('Select at least one complete direction to reschedule.');
+    }
+    if (booking.booking_type !== BookingType.ROUND_TRIP && (retDirect || retLegs)) {
+      throw new BadRequestException('Return direction is only applicable to round-trip bookings.');
+    }
+    if (booking.booking_type === BookingType.CONNECTING && !outLegs) {
+      throw new BadRequestException('A connecting booking requires a complete replacement connecting itinerary.');
+    }
+
     const passengerCount = booking.passengers?.length || 1;
     const user = booking.user_id ? await this.usersService.findById(booking.user_id.toString()) : null;
     const skyMiles = user?.sky_miles || 0;
     const oldTotal = booking.total_amount || 0;
 
+    // Historical RESCHEDULED/CANCELLED coupons must never affect a new quote.
+    const activeCoupons = (booking.ticket_coupons || []).filter(
+      (c: any) => String(c.coupon_status || 'ACTIVE').toUpperCase() === 'ACTIVE',
+    );
+    if (!activeCoupons.length) {
+      throw new BadRequestException('Booking has no active ticket coupons to reschedule.');
+    }
     const isInbound = (lt?: string) => {
       const n = this.bridge.normalizeLegType(lt);
       return n === 'INBOUND' || n.startsWith('INBOUND_');
@@ -337,7 +371,7 @@ export class BookingsQuoteService extends BookingsQuotePart {
       }
     } else if (booking.booking_type === BookingType.ROUND_TRIP && shouldRescheduleReturn) {
       // Outbound is NOT rescheduled: retain existing outbound coupons fare and seat fees!
-      const outboundCoupons = booking.ticket_coupons?.filter((c: any) => isOutbound(c.leg_type)) || [];
+      const outboundCoupons = activeCoupons.filter((c: any) => isOutbound(c.leg_type));
       for (const c of outboundCoupons) {
         newTotalFare += (c.fare_paid || 0);
         newTotalSeatFees += (c.seat_fee || 0);
@@ -429,22 +463,48 @@ export class BookingsQuoteService extends BookingsQuotePart {
       }
     } else if (booking.booking_type === BookingType.ROUND_TRIP && isReschedulingOutbound) {
       // Inbound is NOT rescheduled: retain existing inbound coupons fare and seat fees!
-      const inboundCoupons = booking.ticket_coupons?.filter((c: any) => isInbound(c.leg_type)) || [];
+      const inboundCoupons = activeCoupons.filter((c: any) => isInbound(c.leg_type));
       for (const c of inboundCoupons) {
         newTotalFare += (c.fare_paid || 0);
         newTotalSeatFees += (c.seat_fee || 0);
       }
     }
 
-    // Chronology check between outbound and return
-    if (outboundFlights.length > 0 && returnFlights.length > 0) {
-      const lastOutbound = outboundFlights[outboundFlights.length - 1];
-      const firstReturn = returnFlights[0];
-      if (lastOutbound.scheduled_arrival && new Date(firstReturn.scheduled_departure) <= new Date(lastOutbound.scheduled_arrival)) {
-        throw new BadRequestException('Return flight must depart after the outbound flight arrives.');
+    // Compare the full journey endpoints, not only the first flight of a connection.
+    const oldOutboundCoupons = activeCoupons.filter((c: any) => isOutbound(c.leg_type));
+    const oldReturnCoupons = activeCoupons.filter((c: any) => isInbound(c.leg_type));
+    const oldOutbound = await this.bridge.loadDistinctCouponFlights(
+      oldOutboundCoupons.length ? oldOutboundCoupons : activeCoupons,
+    );
+    const oldReturn = booking.booking_type === BookingType.ROUND_TRIP
+      ? await this.bridge.loadDistinctCouponFlights(oldReturnCoupons) : [];
+    const validateEndpoints = (replacement: FlightDocument[], old: FlightDocument[], direction: string) => {
+      if (!replacement.length) return;
+      if (!old.length || replacement[0].origin_iata !== old[0].origin_iata ||
+          replacement[replacement.length - 1].dest_iata !== old[old.length - 1].dest_iata) {
+        throw new BadRequestException(`Replacement ${direction} must retain the original departure and arrival airports.`);
+      }
+    };
+    validateEndpoints(outboundFlights, oldOutbound, 'outbound');
+    validateEndpoints(returnFlights, oldReturn, 'return');
+
+    // For partial round-trip changes validate against the retained direction too.
+    if (booking.booking_type === BookingType.ROUND_TRIP) {
+      const effectiveOutbound = outboundFlights.length ? outboundFlights : oldOutbound;
+      const effectiveReturn = returnFlights.length ? returnFlights : oldReturn;
+      if (!effectiveOutbound.length || !effectiveReturn.length ||
+          !effectiveOutbound[effectiveOutbound.length - 1].scheduled_arrival ||
+          new Date(effectiveReturn[0].scheduled_departure) <=
+            new Date(effectiveOutbound[effectiveOutbound.length - 1].scheduled_arrival)) {
+        throw new BadRequestException('Return flight must depart after the outbound itinerary arrives.');
       }
     }
 
+    validateRescheduleSeatRequests(
+      dto.seat_requests,
+      [...outboundFlights, ...returnFlights].map((f) => f._id.toString()),
+      passengerCount,
+    );
     if (this.seatAllocationService && dto.seat_requests && dto.seat_requests.length > 0) {
       const allFlights = [...outboundFlights, ...returnFlights];
       const allInventories = [...outboundInventories, ...returnInventories];

@@ -3,6 +3,7 @@ import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -15,15 +16,15 @@ import { AuthService } from '../core/auth.service';
 
     
     <div class="grid grid-4 stats">
-      <div class="card"><span>Đặt chỗ</span><strong>{{data?.total_bookings??'—'}}</strong><small>{{data?.status_breakdown?.confirmed||0}} đã xác nhận</small></div>
+      <div class="card"><span>Đặt chỗ</span><strong>{{data?.total_bookings??'—'}}</strong><small>{{data?.status_breakdown?.confirmed||0}} {{language.pick('đã xác nhận','confirmed')}}</small></div>
       <div class="card"><span>Doanh thu ròng</span><strong>{{money(data?.net_revenue_vnd||0)}}</strong><small>Dựa trên sổ giao dịch</small></div>
       <div class="card"><span>Giá trị đang hoạt động</span><strong>{{money(data?.active_booking_value_vnd||0)}}</strong><small>Đã xác nhận + đã đổi chuyến</small></div>
-      <div class="card"><span>Hệ số lấp đầy</span><strong>{{capacity?.overall_load_factor_percent??'—'}}{{capacity?'%':''}}</strong><small>{{capacity?.total_scheduled_flights||0}} chuyến bay theo lịch</small></div>
+      <div class="card"><span>Hệ số lấp đầy</span><strong>{{capacity?.overall_load_factor_percent??'—'}}{{capacity?'%':''}}</strong><small>{{capacity?.total_scheduled_flights||0}} {{language.pick('chuyến bay theo lịch','scheduled flights')}}</small></div>
     </div>
 
     <div class="dashboard-grid">
       <section class="card panel">
-        <div class="panel-head"><h2>Trạng thái đặt chỗ</h2><span>Tỷ lệ hủy {{data?.cancellation_rate_percent||0}}%</span></div>
+        <div class="panel-head"><h2>Trạng thái đặt chỗ</h2><span>{{language.pick('Tỷ lệ hủy','Cancellation rate')}} {{data?.cancellation_rate_percent||0}}%</span></div>
         <div class="status-grid">
           <div><span>Đã xác nhận</span><b>{{data?.status_breakdown?.confirmed||0}}</b></div>
           <div><span>Đang giữ chỗ</span><b>{{data?.status_breakdown?.blocked||0}}</b></div>
@@ -33,7 +34,7 @@ import { AuthService } from '../core/auth.service';
       </section>
 
       <section class="card panel">
-        <div class="panel-head"><h2>Cơ cấu hành khách</h2><span>Đặt trước {{data?.average_lead_time_days||0}} ngày</span></div>
+        <div class="panel-head"><h2>Cơ cấu hành khách</h2><span>{{language.pick('Đặt trước','Lead time')}} {{data?.average_lead_time_days||0}} {{language.pick('ngày','days')}}</span></div>
         <div class="status-grid">
           <div><span>Người lớn</span><b>{{data?.passenger_demographics?.adults||0}}</b></div>
           <div><span>Trẻ em</span><b>{{data?.passenger_demographics?.children||0}}</b></div>
@@ -66,12 +67,13 @@ export class DashboardComponent{
   private __toast=inject(ToastService);
   api=inject(ApiService);
   auth=inject(AuthService);
+  language=inject(LanguageService);
   router=inject(Router);
   data:any=null;capacity:any=null;private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   constructor(){if(!this.auth.admin()){this.router.navigate(['/admin/reservation-desk']);return}this.load()}
   load(){
     this.error='';
-    this.api.analytics().subscribe({next:r=>this.data=r,error:e=>this.error=this.msg(e,'Không tải được analytics.')});
+    this.api.analytics().subscribe({next:r=>this.data=r,error:e=>this.error=this.msg(e,this.language.pick('Không tải được dữ liệu phân tích.','Unable to load analytics.'))});
     this.api.analyticsCapacity().subscribe({next:r=>this.capacity=r,error:()=>{}})
   }
   money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}

@@ -83,7 +83,7 @@ export class ApiService{
  setUserStatus(id:string,is_active:boolean){return this.http.patch<any>(`${this.base}/users/${encodeURIComponent(id)}/status`,{is_active})}
  resetUserPassword(id:string,password:string){return this.http.post<any>(`${this.base}/users/${encodeURIComponent(id)}/reset-password`,{password})}
  mailTemplates(){return this.http.get<any[]>(`${this.base}/mail/templates`)}
- mailTemplatePreview(key:string){return this.http.get<{key:string;subject:string;html:string}>(`${this.base}/mail/templates/${encodeURIComponent(key)}/preview`)}
+ mailTemplatePreview(key:string){return this.http.get<{key:string;lang:string;subject:string;html:string}>(`${this.base}/mail/templates/${encodeURIComponent(key)}/preview`)}
  sendMailTemplateTest(key:string,to:string){return this.http.post<any>(`${this.base}/mail/templates/${encodeURIComponent(key)}/test`,{to})}
  setMailTemplateEnabled(key:string,enabled:boolean){return this.http.patch<any>(`${this.base}/mail/templates/${encodeURIComponent(key)}`,{enabled})}
  mailLogs(params:any={}){let p=new HttpParams();Object.entries(params).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')p=p.set(k,String(v))});return this.http.get<any>(`${this.base}/mail/logs`,{params:p})}

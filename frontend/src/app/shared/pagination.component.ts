@@ -1,5 +1,6 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   selector: 'app-pagination',
@@ -7,22 +8,22 @@ import { FormsModule } from '@angular/forms';
   imports: [FormsModule],
   template: `
     @if(total > 0){
-      <nav class="pager" aria-label="Phân trang">
-        <div class="summary">Hiển thị <b>{{from}}</b>–<b>{{to}}</b> / <b>{{total}}</b></div>
+      <nav class="pager" [attr.aria-label]="lang.pick('Phân trang', 'Pagination')">
+        <div class="summary">{{lang.pick('Hiển thị', 'Showing')}} <b>{{from}}</b>–<b>{{to}}</b> / <b>{{total}}</b></div>
         <div class="controls">
           <label>
-            <span>Mỗi trang</span>
+            <span>{{lang.pick('Mỗi trang', 'Per page')}}</span>
             <select class="page-size" [ngModel]="pageSize" (ngModelChange)="changeSize($event)">
               @for(size of pageSizeOptions; track size){<option [ngValue]="size">{{size}}</option>}
             </select>
           </label>
-          <button type="button" class="page-btn" (click)="go(1)" [disabled]="page<=1" aria-label="Trang đầu">«</button>
-          <button type="button" class="page-btn" (click)="go(page-1)" [disabled]="page<=1" aria-label="Trang trước">‹</button>
+          <button type="button" class="page-btn" (click)="go(1)" [disabled]="page<=1" [attr.aria-label]="lang.pick('Trang đầu', 'First page')">«</button>
+          <button type="button" class="page-btn" (click)="go(page-1)" [disabled]="page<=1" [attr.aria-label]="lang.pick('Trang trước', 'Previous page')">‹</button>
           @for(p of visiblePages; track p){
             <button type="button" class="page-btn number" [class.active]="p===page" (click)="go(p)">{{p}}</button>
           }
-          <button type="button" class="page-btn" (click)="go(page+1)" [disabled]="page>=totalPages" aria-label="Trang sau">›</button>
-          <button type="button" class="page-btn" (click)="go(totalPages)" [disabled]="page>=totalPages" aria-label="Trang cuối">»</button>
+          <button type="button" class="page-btn" (click)="go(page+1)" [disabled]="page>=totalPages" [attr.aria-label]="lang.pick('Trang sau', 'Next page')">›</button>
+          <button type="button" class="page-btn" (click)="go(totalPages)" [disabled]="page>=totalPages" [attr.aria-label]="lang.pick('Trang cuối', 'Last page')">»</button>
         </div>
       </nav>
     }
@@ -38,6 +39,7 @@ import { FormsModule } from '@angular/forms';
   `]
 })
 export class PaginationComponent {
+  readonly lang = inject(LanguageService);
   @Input() total = 0;
   @Input() page = 1;
   @Output() pageChange = new EventEmitter<number>();

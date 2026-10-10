@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { LanguageService } from '../core/language.service';
 import { AuthService } from '../core/auth.service';
 import { PaypalService } from '../core/paypal.service';
 
@@ -16,16 +17,16 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
   imports: [FormsModule, NgTemplateOutlet],
   template: `
   <div class="container page">
-    <div class="eyebrow">RESCHEDULE</div>
-    <h1 class="title">Đổi chuyến</h1>
-    <p class="subtitle">Tra cứu vé đã xác nhận, chọn chiều cần đổi và xem chính xác chênh lệch trước khi xác nhận.</p>
+    <div class="eyebrow">{{language.pick('ĐỔI CHUYẾN','RESCHEDULE')}}</div>
+    <h1 class="title">{{language.pick('Đổi chuyến','Reschedule')}}</h1>
+    <p class="subtitle">{{language.pick('Tra cứu vé đã xác nhận, chọn chiều cần đổi và xem chính xác chênh lệch trước khi xác nhận.','Look up your confirmed booking, choose the direction to change, and review the fare difference before confirming.')}}</p>
 
     <section class="card finder">
       <div class="field code-field">
-        <span>Confirmation / PNR</span>
+        <span>{{language.pick('Mã xác nhận / PNR','Confirmation / PNR')}}</span>
         <input class="control" [(ngModel)]="confirmation" (keyup.enter)="loadBooking(true)" placeholder="CNF-XXXXXX / PNR">
       </div>
-      <button class="btn btn-dark" (click)="loadBooking(true)" [disabled]="busy||!confirmation.trim()">{{busy?'Đang tra cứu…':'Tải đặt chỗ'}}</button>
+      <button class="btn btn-dark" (click)="loadBooking(true)" [disabled]="busy||!confirmation.trim()">{{busy?language.pick('Đang tra cứu…','Looking up…'):language.pick('Tải đặt chỗ','Load booking')}}</button>
     </section>
 
     
@@ -34,56 +35,53 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
       <section class="card booking-card">
         <div class="booking-head">
           <div>
-            <span class="pill pill-success">{{statusLabel(booking.status)}}</span>
-            <h2>{{booking.pnr_code||booking.confirmation_number}}</h2>
-            <p>{{bookingTypeLabel(booking.booking_type)}} · {{passengerTotal}} hành khách · {{cabinLabel}}</p>
+            <span class="pill pill-success" translate="no">{{statusLabel(booking.status)}}</span>
+            <h2 translate="no">{{booking.pnr_code||booking.confirmation_number}}</h2>
+            <p><span translate="no">{{bookingTypeLabel(booking.booking_type)}}</span> · {{passengerTotal}} {{language.pick('hành khách','passenger(s)')}} · <span translate="no">{{cabinLabel}}</span></p>
           </div>
           <div class="route-summary">
-            <span>Chiều đi</span><strong>{{outboundOrigin||'—'}} → {{outboundDestination||'—'}}</strong>
-            @if(isRoundTrip){<span>Chiều về</span><strong>{{returnOrigin||'—'}} → {{returnDestination||'—'}}</strong>}
+            <span>{{language.pick('Chiều đi','Outbound')}}</span><strong>{{outboundOrigin||'—'}} → {{outboundDestination||'—'}}</strong>
+            @if(isRoundTrip){<span>{{language.pick('Chiều về','Return')}}</span><strong>{{returnOrigin||'—'}} → {{returnDestination||'—'}}</strong>}
           </div>
         </div>
 
         @if(isRoundTrip){
           <div class="direction-picker">
-            <button type="button" [class.active]="direction==='OUTBOUND'" (click)="setDirection('OUTBOUND')">Đổi chiều đi</button>
-            <button type="button" [class.active]="direction==='RETURN'" [disabled]="!supportsReturnOnly" (click)="setDirection('RETURN')">Chỉ đổi chiều về</button>
-            <button type="button" [class.active]="direction==='BOTH'" (click)="setDirection('BOTH')">Đổi cả hai chiều</button>
+            <button type="button" [class.active]="direction==='OUTBOUND'" (click)="setDirection('OUTBOUND')">{{language.pick('Đổi chiều đi','Change outbound')}}</button>
+            <button type="button" [class.active]="direction==='RETURN'" [disabled]="!supportsReturnOnly" (click)="setDirection('RETURN')">{{language.pick('Chỉ đổi chiều về','Change return only')}}</button>
+            <button type="button" [class.active]="direction==='BOTH'" (click)="setDirection('BOTH')">{{language.pick('Đổi cả hai chiều','Change both directions')}}</button>
           </div>
-          @if(!supportsReturnOnly){
-            <p class="contract-note">Vé khứ hồi bay thẳng hiện hỗ trợ đổi chiều đi hoặc đổi cả hai chiều. Nếu một trong hai chiều là hành trình nối chuyến, bạn có thể đổi riêng chiều về.</p>
-          }
         }
       </section>
 
       <section class="card search-card">
         @if(needsOutbound){
           <div class="search-block">
-            <div class="block-title"><span class="step">1</span><div><b>Chuyến mới · chiều đi</b><small>{{outboundOrigin}} → {{outboundDestination}}</small></div></div>
+            <div class="block-title"><span class="step">1</span><div><b>{{language.pick('Chuyến mới · chiều đi','New flight · outbound')}}</b><small>{{outboundOrigin}} → {{outboundDestination}}</small></div></div>
             <div class="grid grid-3">
-              <div class="field"><span>Nơi đi · giữ nguyên</span><input class="control route-locked" [value]="outboundOrigin" readonly aria-readonly="true"></div>
-              <div class="field"><span>Nơi đến · giữ nguyên</span><input class="control route-locked" [value]="outboundDestination" readonly aria-readonly="true"></div>
-              <div class="field"><span>Ngày mới</span><input class="control" type="date" [(ngModel)]="outboundDate" [min]="minDate" [max]="maxDate"></div>
+              <div class="field"><span>{{language.pick('Nơi đi · giữ nguyên','Origin · unchanged')}}</span><input class="control route-locked" [value]="outboundOrigin" readonly aria-readonly="true"></div>
+              <div class="field"><span>{{language.pick('Nơi đến · giữ nguyên','Destination · unchanged')}}</span><input class="control route-locked" [value]="outboundDestination" readonly aria-readonly="true"></div>
+              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><input class="control" type="date" [(ngModel)]="outboundDate" [min]="minDate" [max]="maxDate"></div>
             </div>
-            <p class="route-note">Đổi vé chỉ cho phép đổi ngày/chuyến bay; tuyến {{outboundOrigin}} → {{outboundDestination}} được giữ nguyên theo vé gốc.</p>
+            <p class="route-note">{{language.pick('Chỉ có thể đổi ngày/chuyến bay; tuyến ban đầu được giữ nguyên.','You can change only the date or flight; the original route stays unchanged.')}} {{outboundOrigin}} → {{outboundDestination}}</p>
           </div>
         }
 
         @if(needsReturn){
           <div class="search-block" [class.with-divider]="needsOutbound">
-            <div class="block-title"><span class="step">{{needsOutbound?2:1}}</span><div><b>Chuyến mới · chiều về</b><small>{{returnOrigin}} → {{returnDestination}}</small></div></div>
+            <div class="block-title"><span class="step">{{needsOutbound?2:1}}</span><div><b>{{language.pick('Chuyến mới · chiều về','New flight · return')}}</b><small>{{returnOrigin}} → {{returnDestination}}</small></div></div>
             <div class="grid grid-3">
-              <div class="field"><span>Nơi đi · giữ nguyên</span><input class="control route-locked" [value]="returnOrigin" readonly aria-readonly="true"></div>
-              <div class="field"><span>Nơi đến · giữ nguyên</span><input class="control route-locked" [value]="returnDestination" readonly aria-readonly="true"></div>
-              <div class="field"><span>Ngày mới</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="minDate" [max]="maxDate"></div>
+              <div class="field"><span>{{language.pick('Nơi đi · giữ nguyên','Origin · unchanged')}}</span><input class="control route-locked" [value]="returnOrigin" readonly aria-readonly="true"></div>
+              <div class="field"><span>{{language.pick('Nơi đến · giữ nguyên','Destination · unchanged')}}</span><input class="control route-locked" [value]="returnDestination" readonly aria-readonly="true"></div>
+              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="minDate" [max]="maxDate"></div>
             </div>
-            <p class="route-note">Đổi vé chỉ cho phép đổi ngày/chuyến bay; tuyến {{returnOrigin}} → {{returnDestination}} được giữ nguyên theo vé gốc.</p>
+            <p class="route-note">{{language.pick('Chỉ có thể đổi ngày/chuyến bay; tuyến ban đầu được giữ nguyên.','You can change only the date or flight; the original route stays unchanged.')}} {{returnOrigin}} → {{returnDestination}}</p>
           </div>
         }
 
         <div class="search-actions">
-          <span class="muted">Tìm direct và hành trình nối chuyến trong cửa sổ đặt vé 330 ngày.</span>
-          <button class="btn btn-primary" (click)="search()" [disabled]="busy">{{busy?'Đang tìm…':'Tìm chuyến thay thế'}}</button>
+          <span class="muted">{{language.pick('Tìm chuyến thẳng và hành trình nối chuyến trong cửa sổ đặt vé 330 ngày.','Find direct and connecting routes within the 330-day booking window.')}}</span>
+          <button class="btn btn-primary" (click)="search()" [disabled]="busy">{{busy?language.pick('Đang tìm…','Searching…'):language.pick('Tìm chuyến thay thế','Find replacement flights')}}</button>
         </div>
       </section>
 
@@ -97,8 +95,8 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
       <ng-template #resultsSection let-kind>
         @if(hasResults(kind)){
           <div class="section-head result-head">
-            <div><div class="eyebrow">{{kind==='OUTBOUND'?'CHIỀU ĐI':'CHIỀU VỀ'}}</div><h2>Chọn chuyến thay thế</h2></div>
-            <span class="pill pill-gold">{{resultCount(kind)}} lựa chọn</span>
+            <div><div class="eyebrow">{{kind==='OUTBOUND'?language.pick('CHIỀU ĐI','OUTBOUND'):language.pick('CHIỀU VỀ','RETURN')}}</div><h2>{{language.pick('Chọn chuyến thay thế','Choose a replacement flight')}}</h2></div>
+            <span class="pill pill-gold">{{resultCount(kind)}} {{language.pick('lựa chọn','options')}}</span>
           </div>
         }
 
@@ -109,66 +107,66 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
               <b>{{f.flight_number}}</b>
               <span>{{f.origin_iata}} {{clock(f.scheduled_departure_local||f.scheduled_departure)}} → {{f.dest_iata}} {{clock(f.scheduled_arrival_local||f.scheduled_arrival)}}</span>
             </div>
-            <div><strong>{{money(f.total_party_price)}}</strong><small>Còn {{f.available_seats}} ghế</small></div>
-            <button class="btn btn-primary" (click)="selectDirect(kind,f)" [disabled]="busy">{{isSelected(kind,'DIRECT',f)?'Đã chọn':'Chọn'}}</button>
+            <div><strong>{{money(f.total_party_price)}}</strong><small>{{language.pick('Còn','Available:')}} {{f.available_seats}} {{language.pick('ghế','seats')}}</small></div>
+            <button class="btn btn-primary" (click)="selectDirect(kind,f)" [disabled]="busy">{{isSelected(kind,'DIRECT',f)?language.pick('Đã chọn','Selected'):language.pick('Chọn','Select')}}</button>
           </article>
         }
 
         @for(r of connectionsFor(kind);track routeKey(r,$index)){
           <article class="card connection" [class.chosen]="isSelected(kind,'CONNECTING',r)">
             <div class="connection-title">
-              <div><span class="pill pill-gold">{{r.legs?.length||2}} chặng</span><h3>{{r.legs?.[0]?.origin_iata}} → {{r.legs?.[r.legs.length-1]?.dest_iata}}</h3></div>
+              <div><span class="pill pill-gold">{{r.legs?.length||2}} {{language.pick('chặng','legs')}}</span><h3>{{r.legs?.[0]?.origin_iata}} → {{r.legs?.[r.legs.length-1]?.dest_iata}}</h3></div>
               <strong>{{duration(r.total_duration_minutes)}}</strong>
             </div>
             @for(l of r.legs;track l.flight_id){
               <div class="leg"><b>{{l.flight_number}}</b><span>{{l.origin_iata}} {{clock(l.scheduled_departure_local||l.scheduled_departure||l.departure)}}</span><span>→</span><span>{{l.dest_iata}} {{clock(l.scheduled_arrival_local||l.scheduled_arrival||l.arrival)}}</span></div>
             }
             <div class="connection-foot">
-              <span class="muted">Các chặng nối được đổi cùng một lần.</span>
-              <button class="btn btn-primary" (click)="selectConnection(kind,r)" [disabled]="busy">{{isSelected(kind,'CONNECTING',r)?'Đã chọn':'Chọn'}}</button>
+              <span class="muted">{{language.pick('Các chặng nối được đổi cùng một lần.','All connecting legs are changed together.')}}</span>
+              <button class="btn btn-primary" (click)="selectConnection(kind,r)" [disabled]="busy">{{isSelected(kind,'CONNECTING',r)?language.pick('Đã chọn','Selected'):language.pick('Chọn','Select')}}</button>
             </div>
           </article>
         }
 
         @if(wasSearched(kind)&&!hasResults(kind)){
-          <div class="card empty"><h2>Không có chuyến phù hợp cho {{kind==='OUTBOUND'?'chiều đi':'chiều về'}}</h2><p class="muted">Thử một ngày khác trong cửa sổ đặt vé.</p></div>
+          <div class="card empty"><h2 translate="no">{{kind==='OUTBOUND' ? language.pick('Không có chuyến phù hợp cho chiều đi', 'No suitable outbound flight') : language.pick('Không có chuyến phù hợp cho chiều về', 'No suitable return flight')}}</h2><p class="muted">{{language.pick('Thử một ngày khác trong cửa sổ đặt vé.','Try another date within the booking window.')}}</p></div>
         }
       </ng-template>
 
       @if(needsBothSelections&&!quote&&(selectedOutbound||selectedReturn)){
         <div class="card selection-progress">
-          <b>Đã chọn {{selectedOutbound?'chiều đi':''}}{{selectedOutbound&&selectedReturn?' và ':''}}{{selectedReturn?'chiều về':''}}.</b>
-          <span>Chọn đủ cả hai chiều để hệ thống lấy báo giá tổng.</span>
+          <b translate="no">{{language.pick('Đã chọn ' + (selectedOutbound?'chiều đi':'') + (selectedOutbound&&selectedReturn?' và ':'') + (selectedReturn?'chiều về':'') + '.', (selectedOutbound&&selectedReturn ? 'Outbound and return selected.' : selectedOutbound ? 'Outbound selected.' : 'Return selected.'))}}</b>
+          <span>{{language.pick('Chọn đủ cả hai chiều để hệ thống lấy báo giá tổng.','Select both directions to calculate the total fare quote.')}}</span>
         </div>
       }
 
       @if(quote){
         <section class="card quote">
           <div>
-            <div class="eyebrow">BÁO GIÁ ĐỔI VÉ</div>
-            <h2>{{selectedTitle}}</h2>
+            <div class="eyebrow">{{language.pick('BÁO GIÁ ĐỔI VÉ','RESCHEDULE QUOTE')}}</div>
+            <h2 translate="no">{{selectedTitle}}</h2>
           </div>
           <div class="price-grid">
-            <div><span>Booking hiện tại</span><strong>{{money(quote.old_total)}}</strong></div>
-            <div><span>Hành trình mới</span><strong>{{money(quote.new_total)}}</strong></div>
-            <div class="difference" [class.refund]="priceDifference<0"><span>Chênh lệch</span><strong>{{signedMoney(priceDifference)}}</strong></div>
+            <div><span>{{language.pick('Đặt chỗ hiện tại','Current booking')}}</span><strong>{{money(quote.old_total)}}</strong></div>
+            <div><span>{{language.pick('Hành trình mới','New itinerary')}}</span><strong>{{money(quote.new_total)}}</strong></div>
+            <div class="difference" [class.refund]="priceDifference<0"><span>{{language.pick('Chênh lệch','Fare difference')}}</span><strong>{{signedMoney(priceDifference)}}</strong></div>
           </div>
           @if(priceDifference>0){
             @if(auth.staff()){
-              <p class="refund-note"><strong>Giao dịch tại quầy.</strong> Nhân viên xử lý phần chênh lệch theo luồng hỗ trợ hiện có.</p>
+              <p class="refund-note"><strong>{{language.pick('Giao dịch tại quầy.','Staff-assisted booking.')}}</strong> {{language.pick('Khách cần tự đổi chuyến và thanh toán chênh lệch qua PayPal.','The customer must reschedule and pay the difference directly through PayPal.')}}</p>
             }@else{
               <div class="payment">
-                <label [class.disabled]="!paypalEnabled"><input type="radio" name="reschedulePayment" value="PAYPAL" [(ngModel)]="payment" [disabled]="!paypalEnabled"> <span><b>PayPal Checkout</b><small>{{paypalEnabled?'Thanh toán phần chênh lệch qua PayPal':'PayPal chưa được bật'}}</small></span></label>
+                <label [class.disabled]="!paypalEnabled"><input type="radio" name="reschedulePayment" value="PAYPAL" [(ngModel)]="payment" [disabled]="!paypalEnabled"> <span><b>PayPal Checkout</b><small>{{paypalEnabled?language.pick('Thanh toán phần chênh lệch qua PayPal','Pay the fare difference with PayPal'):language.pick('PayPal chưa được bật','PayPal is unavailable')}}</small></span></label>
               </div>
             }
           }@else if(priceDifference<0){
-            <p class="refund-note"><strong>Hành trình mới rẻ hơn.</strong> Phần chênh lệch được hoàn về nguồn thanh toán gốc của booking; không cần nhập tài khoản hay thẻ mới tại đây.</p>
+            <p class="refund-note"><strong>{{language.pick('Hành trình mới rẻ hơn.','The new itinerary costs less.')}}</strong> {{language.pick('Phần chênh lệch sẽ được yêu cầu hoàn về nguồn thanh toán PayPal gốc và có thể cần thời gian xử lý.','The fare difference will be requested as a refund to the original PayPal payment. Processing may take time.')}}</p>
           }@else{
-            <p class="refund-note">Không có chênh lệch giá, không cần thanh toán thêm.</p>
+            <p class="refund-note">{{language.pick('Không có chênh lệch giá, không cần thanh toán thêm.','No fare difference. No additional payment is required.')}}</p>
           }
           <div class="quote-actions">
-            <button class="btn btn-outline" (click)="clearSelections()">Chọn lại</button>
-            <button class="btn btn-primary" (click)="confirmReschedule()" [disabled]="busy">{{busy?'Đang xử lý…':'Xác nhận đổi chuyến'}}</button>
+            <button class="btn btn-outline" (click)="clearSelections()">{{language.pick('Chọn lại','Choose again')}}</button>
+            <button class="btn btn-primary" (click)="confirmReschedule()" [disabled]="busy">{{busy?language.pick('Đang xử lý…','Processing…'):language.pick('Xác nhận đổi chuyến','Confirm reschedule')}}</button>
           </div>
         </section>
       }
@@ -183,6 +181,7 @@ export class RescheduleComponent {
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   api = inject(ApiService);
+  readonly language = inject(LanguageService);
   auth = inject(AuthService);
   paypal = inject(PaypalService);
   router = inject(Router);
@@ -210,7 +209,7 @@ export class RescheduleComponent {
   payment = 'PAYPAL';
   paypalEnabled = false;
   busy = false;
-  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
+  private __error='';get error(){return this.__error}set error(v:string){this.__error=v;if(v) this.__toast.notifyError(v)};
 
   constructor() {
     this.confirmation = this.route.snapshot.queryParamMap.get('code') || '';
@@ -223,20 +222,25 @@ export class RescheduleComponent {
   }
 
   get isRoundTrip() { return this.booking?.booking_type === 'ROUND_TRIP'; }
+  // The backend requires a complete connecting itinerary when replacing a CONNECTING booking.
+  get requiresConnectingReplacement() { return this.booking?.booking_type === 'CONNECTING'; }
   get passengerTotal() { return this.booking?.passengers?.length || 1; }
   get cabin() { return this.booking?.ticket_coupons?.[0]?.cabin_class || 'ECONOMY'; }
-  get cabinLabel() { return ({ ECONOMY: 'Phổ thông', CLUB: 'Club', BUSINESS: 'Thương gia', FIRST: 'Hạng nhất' } as any)[this.cabin] || this.cabin; }
+  get cabinLabel() { return this.language.cabinLabel(this.cabin); }
   get needsOutbound() { return !this.isRoundTrip || this.direction === 'OUTBOUND' || this.direction === 'BOTH'; }
   get needsReturn() { return this.isRoundTrip && (this.direction === 'RETURN' || this.direction === 'BOTH'); }
   get needsBothSelections() { return this.direction === 'BOTH'; }
   get priceDifference() { return Number(this.quote?.price_difference || 0); }
-  get supportsReturnOnly() { return this.isRoundTrip && (this.outboundIsConnecting || this.returnIsConnecting); }
+  get supportsReturnOnly() { return this.isRoundTrip; }
   get selectedTitle() {
-    if (this.direction === 'BOTH') return 'Đổi cả chiều đi và chiều về';
-    return this.direction === 'RETURN' ? 'Đổi chiều về' : 'Đổi chiều đi';
+    return this.direction === 'BOTH'
+      ? this.language.pick('Đổi cả chiều đi và chiều về', 'Reschedule outbound and return')
+      : this.direction === 'RETURN'
+        ? this.language.pick('Đổi chiều về', 'Reschedule return')
+        : this.language.pick('Đổi chiều đi', 'Reschedule outbound');
   }
-  bookingTypeLabel(value: string) { return ({ ONE_WAY: 'Một chiều', ROUND_TRIP: 'Khứ hồi', CONNECTING: 'Nối chuyến' } as any)[value] || value; }
-  statusLabel(value: string) { return ({ BLOCKED: 'Đang giữ chỗ', CONFIRMED: 'Đã xác nhận', RESCHEDULED: 'Đã đổi chuyến', CANCELLED: 'Đã hủy' } as any)[value] || value; }
+  bookingTypeLabel(value: string) { return this.language.bookingTypeLabel(value); }
+  statusLabel(value: string) { return this.language.bookingStatusLabel(value); }
 
   get coupons() { return this.tracked?.flight_coupons || this.booking?.ticket_coupons || []; }
   get outboundCoupons() { return this.coupons.filter((c: any) => this.isOutboundLeg(c.leg_type)); }
@@ -245,13 +249,13 @@ export class RescheduleComponent {
   get returnIsConnecting() { return this.directionIsConnecting(this.returnCoupons, 'RETURN'); }
 
   async loadBooking(showError = true) {
-    if (!this.confirmation.trim()) { if (showError) this.error = 'Nhập confirmation number hoặc PNR trước.'; return false; }
+    if (!this.confirmation.trim()) { if (showError) this.error = this.language.pick('Vui lòng nhập mã xác nhận hoặc PNR.', 'Enter a confirmation number or PNR.'); return false; }
     this.busy = true;
     this.error = '';
     try {
       const tracked = await firstValueFrom(this.api.track(this.confirmation.trim()));
       const booking = tracked?.booking_info || tracked;
-      if (booking?.status !== 'CONFIRMED') throw new Error('Chỉ booking đang ở trạng thái CONFIRMED mới được đổi chuyến.');
+      if (booking?.status !== 'CONFIRMED') throw new Error(this.language.pick('Chỉ đặt chỗ đã xác nhận mới được đổi chuyến.', 'Only confirmed bookings can be rescheduled.'));
       this.tracked = tracked;
       this.booking = booking;
       this.populateRoutesFromBooking();
@@ -261,7 +265,7 @@ export class RescheduleComponent {
     } catch (e: any) {
       this.booking = null;
       this.tracked = null;
-      if (showError) this.error = this.msg(e, 'Không tra cứu được booking.');
+      if (showError) this.error = this.msg(e, this.language.pick('Không tra cứu được đặt chỗ.', 'Unable to find this booking.'));
       return false;
     } finally {
       this.busy = false;
@@ -284,9 +288,9 @@ export class RescheduleComponent {
     this.outboundSearched = false;
     this.returnSearched = false;
     if (!this.booking) { const ok = await this.loadBooking(true); if (!ok) return; }
-    if (this.needsOutbound && (!this.outboundOrigin.trim() || !this.outboundDestination.trim() || !this.outboundDate)) { this.error = 'Nhập đủ tuyến và ngày mới cho chiều đi.'; return; }
-    if (this.needsReturn && (!this.returnOrigin.trim() || !this.returnDestination.trim() || !this.returnDate)) { this.error = 'Nhập đủ tuyến và ngày mới cho chiều về.'; return; }
-    if (this.needsOutbound && this.needsReturn && this.returnDate < this.outboundDate) { this.error = 'Ngày về mới phải bằng hoặc sau ngày đi mới.'; return; }
+    if (this.needsOutbound && (!this.outboundOrigin.trim() || !this.outboundDestination.trim() || !this.outboundDate)) { this.error = this.language.pick('Nhập đủ tuyến và ngày mới cho chiều đi.', 'Enter the outbound route and new date.'); return; }
+    if (this.needsReturn && (!this.returnOrigin.trim() || !this.returnDestination.trim() || !this.returnDate)) { this.error = this.language.pick('Nhập đủ tuyến và ngày mới cho chiều về.', 'Enter the return route and new date.'); return; }
+    if (this.needsOutbound && this.needsReturn && this.returnDate < this.outboundDate) { this.error = this.language.pick('Ngày về mới phải bằng hoặc sau ngày đi mới.', 'The new return date must be on or after the outbound date.'); return; }
 
     this.busy = true;
     try {
@@ -294,8 +298,17 @@ export class RescheduleComponent {
       if (this.needsOutbound) jobs.push(this.searchDirection('OUTBOUND'));
       if (this.needsReturn) jobs.push(this.searchDirection('RETURN'));
       await Promise.all(jobs);
+      if ((this.needsOutbound && !this.hasResults('OUTBOUND')) ||
+          (this.needsReturn && !this.hasResults('RETURN'))) {
+        this.__toast.error({
+          titleVi: 'Không có chuyến thay thế',
+          titleEn: 'No replacement flights available',
+          messageVi: 'Hiện tại không có chuyến nào hợp lệ để đổi. Vui lòng chọn ngày khác.',
+          messageEn: 'No eligible replacement flights are available. Please choose another date.',
+        });
+      }
     } catch (e: any) {
-      this.error = this.msg(e, 'Không tìm được chuyến thay thế.');
+      this.error = this.msg(e, this.language.pick('Không tìm được chuyến thay thế.', 'Unable to find replacement flights.'));
     } finally {
       this.busy = false;
     }
@@ -318,10 +331,11 @@ export class RescheduleComponent {
   }
 
   selectDirect(kind: DirectionKey, f: any) {
+    if (kind === 'OUTBOUND' && this.requiresConnectingReplacement) return;
     const inv = this.inventory(f);
     const flightId = f.flight_id || f._id;
     const inventoryId = f.inventory_id || inv?._id || inv?.id;
-    if (!flightId || !inventoryId) { this.error = 'Chuyến này thiếu inventory phù hợp.'; return; }
+    if (!flightId || !inventoryId) { this.error = this.language.pick('Chuyến bay này chưa có thông tin hạng vé phù hợp.', 'Fare-class details are unavailable for this flight.'); return; }
     const selected = { kind: 'DIRECT', source: f, flightId, inventoryId };
     if (kind === 'OUTBOUND') this.selectedOutbound = selected; else this.selectedReturn = selected;
     this.quoteWhenReady();
@@ -336,7 +350,7 @@ export class RescheduleComponent {
         leg_type: kind === 'RETURN' ? `INBOUND_${i + 1}` : `CONNECTING_${i + 1}`,
       };
     });
-    if (!legs.length || legs.some((l: any) => !l.flight_id || !l.inventory_id)) { this.error = 'Hành trình nối chuyến thiếu inventory phù hợp.'; return; }
+    if (!legs.length || legs.some((l: any) => !l.flight_id || !l.inventory_id)) { this.error = this.language.pick('Hành trình nối chuyến chưa có thông tin hạng vé phù hợp.', 'Fare-class details are unavailable for this connecting itinerary.'); return; }
     const selected = { kind: 'CONNECTING', source: r, legs };
     if (kind === 'OUTBOUND') this.selectedOutbound = selected; else this.selectedReturn = selected;
     this.quoteWhenReady();
@@ -356,7 +370,7 @@ export class RescheduleComponent {
     this.error = '';
     this.quote = null;
     try { this.quote = await firstValueFrom(this.api.quoteReschedule(payload)); }
-    catch (e: any) { this.error = this.msg(e, 'Không lấy được báo giá đổi chuyến.'); }
+    catch (e: any) { this.error = this.msg(e, this.language.pick('Không lấy được báo giá đổi chuyến.', 'Unable to retrieve the reschedule quote.')); }
     finally { this.busy = false; }
   }
 
@@ -367,7 +381,7 @@ export class RescheduleComponent {
     this.error = '';
     try {
       if (this.priceDifference > 0 && !this.auth.staff()) {
-        if (!this.paypalEnabled) throw new Error('PayPal chưa được bật cho môi trường hiện tại.');
+        if (!this.paypalEnabled) throw new Error(this.language.pick('PayPal chưa được bật cho môi trường hiện tại.', 'PayPal is not enabled in this environment.'));
         let checkout = '';
         await this.paypal.pay(
           async () => {
@@ -378,13 +392,13 @@ export class RescheduleComponent {
           async orderId => { await firstValueFrom(this.api.paypalRescheduleCapture(checkout, orderId)); }
         );
       } else if (this.priceDifference > 0 && this.auth.staff()) {
-        await firstValueFrom(this.api.reschedule({ ...payload, payment_method: 'PROFILE_CARD' }));
+        throw new Error(this.language.pick('Không thể thu chênh lệch bằng thẻ lưu tại quầy. Khách cần tự đổi chuyến và thanh toán PayPal.','Staff cannot charge a saved card for a fare difference. The customer must reschedule and pay with PayPal.'));
       } else {
         await firstValueFrom(this.api.reschedule(payload));
       }
       this.router.navigate(['/trips']);
     } catch (e: any) {
-      this.error = this.msg(e, 'Không đổi được chuyến.');
+      this.error = this.msg(e, this.language.pick('Không đổi được chuyến.', 'Unable to reschedule this booking.'));
     } finally {
       this.busy = false;
     }
@@ -438,7 +452,10 @@ export class RescheduleComponent {
     this.quote = null;
   }
 
-  directFor(kind: DirectionKey) { return (kind === 'OUTBOUND' ? this.outboundData : this.returnData)?.onward_flights || []; }
+  directFor(kind: DirectionKey) {
+    if (kind === 'OUTBOUND' && this.requiresConnectingReplacement) return [];
+    return (kind === 'OUTBOUND' ? this.outboundData : this.returnData)?.onward_flights || [];
+  }
   connectionsFor(kind: DirectionKey) { return (kind === 'OUTBOUND' ? this.outboundData : this.returnData)?.connecting_routes || []; }
   hasResults(kind: DirectionKey) { return this.resultCount(kind) > 0; }
   resultCount(kind: DirectionKey) { return this.directFor(kind).length + this.connectionsFor(kind).length; }
@@ -461,7 +478,7 @@ export class RescheduleComponent {
   }
   clock(v: string) { const m = (v || '').match(/(?:T|\s)(\d{2}:\d{2})/); return m?.[1] || '--:--'; }
   duration(v: number) { v = Number(v || 0); return `${Math.floor(v / 60)}h ${v % 60}m`; }
-  money(v: number) { return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(v || 0); }
+  money(v: number) { return new Intl.NumberFormat(this.language.isEnglish() ? 'en-US' : 'vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(v || 0); }
   signedMoney(v: number) { return `${v > 0 ? '+' : ''}${this.money(v)}`; }
   localDate(date: Date) { const y=date.getFullYear();const m=String(date.getMonth()+1).padStart(2,'0');const d=String(date.getDate()).padStart(2,'0');return `${y}-${m}-${d}`; }
   msg(e: any, f: string) { const m = e?.error?.message; return Array.isArray(m) ? m.join(' · ') : m || e?.message || f; }

@@ -15,7 +15,7 @@ import {
   SagaOperationType,
   SagaState,
 } from '../seat-allocation/booking-seat-saga-operation.schema';
-import { allocateRefundSources, AllocatedRefundItem } from './refund-allocation.util';
+import { allocateRefundSources, AllocatedRefundItem, assertPayPalRefundAllocations } from './refund-allocation.util';
 import {
   BookingsRescheduleBridge,
   BookingsRescheduleDependencies,
@@ -40,7 +40,14 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
     const passengerCount = booking.passengers.length;
     const oldTotalFare = booking.total_amount;
     const newLegs = dto.new_legs!;
-    const oldCoupons = booking.ticket_coupons.map((coupon: any) => ({ ...coupon }));
+    // Historical RESCHEDULED/CANCELLED coupons must never be restored a second
+    // time or used as the original route when rescheduling again.
+    const oldCoupons = booking.ticket_coupons
+      .filter((coupon: any) => String(coupon.coupon_status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+      .map((coupon: any) => ({ ...coupon }));
+    if (oldCoupons.length === 0) {
+      throw new BadRequestException('Booking has no active ticket coupons to reschedule.');
+    }
     const refundAllocations: AllocatedRefundItem[] = [];
 
     // 1. Load and validate all new flights
@@ -142,6 +149,10 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
         await sagaOp.save().catch(() => {});
       }
 
+      // Include an uncertain in-flight reservation in Saga compensation.
+      // The marker makes compensation safe even if the reservation never applied.
+      if (this.sagaModel) reservedLegs.push({ ...legDef, mutation_key: mutKey });
+
       try {
         reserved = this.sagaModel
           ? await this.flightsService.reserveSeats(
@@ -231,7 +242,8 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
           `Not enough available seats on flight ${f.flight_number}. Reschedule cancelled and no seats were modified.`,
         );
       }
-      reservedLegs.push({ ...legDef, mutation_key: mutKey });
+      // A non-Saga reservation must have succeeded before it can be released.
+      if (!this.sagaModel) reservedLegs.push({ ...legDef, mutation_key: mutKey });
     }
 
     // 4. Mutating Phase with compensating rollback
@@ -390,17 +402,13 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
             created_at: new Date(),
           });
         } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, true);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_CHARGE',
-            payment_method: resCard.paymentMethod,
-            payment_reference: this.bridge.generateCode('PAY'),
-            amount: priceDiff,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
+          if (!dto.payment_method) {
+            throw new BadRequestException('Payment method is required for reschedule fare difference.');
+          }
+          if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
+            throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
+          }
+          throw new BadRequestException('A PayPal payment is required for the reschedule fare difference.');
         }
       } else if (priceDiff < 0) {
         const refundAmt = Math.abs(priceDiff);
@@ -410,23 +418,18 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
           'RESCHEDULE_REFUND',
           (p) => this.bridge.generateCode(p),
         );
-        if (allocations.length > 0) {
-          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
-          for (const alloc of allocations) {
-            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
-              const rawMasked = (alloc.card_masked || '').trim();
-              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
-                const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
-                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
-              }
-            }
+        assertPayPalRefundAllocations(allocations, refundAmt);
+        if (!this.paypalService?.isPayPalActive()) {
+          throw new BadRequestException('PayPal refunds are unavailable. Please contact support before rescheduling.');
+        }
+        for (const alloc of allocations) {
             refundAllocations.push(alloc);
             booking.payment_transactions.push({
               transaction_type: alloc.transaction_type,
               payment_reference: alloc.payment_reference,
               source_payment_reference: alloc.source_payment_reference,
               payment_method: alloc.payment_method,
+              payment_provider: 'PAYPAL',
               amount: alloc.amount,
               currency: alloc.currency,
               card_masked: alloc.card_masked,
@@ -436,21 +439,9 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
               provider_currency: alloc.provider_currency,
               exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
               status: alloc.status,
+              next_retry_at: alloc.status === 'PENDING' ? new Date() : undefined,
               created_at: new Date(),
             });
-          }
-        } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_REFUND',
-            payment_method: resCard.paymentMethod,
-            payment_reference: this.bridge.generateCode('REF'),
-            amount: refundAmt,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
         }
       }
 
@@ -582,14 +573,18 @@ export class BookingsRescheduleConnectingService extends BookingsReschedulePart 
       }
 
       if (this.paypalService && refundAllocations.length > 0) {
-        await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        try {
+          await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        } catch (refundError) {
+          this.logger.error(`Post-commit refund dispatch failed for ${booking.pnr_code}: ${refundError}`);
+        }
       }
 
       const diffMsg =
         priceDiff > 0
           ? ` Thu thêm: ${priceDiff.toLocaleString()} VND.`
           : priceDiff < 0
-          ? ` Hoàn lại: ${Math.abs(priceDiff).toLocaleString()} VND.`
+          ? ` Đã yêu cầu hoàn qua PayPal: ${Math.abs(priceDiff).toLocaleString()} VND. Vui lòng theo dõi trạng thái hoàn tiền.`
           : ' Không phát sinh chênh lệch giá.';
 
       return {

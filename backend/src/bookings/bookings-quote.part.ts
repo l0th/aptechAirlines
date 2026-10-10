@@ -15,6 +15,7 @@ export interface BookingsQuoteDependencies {
 }
 
 export interface BookingsQuoteBridge {
+  loadDistinctCouponFlights(coupons: any[]): Promise<FlightDocument[]>;
   normalizeLegType(legType?: string): string;
   assertBookableFlight(flight: FlightDocument, context?: string): void;
   validateBookingWindow(flightOrFlights: FlightDocument | FlightDocument[], directionName?: string): void;

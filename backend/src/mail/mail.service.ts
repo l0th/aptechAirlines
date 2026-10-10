@@ -4,6 +4,8 @@ import { Model } from 'mongoose';
 import * as nodemailer from 'nodemailer';
 import { EmailLog, EmailLogDocument, EmailLogStatus, EmailSetting, EmailSettingDocument } from './email-log.schema';
 import {
+  BlockedReminderEmailData,
+  HoldCreatedEmailData,
   CancellationEmailData,
   ExpiredHoldEmailData,
   FlightDisruptionEmailData,
@@ -11,6 +13,9 @@ import {
   PasswordResetEmailData,
   RenderedEmail,
   UpcomingTripEmailData,
+  blockedReminderSubject,
+  renderBlockedTicketReminder,
+  renderHoldCreatedEmail,
   renderCancellationEmail,
   renderExpiredHoldCancellationEmail,
   renderFlightDisruptionEmail,
@@ -18,10 +23,13 @@ import {
   renderPasswordResetCode,
   renderUpcomingTripReminder,
 } from './mail-renderers';
+import { DEFAULT_MAIL_LANG, MailLang, isMailLang, normalizeMailLang, renderBilingualMail } from './mail-i18n';
 import { MailTemplateKey } from './mail-templates';
+import { User, UserDocument } from '../users/users.schema';
 
 // Re-export renderer types/helpers so existing imports from './mail.service' keep working.
 export * from './mail-renderers';
+export { normalizeMailLang } from './mail-i18n';
 
 export interface SendMailMeta {
   templateKey?: MailTemplateKey;
@@ -39,8 +47,8 @@ export interface SendMailMeta {
  *
  * If SMTP_HOST is not set, the service falls back to DEV mode:
  * email content is logged to the console with a [MAIL:DEV-FALLBACK]
- * prefix and the send resolves successfully so the app stays runnable
- * for demos without a real SMTP server.
+ * prefix for local development. No real delivery has taken place, so
+ * sendMail returns false and the log is marked DEV_FALLBACK.
  */
 @Injectable()
 export class MailService {
@@ -50,6 +58,7 @@ export class MailService {
   constructor(
     @Optional() @InjectModel(EmailLog.name) private readonly logModel?: Model<EmailLogDocument>,
     @Optional() @InjectModel(EmailSetting.name) private readonly settingModel?: Model<EmailSettingDocument>,
+    @Optional() @InjectModel(User.name) private readonly userModel?: Model<UserDocument>,
   ) {
     const host = process.env.SMTP_HOST;
     if (host) {
@@ -74,7 +83,7 @@ export class MailService {
   /**
    * Generic mail sender with bounded retry (up to 3 attempts).
    * Falls back to console logging when no SMTP host is configured.
-   * Never throws, returns true on success, false on permanent failure.
+   * Never throws; true means submitted via SMTP, not just previewed locally.
    */
   async sendMail(to: string, subject: string, html: string, meta: SendMailMeta = {}): Promise<boolean> {
     const from = process.env.MAIL_FROM || 'Airline Reservation System <no-reply@airline.local>';
@@ -88,7 +97,8 @@ export class MailService {
       this.logger.log(`[MAIL:DEV-FALLBACK] Body:\n${html}`);
       this.logger.log(`[MAIL:DEV-FALLBACK] --------------------------------------------------`);
       await this.recordLog(to, subject, 'DEV_FALLBACK', meta);
-      return true;
+      this.logger.warn(`[MAIL:DEV-FALLBACK] Email to ${to} was NOT delivered because SMTP_HOST is missing.`);
+      return false;
     }
 
     const maxAttempts = 3;
@@ -153,48 +163,120 @@ export class MailService {
   }
 
   /**
+   * Language of an email: an explicit `lang` wins; otherwise the recipient
+   * account's `preferred_language` (set from the website language switch);
+   * otherwise Vietnamese.
+   */
+  async resolveLanguage(to: string, explicit?: unknown): Promise<MailLang> {
+    if (isMailLang(explicit)) return explicit;
+    if (!this.userModel || !to) return DEFAULT_MAIL_LANG;
+    try {
+      const user = await this.userModel
+        .findOne({ email: String(to).trim().toLowerCase() })
+        .select('preferred_language')
+        .lean()
+        .exec();
+      return normalizeMailLang((user as any)?.preferred_language);
+    } catch {
+      return DEFAULT_MAIL_LANG;
+    }
+  }
+
+  /**
    * Send a rendered template honouring the per-template enable toggle.
    * A disabled template is skipped and reported as handled (true) so batch
    * jobs do not retry it every hour.
+   * Render both languages for template functions, Vietnamese first.
+   * Direct pre-rendered HTML is retained for legacy callers.
    */
   async sendTemplate(
     key: MailTemplateKey,
     to: string,
-    rendered: RenderedEmail,
+    rendered: RenderedEmail | ((lang: MailLang) => RenderedEmail),
     bookingReference?: string,
+    lang?: MailLang,
   ): Promise<boolean> {
     if (!(await this.isTemplateEnabled(key))) {
       this.logger.warn(`Email template ${key} is disabled; skipping email to ${to}`);
       return true;
     }
-    return this.sendMail(to, rendered.subject, rendered.html, { templateKey: key, bookingReference });
+    const email = typeof rendered === 'function' ? renderBilingualMail(rendered) : rendered;
+    return this.sendMail(to, email.subject, email.html, { templateKey: key, bookingReference });
   }
 
   /**
    * Requirement 3.4.2.1: Reminder email sent 3 weeks before departure
-   * for a ticket the user chose to block now. Body is pre-rendered by the
-   * scheduler via renderBlockedTicketReminder().
+   * for a ticket the user chose to block now. Both languages appear in each email.
+   */
+  async sendBlockedTicketReminderEmail(data: BlockedReminderEmailData): Promise<boolean> {
+    return this.sendTemplate(
+      'BLOCKED_REMINDER',
+      data.toEmail,
+      (lang) => renderBlockedTicketReminder({ ...data, lang }),
+      data.bookingReference,
+      data.lang,
+    );
+  }
+
+  async sendHoldCreatedEmail(data: HoldCreatedEmailData): Promise<boolean> {
+    // A deliberately disabled hold template is not a delivered email. Keep the
+    // booking's durable delivery state eligible for investigation/retry.
+    if (!(await this.isTemplateEnabled('HOLD_CREATED'))) {
+      this.logger.warn('HOLD_CREATED email is disabled; no email was delivered.');
+      return false;
+    }
+    return this.sendTemplate(
+      'HOLD_CREATED',
+      data.toEmail,
+      (lang) => renderHoldCreatedEmail({ ...data, lang }),
+      data.bookingReference,
+    );
+  }
+
+  /**
+   * Legacy variant kept for scripts: body is already rendered by the caller.
    */
   async sendBlockedTicketReminder(toEmail: string, reminderBody: string, bookingReference?: string): Promise<boolean> {
     return this.sendTemplate(
       'BLOCKED_REMINDER',
       toEmail,
-      { subject: 'Reminder: Your blocked ticket is awaiting confirmation', html: reminderBody },
+      {
+        subject: `${blockedReminderSubject('vi', bookingReference)} | ${blockedReminderSubject('en', bookingReference)}`,
+        html: reminderBody,
+      },
       bookingReference,
     );
   }
 
   async sendPasswordResetCode(data: PasswordResetEmailData): Promise<boolean> {
-    return this.sendTemplate('PASSWORD_RESET', data.toEmail, renderPasswordResetCode(data));
+    return this.sendTemplate(
+      'PASSWORD_RESET',
+      data.toEmail,
+      (lang) => renderPasswordResetCode({ ...data, lang }),
+      undefined,
+      data.lang,
+    );
   }
 
   async sendUpcomingTripReminder(data: UpcomingTripEmailData): Promise<boolean> {
-    return this.sendTemplate('UPCOMING_TRIP', data.toEmail, renderUpcomingTripReminder(data), data.bookingReference);
+    return this.sendTemplate(
+      'UPCOMING_TRIP',
+      data.toEmail,
+      (lang) => renderUpcomingTripReminder({ ...data, lang }),
+      data.bookingReference,
+      data.lang,
+    );
   }
 
   /** Cancellation notice email (Manual Blocked, Manual Confirmed, or Emergency Flight Cancellation). */
   async sendCancellationEmail(data: CancellationEmailData): Promise<boolean> {
-    return this.sendTemplate('CANCELLATION', data.toEmail, renderCancellationEmail(data), data.bookingReference);
+    return this.sendTemplate(
+      'CANCELLATION',
+      data.toEmail,
+      (lang) => renderCancellationEmail({ ...data, lang }),
+      data.bookingReference,
+      data.lang,
+    );
   }
 
   /** Customer cancelled their own unpaid HOLD/BLOCKED booking. */
@@ -202,18 +284,31 @@ export class MailService {
     return this.sendTemplate(
       'HOLD_CANCELLED_BY_CUSTOMER',
       data.toEmail,
-      renderHoldCancelledByCustomer(data),
+      (lang) => renderHoldCancelledByCustomer({ ...data, lang }),
       data.bookingReference,
+      data.lang,
     );
   }
 
   /** Expired hold cancellation notification. */
   async sendExpiredHoldCancellationEmail(data: ExpiredHoldEmailData): Promise<boolean> {
-    return this.sendTemplate('EXPIRED_HOLD', data.toEmail, renderExpiredHoldCancellationEmail(data), data.bookingReference);
+    return this.sendTemplate(
+      'EXPIRED_HOLD',
+      data.toEmail,
+      (lang) => renderExpiredHoldCancellationEmail({ ...data, lang }),
+      data.bookingReference,
+      data.lang,
+    );
   }
 
   /** Flight schedule disruption or recovery notification. */
   async sendFlightDisruptionEmail(data: FlightDisruptionEmailData): Promise<boolean> {
-    return this.sendTemplate('FLIGHT_DISRUPTION', data.toEmail, renderFlightDisruptionEmail(data), data.bookingReference);
+    return this.sendTemplate(
+      'FLIGHT_DISRUPTION',
+      data.toEmail,
+      (lang) => renderFlightDisruptionEmail({ ...data, lang }),
+      data.bookingReference,
+      data.lang,
+    );
   }
 }

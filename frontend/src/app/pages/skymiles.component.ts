@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({standalone:true,imports:[RouterLink],template:`
 <div class="sky-page">
@@ -19,7 +20,7 @@ import { AuthService } from '../core/auth.service';
 
     <div class="section-head"><div><div class="eyebrow">HẠNG THÀNH VIÊN</div><h2>Bốn hạng thành viên, quyền lợi tăng dần</h2></div><p>Số SkyMiles hiện có tại thời điểm báo giá quyết định hạng thành viên và mức ưu đãi áp dụng.</p></div>
     <section class="tiers">
-      @for(t of tiers;track t.name){<article class="tier card" [class.current]="tier===t.name"><div class="tier-head"><span>{{t.name}}</span>@if(tier===t.name){<b>HẠNG CỦA BẠN</b>}</div><strong>{{t.range}}</strong><div class="discount">{{t.discount}}%</div><p>{{t.copy}}</p></article>}
+      @for(t of tiers;track t.name){<article class="tier card" [class.current]="tier===t.name"><div class="tier-head"><span>{{t.name}}</span>@if(tier===t.name){<b>HẠNG CỦA BẠN</b>}</div><strong>{{t.range}}</strong><div class="discount">{{t.discount}}%</div><p>{{language.translate(t.copy)}}</p></article>}
     </section>
 
     <section class="earn card"><div><div class="eyebrow">CÁCH TÍCH LŨY</div><h2>Tích lũy theo quãng đường thực tế</h2><p>Khi vé được xác nhận, SkyMiles được cộng theo quãng đường của các chặng bay. Vé nối chuyến tính tổng các chặng; khi đổi hoặc hủy vé, số dặm được điều chỉnh theo hành trình còn hiệu lực.</p></div><div class="flow"><div><b>01</b><span>Chọn chuyến</span></div><i>→</i><div><b>02</b><span>Xác nhận vé</span></div><i>→</i><div><b>03</b><span>Cộng SkyMiles</span></div><i>→</i><div><b>04</b><span>Tự động lên hạng</span></div></div></section>
@@ -31,6 +32,7 @@ import { AuthService } from '../core/auth.service';
 `]})
 export class SkyMilesComponent{
   auth=inject(AuthService);
+  readonly language=inject(LanguageService);
   tiers=[
     {name:'MEMBER',range:'0 – 19.999 miles',discount:0,copy:'Bắt đầu tích lũy trên mọi vé đã xác nhận.'},
     {name:'SILVER',range:'20.000 – 49.999 miles',discount:3,copy:'Mở mức giảm SkyMiles 3% trong pricing.'},
@@ -44,5 +46,5 @@ export class SkyMilesComponent{
   get nextThreshold(){return this.miles<20000?20000:this.miles<50000?50000:100000}
   get tierFloor(){return this.miles<20000?0:this.miles<50000?20000:this.miles<100000?50000:100000}
   get progress(){if(!this.nextTier)return 100;const span=this.nextThreshold-this.tierFloor;return Math.max(0,Math.min(100,Math.round(((this.miles-this.tierFloor)/span)*100)))}
-  format(v:number){return new Intl.NumberFormat('vi-VN').format(Math.max(0,Math.round(v||0)))}
+  format(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN').format(Math.max(0,Math.round(v||0)))}
 }

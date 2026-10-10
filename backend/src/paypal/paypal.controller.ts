@@ -75,47 +75,30 @@ export class PaypalController {
       throw new BadRequestException('booking_id is required in request body to retry a specific refund.');
     }
 
-    const cleanBookingId = body.booking_id.trim();
-    const query: any = {
-      _id: cleanBookingId,
-      'payment_transactions.payment_reference': paymentReference,
-    };
-
-    const booking = await this.bookingModel.findOne(query);
-
+    const bookingId = body.booking_id.trim();
+    const reference = paymentReference.trim();
+    const booking = await this.bookingModel.findOne({
+      _id: bookingId,
+      'payment_transactions.payment_reference': reference,
+    });
     if (!booking) {
-      throw new NotFoundException(
-        `No booking found with id ${cleanBookingId} and refund payment reference ${paymentReference}`,
-      );
+      throw new NotFoundException('Booking or refund transaction was not found.');
     }
 
-    const tx = booking.payment_transactions.find(
-      (t: any) => t.payment_reference === paymentReference,
-    );
-
-    if (!tx) {
-      throw new NotFoundException(`Transaction ${paymentReference} not found on booking ${booking.confirmation_number}`);
+    const tx = booking.payment_transactions.find((entry) => entry.payment_reference === reference);
+    if (!tx || tx.payment_method !== PaymentMethod.PAYPAL ||
+        !['REFUND', 'RESCHEDULE_REFUND'].includes(tx.transaction_type)) {
+      throw new BadRequestException('This transaction is not a PayPal refund.');
     }
-
-    if (tx.payment_method !== PaymentMethod.PAYPAL) {
-      throw new BadRequestException(`Transaction ${paymentReference} is not a PayPal payment.`);
-    }
-
-    if (!['REFUND', 'RESCHEDULE_REFUND'].includes(tx.transaction_type)) {
-      throw new BadRequestException(`Transaction ${paymentReference} is not a refund transaction.`);
-    }
-
     if (tx.status === 'SUCCESS') {
       return {
         status: 'ALREADY_COMPLETED',
-        message: 'Refund was already completed successfully.',
         provider_refund_id: tx.provider_refund_id,
         booking_id: booking._id,
         confirmation_number: booking.confirmation_number,
       };
     }
 
-    // Assert complete provenance snapshot before calling PayPal (FIX 2, FIX 5 & FIX 6)
     assertPayPalRefundExecutionSnapshot({
       payment_reference: tx.payment_reference,
       provider_capture_id: tx.provider_capture_id,
@@ -126,104 +109,46 @@ export class PaypalController {
       context: 'PaypalController.retrySpecificRefund',
     });
 
-    // Existing provider_refund_id means RECONCILE, NOT RESUBMIT (FIX 7 & FIX 9)
-    if (tx.provider_refund_id && tx.provider_refund_id.trim()) {
-      try {
-        const details = await this.paypalService.getRefundDetails(tx.provider_refund_id, {
-          expectedAmount: tx.provider_amount,
-          expectedCurrency: tx.provider_currency,
-        });
-        const classified = classifyPayPalRefundStatus(details.status);
-        tx.provider_status = classified.provider_status;
-
-        if (classified.is_success) {
-          tx.status = 'SUCCESS';
-          tx.failure_reason = undefined;
-          tx.next_retry_at = undefined;
-          await booking.save();
-          return {
-            status: 'SUCCESS',
-            message: 'Refund confirmed completed via PayPal pre-check.',
-            provider_refund_id: tx.provider_refund_id,
-            booking_id: booking._id,
-            confirmation_number: booking.confirmation_number,
-          };
-        } else if (classified.is_pending) {
-          tx.status = 'PENDING';
-          tx.failure_reason = 'Refund remains in PENDING state on PayPal';
-          await booking.save();
-          return {
-            status: 'PENDING',
-            message: 'Refund remains PENDING on PayPal. Not resubmitting.',
-            provider_refund_id: tx.provider_refund_id,
-            booking_id: booking._id,
-            confirmation_number: booking.confirmation_number,
-          };
-        } else {
-          tx.status = 'FAILED';
-          tx.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
-          tx.next_retry_at = undefined;
-          await booking.save();
-          return {
-            status: 'FAILED',
-            message: `Refund has status ${classified.provider_status} on PayPal.`,
-            provider_refund_id: tx.provider_refund_id,
-            booking_id: booking._id,
-            confirmation_number: booking.confirmation_number,
-          };
-        }
-      } catch (checkErr: any) {
-        this.logger.warn(`Pre-check of refund ${tx.provider_refund_id} failed: ${checkErr?.message}`);
-        throw new BadRequestException(`Reconciliation query failed for refund ${tx.provider_refund_id}: ${checkErr?.message}`);
-      }
+    if (tx.status === 'FAILED') {
+      // Re-queue only a still-FAILED row. A concurrent admin/worker may
+      // already have claimed it; never overwrite its lease or provider result.
+      await this.bookingModel.updateOne(
+        { _id: booking._id, payment_transactions: { $elemMatch: {
+          payment_reference: reference,
+          payment_method: PaymentMethod.PAYPAL,
+          transaction_type: { $in: ['REFUND', 'RESCHEDULE_REFUND'] },
+          status: 'FAILED',
+        } } },
+        { $set: {
+          'payment_transactions.$.status': 'PENDING',
+          'payment_transactions.$.next_retry_at': new Date(),
+          ...(body.reset_retry_count ? { 'payment_transactions.$.retry_count': 0 } : {}),
+        } },
+      );
+    } else if (tx.status !== 'PENDING') {
+      throw new BadRequestException('Refund must be PENDING or FAILED to retry.');
     }
 
-    // Only if provider_refund_id is completely absent, submit refundCapture
-    try {
-      const refundResult = await this.paypalService.refundCapture({
-        captureId: tx.provider_capture_id,
-        providerAmount: tx.provider_amount,
-        providerCurrency: tx.provider_currency,
-        paypalRequestId: tx.payment_reference,
-        note: `Manual admin refund retry for booking ${booking.confirmation_number || booking.pnr_code}`,
-      });
-
-      const classified = classifyPayPalRefundStatus(refundResult.status);
-      tx.provider_refund_id = refundResult.refund_id;
-      tx.provider_status = classified.provider_status;
-
-      if (classified.is_success) {
-        tx.status = 'SUCCESS';
-        tx.failure_reason = undefined;
-        tx.next_retry_at = undefined;
-      } else if (classified.is_pending) {
-        tx.status = 'PENDING';
-        tx.failure_reason = 'Manual retry returned status PENDING';
-      } else {
-        tx.status = 'FAILED';
-        tx.failure_reason = `PayPal refund returned status: ${classified.provider_status}`;
-        tx.next_retry_at = undefined;
-      }
-
-      if (body?.reset_retry_count) {
-        tx.retry_count = 0;
-      }
-
-      await booking.save();
-
-      return {
-        status: tx.status,
-        message: `Refund retry finished with status ${tx.status}`,
-        provider_refund_id: tx.provider_refund_id,
-        booking_id: booking._id,
-        confirmation_number: booking.confirmation_number,
-      };
-    } catch (err: any) {
-      tx.status = 'FAILED';
-      tx.failure_reason = `Manual admin retry failed: ${err?.message}`;
-      await booking.save();
-      throw new BadRequestException(`Manual refund retry failed: ${err?.message}`);
+    // Uses the identical atomic lease/claim as cron and post-commit processing.
+    // A PENDING refund with a future retry time or active lease is not forced.
+    const result = await this.paypalRefundScheduler.processPendingRefunds(bookingId, reference);
+    const refreshed = await this.bookingModel.findOne({
+      _id: bookingId,
+      'payment_transactions.payment_reference': reference,
+    });
+    const latest = refreshed?.payment_transactions.find((entry) => entry.payment_reference === reference);
+    if (!latest) {
+      throw new NotFoundException('Refund transaction disappeared during retry.');
     }
+    return {
+      status: latest.status,
+      message: result.processed === 0
+        ? 'Refund is already processing or scheduled for a later retry.'
+        : `Refund processing finished with status ${latest.status}.`,
+      provider_refund_id: latest.provider_refund_id,
+      booking_id: booking._id,
+      confirmation_number: booking.confirmation_number,
+    };
   }
 
   /**
@@ -480,4 +405,3 @@ export class PaypalController {
     };
   }
 }
-

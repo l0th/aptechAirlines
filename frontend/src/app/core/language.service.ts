@@ -1,6 +1,11 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 
 export type UiLanguage = 'vi' | 'en';
+
+// These values are also common personal names or free-form domain values. They
+// must be translated explicitly with pick(), never by the global DOM directive.
+const AMBIGUOUS_EXACT_VALUES = new Set(['Nam', 'Male', 'Nữ', 'Female', 'Khác', 'Other']);
 
 type TranslationPair = readonly [vi: string, en: string];
 
@@ -499,6 +504,7 @@ const PAIRS: TranslationPair[] = [
   ['Chỉ đổi chiều về', 'Change return only'],
   ['Đổi cả hai chiều', 'Change both directions'],
   ['Đặt chỗ khứ hồi direct hiện yêu cầu đổi chiều đi hoặc đổi cả hai chiều. Nếu một trong hai chiều là nối chuyến, hệ thống cho phép đổi riêng chiều về.', 'A direct round-trip booking currently requires changing the outbound leg or both directions. If either direction is connecting, the return can be changed separately.'],
+  ['Vé khứ hồi bay thẳng hiện hỗ trợ đổi chiều đi hoặc đổi cả hai chiều. Nếu một trong hai chiều là hành trình nối chuyến, bạn có thể đổi riêng chiều về.', 'For a direct round-trip ticket, you can change the outbound or both directions. If either direction includes a connection, you can change only the return.'],
   ['Chuyến mới · chiều đi', 'New flight · outbound'],
   ['Chuyến mới · chiều về', 'New flight · return'],
   ['Nơi đi · giữ nguyên', 'Origin · unchanged'],
@@ -519,12 +525,13 @@ const PAIRS: TranslationPair[] = [
   ['Đổi cả chiều đi và chiều về', 'Change outbound and return'],
   ['Đổi chiều về', 'Change return'],
   ['BOOKING HIỆN TẠI', 'CURRENT BOOKING'],
+  ['Đặt chỗ hiện tại', 'Current booking'],
   ['HÀNH TRÌNH MỚI', 'NEW ITINERARY'],
   ['CHÊNH LỆCH', 'DIFFERENCE'],
   ['Chênh lệch', 'Difference'],
   ['Hành trình mới rẻ hơn. Hệ thống sẽ xử lý phần chênh lệch theo nghiệp vụ đổi chuyến hiện có.', 'The new itinerary is cheaper. The difference will be handled by the existing reschedule flow.'],
   ['Hành trình mới rẻ hơn.', 'The new itinerary is cheaper.'],
-  ['Phần chênh lệch được hoàn về nguồn thanh toán gốc của booking; không cần nhập tài khoản hay thẻ mới tại đây.', 'The difference is refunded to the booking’s original payment source; no new bank account or card is required here.'],
+  ['Phần chênh lệch được hoàn về nguồn thanh toán gốc của đặt chỗ; không cần nhập tài khoản hay thẻ mới tại đây.', 'The difference is refunded to the booking’s original payment source; no new bank account or card is required here.'],
   ['Giao dịch tại quầy.', 'Counter transaction.'],
   ['Nhân viên xử lý phần chênh lệch theo luồng hỗ trợ hiện có.', 'Staff handle the fare difference through the assisted flow.'],
   ['Thanh toán phần chênh lệch qua PayPal', 'Pay the fare difference with PayPal'],
@@ -532,13 +539,16 @@ const PAIRS: TranslationPair[] = [
   ['Chọn lại', 'Choose again'],
   ['Xác nhận đổi chuyến', 'Confirm reschedule'],
   ['Chỉ đặt chỗ đang ở trạng thái CONFIRMED mới được đổi chuyến.', 'Only a booking with CONFIRMED status can be rescheduled.'],
-  ['Nhập confirmation number hoặc PNR trước.', 'Enter a confirmation number or PNR first.'],
+  ['Chỉ đặt chỗ đã xác nhận mới được đổi chuyến.', 'Only a confirmed booking can be rescheduled.'],
+  ['Vui lòng nhập mã xác nhận hoặc PNR.', 'Enter a confirmation number or PNR first.'],
+  ['Không tra cứu được đặt chỗ.', 'Unable to look up the booking.'],
   ['Nhập đủ tuyến và ngày mới cho chiều đi.', 'Enter the outbound route and new date.'],
   ['Nhập đủ tuyến và ngày mới cho chiều về.', 'Enter the return route and new date.'],
   ['Ngày về mới phải bằng hoặc sau ngày đi mới.', 'The new return date must be on or after the new outbound date.'],
   ['Không tìm được chuyến thay thế.', 'Unable to find a replacement flight.'],
   ['Không lấy được báo giá đổi chuyến.', 'Unable to load the reschedule quote.'],
   ['Không đổi được chuyến.', 'Unable to reschedule.'],
+  ['PayPal chưa được bật cho môi trường hiện tại.', 'PayPal is not enabled in this environment.'],
 
   ['Bảng điều khiển', 'Dashboard'],
   ['VẬN HÀNH', 'OPERATIONS'],
@@ -758,8 +768,8 @@ const PAIRS: TranslationPair[] = [
   ['Khoảng ngày đi không hợp lệ.', 'Departure date range is invalid.'],
   ['Ngày về phải bằng hoặc sau ngày đi cuối cùng.', 'Return date must be on or after the final outbound date.'],
   ['Máy chủ không phản hồi.', 'Server did not respond.'],
-  ['Chuyến này thiếu inventory phù hợp.', 'This flight is missing a suitable inventory.'],
-  ['Hành trình nối chuyến thiếu inventory phù hợp.', 'The connecting itinerary is missing suitable inventory.'],
+  ['Chuyến bay này chưa có thông tin hạng vé phù hợp.', 'This flight has no matching fare inventory.'],
+  ['Hành trình nối chuyến chưa có thông tin hạng vé phù hợp.', 'The connecting itinerary has no matching fare inventory.'],
   ['Không thể thực hiện yêu cầu.', 'Unable to complete the request.'],
   ['Đã tạo', 'Created'],
   ['Đã cập nhật', 'Updated'],
@@ -837,18 +847,165 @@ export class LanguageService {
   readonly isVietnamese = computed(() => this.language() === 'vi');
   readonly isEnglish = computed(() => this.language() === 'en');
 
+  private readonly http = inject(HttpClient);
+
   constructor() {
     this.applyDocumentLanguage(this.language());
   }
 
   setLanguage(language: UiLanguage) {
+    const changed = this.language() !== language;
     this.language.set(language);
     this.applyDocumentLanguage(language);
     try { localStorage.setItem(this.storageKey, language); } catch {}
+    if (changed) this.syncAccountLanguage(language);
+  }
+
+  /** Logged-in users: remember the language on the account so emails are sent in it. */
+  private syncAccountLanguage(language: UiLanguage) {
+    let token: string | null = null;
+    try { token = localStorage.getItem('auth_token'); } catch {}
+    if (!token) return;
+    this.http.patch('/api/users/me/language', { language }).subscribe({ error: () => {} });
   }
 
   toggle() {
     this.setLanguage(this.language() === 'vi' ? 'en' : 'vi');
+  }
+
+  /** Choose explicit UI copy without duplicating VI/EN checks in components. */
+  pick(vi: string, en: string, language: UiLanguage = this.language()): string {
+    return language === 'en' ? en : vi;
+  }
+
+  /** One source of booking labels for customer and staff screens. */
+  bookingStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      BLOCKED: 'Đang giữ chỗ',
+      CONFIRMED: 'Đã xác nhận',
+      RESCHEDULED: 'Đã đổi chuyến',
+      CANCELLED: 'Đã hủy',
+    };
+    return this.translateNotice(labels[status] ?? status);
+  }
+
+  /** Status labels shared by public tracking and staff flight/ticket views. */
+  flightStatusLabel(status: string): string {
+    const labels: Record<string, [string, string]> = {
+      SCHEDULED: ['Đúng lịch', 'Scheduled'],
+      DELAYED: ['Hoãn chuyến', 'Delayed'],
+      CANCELLED: ['Đã hủy', 'Cancelled'],
+      COMPLETED: ['Đã hoàn thành', 'Completed'],
+    };
+    return labels[status] ? this.pick(...labels[status]) : status;
+  }
+
+  couponStatusLabel(status: string): string {
+    const labels: Record<string, [string, string]> = {
+      ACTIVE: ['Còn hiệu lực', 'Active'],
+      CANCELLED: ['Đã hủy', 'Cancelled'],
+      RESCHEDULED: ['Đã đổi chuyến', 'Rescheduled'],
+    };
+    return labels[status] ? this.pick(...labels[status]) : status;
+  }
+
+  bookingTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      ONE_WAY: 'Một chiều',
+      ROUND_TRIP: 'Khứ hồi',
+      CONNECTING: 'Nối chuyến',
+    };
+    return this.translateNotice(labels[type] ?? type);
+  }
+
+  cabinLabel(cabin: string): string {
+    if (cabin === 'ALL') return this.pick('Tất cả hạng', 'All cabins');
+    const labels: Record<string, string> = {
+      ECONOMY: 'Phổ thông',
+      CLUB: 'Club',
+      BUSINESS: 'Thương gia',
+      FIRST: 'Hạng nhất',
+    };
+    return this.translateNotice(labels[cabin] ?? cabin);
+  }
+
+  /** Seat-map states are separate from booking statuses (e.g. BLOCKED seat vs held booking). */
+  seatStatusLabel(status: string): string {
+    const labels: Record<string, [string, string]> = {
+      AVAILABLE: ['Trống', 'Available'],
+      HELD: ['Đang giữ', 'Held'],
+      OCCUPIED: ['Đã đặt', 'Occupied'],
+      BLOCKED: ['Đã khóa', 'Blocked'],
+    };
+    const label = labels[status];
+    return label ? this.pick(...label) : status;
+  }
+
+  seatDimensionLabel(dimension: string): string {
+    const labels: Record<string, [string, string]> = {
+      CABIN_BASE: ['Phí cơ bản theo hạng', 'Cabin base fee'],
+      WINDOW: ['Ghế cửa sổ', 'Window seat'],
+      AISLE: ['Ghế lối đi', 'Aisle seat'],
+      MIDDLE: ['Ghế giữa', 'Middle seat'],
+      FRONT_ZONE: ['Khu vực phía trước', 'Front zone'],
+      EXIT_ROW: ['Hàng thoát hiểm', 'Exit row'],
+      EXTRA_LEGROOM: ['Chỗ để chân rộng', 'Extra legroom'],
+      BULKHEAD: ['Hàng vách ngăn', 'Bulkhead row'],
+    };
+    const label = labels[dimension];
+    return label ? this.pick(...label) : dimension;
+  }
+
+  passengerTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      ADULT: 'Người lớn',
+      CHILD: 'Trẻ em',
+      SENIOR: 'Cao tuổi',
+    };
+    return this.translateNotice(labels[type] ?? type);
+  }
+
+  itineraryLegLabel(leg: string): string {
+    if (leg === 'OUTBOUND' || leg === 'INBOUND') {
+      return this.translateNotice(leg === 'OUTBOUND' ? 'Chiều đi' : 'Chiều về');
+    }
+    const match = /^(CONNECTING|INBOUND)_(\d+)$/.exec(leg || '');
+    if (match) {
+      const outbound = match[1] === 'CONNECTING';
+      return this.pick(
+        `${outbound ? 'Đi' : 'Về'} · chặng ${match[2]}`,
+        `${outbound ? 'Outbound' : 'Return'} · leg ${match[2]}`,
+      );
+    }
+    return leg || this.pick('Chặng bay', 'Flight leg');
+  }
+
+  /**
+   * Translate notifications conservatively: only whole dictionary entries or
+   * supported parameterized errors. Never rewrite fragments of customer data,
+   * identifiers, flight codes or free-form server messages.
+   */
+  translateNotice(source: string, language: UiLanguage = this.language()): string {
+    if (!source) return source;
+    const core = source.trim();
+    if (!core) return source;
+    const sameLanguageIndex = language === 'vi' ? 0 : 1;
+    if (PAIRS.some(pair => pair[sameLanguageIndex] === core)) return source;
+    const aliases = language === 'vi' ? TARGET_VI_ALIASES : TARGET_EN_ALIASES;
+    const match = PAIRS.find(pair => pair[language === 'vi' ? 1 : 0] === core);
+    const translated = aliases[core] ?? match?.[sameLanguageIndex];
+    if (translated) return source.replace(core, translated);
+
+    const knownDynamic = language === 'vi'
+      ? /^(?:No booking found with code .+|No flights found for flight number .+ on .+|\d+ (?:seats? left|passengers?|customers?|records?|confirmed|days? before departure|itinerar(?:y|ies)|options?|legs?))$/i
+      : /^(?:Không tìm thấy đặt chỗ với mã .+|Không tìm thấy chuyến bay .+ vào ngày .+|Còn \d+ ghế|\d+ (?:hành khách|khách hàng|bản ghi|đã xác nhận|ngày trước bay|hành trình|lựa chọn|chặng))$/i;
+    if (!knownDynamic.test(core)) return source;
+    const translatedDynamic = language === 'vi'
+      ? this.dynamicToVietnamese(core)
+      : this.dynamicToEnglish(core)
+          .replace(/^Không tìm thấy đặt chỗ với mã (.+)$/i, 'No booking found with code $1')
+          .replace(/^Không tìm thấy chuyến bay (.+) vào ngày (.+)$/i, 'No flights found for flight number $1 on $2');
+    return source.replace(core, translatedDynamic);
   }
 
   translate(source: string, language: UiLanguage = this.language()) {
@@ -857,22 +1014,49 @@ export class LanguageService {
     const trailing = source.match(/\s*$/)?.[0] ?? '';
     const core = source.slice(leading.length, source.length - trailing.length);
     if (!core) return source;
+    if (AMBIGUOUS_EXACT_VALUES.has(core)) return source;
 
-    let value = core;
     const aliases = language === 'vi' ? TARGET_VI_ALIASES : TARGET_EN_ALIASES;
-    if (aliases[value]) value = aliases[value];
+    const sameLanguageIndex = language === 'vi' ? 0 : 1;
+    const match = PAIRS.find(pair => pair[language === 'vi' ? 1 : 0] === core);
+    let value = aliases[core] ?? match?.[sameLanguageIndex] ?? core;
 
-    const replacements = PAIRS
-      .map(([vi, en]) => language === 'vi' ? [en, vi] as const : [vi, en] as const)
-      .filter(([from]) => !!from)
-      .sort((a, b) => b[0].length - a[0].length);
-
-    for (const [from, to] of replacements) {
-      if (value.includes(from)) value = value.split(from).join(to);
+    // The directive runs for every text node, including names, email addresses and
+    // server-provided values. Only transform a dynamic value when the entire text
+    // matches one of our supported UI patterns; never replace dictionary fragments
+    // inside customer/domain data (for example, a customer named "Nam").
+    if (value === core && this.isKnownDynamicUiText(core, language)) {
+      value = language === 'en' ? this.dynamicToEnglish(core) : this.dynamicToVietnamese(core);
     }
-
-    value = language === 'en' ? this.dynamicToEnglish(value) : this.dynamicToVietnamese(value);
     return `${leading}${value}${trailing}`;
+  }
+
+  private isKnownDynamicUiText(value: string, language: UiLanguage) {
+    const viPatterns = [
+      /^Còn [\d.]+ miles để lên [A-Z]+$/,
+      /^Từ \d+ ngày$/i,
+      /^\d+\s*–\s*(?:\d+|∞) ngày(?: trước bay)?$/i,
+      /^Còn \d+ ghế$/i,
+      /^\d+ (?:hành khách|khách hàng|bản ghi|đã xác nhận|ngày trước bay|hành trình|lựa chọn|chặng)$/i,
+      /^Đặt trước \d+ ngày$/i,
+      /^Hoàn \d+%$/i,
+      /^(?:Đi|Về)\s*·\s*chặng \d+$/i,
+      /^Giữ đến .+$/i,
+      /^No flights found for flight number .+ on .+$/i,
+    ];
+    const enPatterns = [
+      /^Airport with IATA \S+ already exists$/i,
+      /^[\d.]+ miles to [A-Z]+$/,
+      /^\d+\+ days? before departure$/i,
+      /^\d+\s*–\s*(?:\d+|∞) days? before departure$/i,
+      /^No flights found for flight number .+ on .+$/i,
+      /^No booking found with code .+$/i,
+      /^\d+ (?:seats? left|passengers?|customers?|records?|confirmed|days? before departure|itinerar(?:y|ies)|options?|legs?)$/i,
+      /^Lead time \d+ days?$/i,
+      /^Refund \d+%$/i,
+      /^(?:Outbound|Return)\s*·\s*leg \d+$/i,
+    ];
+    return (language === 'en' ? viPatterns : enPatterns).some(pattern => pattern.test(value));
   }
 
   private dynamicToEnglish(value: string) {

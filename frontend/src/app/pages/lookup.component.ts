@@ -3,6 +3,7 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { PaginationComponent } from '../shared/pagination.component';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone: true,
@@ -38,7 +39,7 @@ import { PaginationComponent } from '../shared/pagination.component';
             <div>
               <small>APTECH AIRLINES</small>
               <h2>{{f.flight_number}}</h2>
-              <span>{{f.aircraft?.model_name||f.aircraft?.model_code||f.aircraft_type||'Máy bay theo lịch khai thác'}}</span>
+              <span>{{f.aircraft?.model_name||f.aircraft?.model_code||f.aircraft_type||language.pick('Máy bay theo lịch khai thác', 'Aircraft as scheduled')}}</span>
             </div>
             <span class="status" [class.ok]="f.status==='SCHEDULED'||f.status==='DEPARTED'||f.status==='ARRIVED'" [class.warn]="f.status==='DELAYED'" [class.cancel]="f.status==='CANCELLED'">{{statusLabel(f.status)}}</span>
           </header>
@@ -48,9 +49,9 @@ import { PaginationComponent } from '../shared/pagination.component';
               <span>Khởi hành</span>
               <strong>{{f.origin_iata}}</strong>
               <b>{{clock(f.scheduled_departure_local||f.scheduled_departure)}}</b>
-              <small>{{datePart(f.scheduled_departure_local||f.scheduled_departure)}} · {{f.origin_time_zone||'Giờ địa phương'}}</small>
+              <small>{{datePart(f.scheduled_departure_local||f.scheduled_departure)}} · {{f.origin_time_zone||language.pick('Giờ địa phương', 'Local time')}}</small>
               @if(f.actual_departure_local||f.actual_departure){
-                <div class="actual">Thực tế: {{clock(f.actual_departure_local||f.actual_departure)}}</div>
+                <div class="actual">{{language.pick('Thực tế:', 'Actual:')}} {{clock(f.actual_departure_local||f.actual_departure)}}</div>
               }
             </div>
 
@@ -60,9 +61,9 @@ import { PaginationComponent } from '../shared/pagination.component';
               <span>Đến nơi</span>
               <strong>{{f.dest_iata}}</strong>
               <b>{{clock(f.scheduled_arrival_local||f.scheduled_arrival)}}</b>
-              <small>{{datePart(f.scheduled_arrival_local||f.scheduled_arrival)}} · {{f.dest_time_zone||'Giờ địa phương'}}</small>
+              <small>{{datePart(f.scheduled_arrival_local||f.scheduled_arrival)}} · {{f.dest_time_zone||language.pick('Giờ địa phương', 'Local time')}}</small>
               @if(f.actual_arrival_local||f.actual_arrival){
-                <div class="actual">Thực tế: {{clock(f.actual_arrival_local||f.actual_arrival)}}</div>
+                <div class="actual">{{language.pick('Thực tế:', 'Actual:')}} {{clock(f.actual_arrival_local||f.actual_arrival)}}</div>
               }
             </div>
           </div>
@@ -83,6 +84,7 @@ export class LookupComponent {
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   private api = inject(ApiService);
+  readonly language = inject(LanguageService);
   number = '';
   date = '';
   results: any[] = [];
@@ -104,7 +106,7 @@ export class LookupComponent {
     this.page = 1;
     this.searched = true;
     if (!number || !this.date) {
-      this.error = 'Vui lòng nhập đầy đủ số hiệu chuyến bay và ngày bay.';
+      this.error = this.language.pick('Vui lòng nhập đầy đủ số hiệu chuyến bay và ngày bay.','Enter both the flight number and travel date.');
       return;
     }
 
@@ -116,20 +118,21 @@ export class LookupComponent {
         this.loading = false;
       },
       error: e => {
-        this.error = this.message(e, 'Không tìm thấy chuyến bay phù hợp.');
+        this.error = this.message(e, this.language.pick('Không tìm thấy chuyến bay phù hợp.','No matching flight was found.'));
         this.loading = false;
       }
     });
   }
 
   statusLabel(v: string) {
-    return ({
-      SCHEDULED: 'ĐÚNG LỊCH',
-      DELAYED: 'TRỄ CHUYẾN',
-      DEPARTED: 'ĐÃ KHỞI HÀNH',
-      ARRIVED: 'ĐÃ ĐẾN',
-      CANCELLED: 'ĐÃ HỦY'
-    } as Record<string, string>)[v] || v || 'CHƯA CÓ TRẠNG THÁI';
+    const labels: Record<string, [string, string]> = {
+      SCHEDULED: ['ĐÚNG LỊCH', 'ON SCHEDULE'],
+      DELAYED: ['TRỄ CHUYẾN', 'DELAYED'],
+      DEPARTED: ['ĐÃ KHỞI HÀNH', 'DEPARTED'],
+      ARRIVED: ['ĐÃ ĐẾN', 'ARRIVED'],
+      CANCELLED: ['ĐÃ HỦY', 'CANCELLED'],
+    };
+    return this.language.pick(...(labels[v] || (v ? [v, v] : ['CHƯA CÓ TRẠNG THÁI', 'STATUS UNAVAILABLE'])));
   }
 
   clock(v: string) {
@@ -150,6 +153,6 @@ export class LookupComponent {
 
   private message(e: any, fallback: string) {
     const m = e?.error?.message;
-    return Array.isArray(m) ? m.join(' · ') : m || fallback;
+    return this.language.translateNotice(Array.isArray(m) ? m.join(' · ') : m || fallback);
   }
 }

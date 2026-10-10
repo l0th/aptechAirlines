@@ -7,6 +7,7 @@ import { AirportsService } from '../airports/airports.service';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import { MailService } from '../mail/mail.service';
 import { PaypalService } from '../paypal/paypal.service';
+import { PaypalRefundScheduler } from '../paypal/paypal-refund.scheduler';
 import { AllocatedRefundItem } from './refund-allocation.util';
 
 export interface BookingsLifecycleDependencies {
@@ -18,6 +19,7 @@ export interface BookingsLifecycleDependencies {
   seatAllocationService?: SeatAllocationService;
   mailService?: MailService;
   paypalService?: PaypalService;
+  paypalRefundScheduler?: PaypalRefundScheduler;
 }
 
 export interface BookingsLifecycleBridge {
@@ -45,4 +47,5 @@ export abstract class BookingsLifecyclePart {
   protected get seatAllocationService() { return this.deps.seatAllocationService; }
   protected get mailService() { return this.deps.mailService; }
   protected get paypalService() { return this.deps.paypalService; }
+  protected get paypalRefundScheduler() { return this.deps.paypalRefundScheduler; }
 }

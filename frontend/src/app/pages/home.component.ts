@@ -5,6 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { Meta, Title } from '@angular/platform-browser';
 import { ApiService } from '../core/api.service';
 import { BookingStateService } from '../core/booking-state.service';
+import { LanguageService } from '../core/language.service';
 import { IconComponent } from '../shared/icon.component';
 
 type LocationField = 'origin' | 'destination';
@@ -23,25 +24,25 @@ type LocationSuggestion = {
     <section class="hero">
       <div class="container hero-inner">
         <div class="copy">
-          <div class="eyebrow gold">APTECH AIRLINES · BAY XA HƠN</div>
-          <h1>Tìm chuyến bay phù hợp cho hành trình của bạn.</h1>
-          <p>Tra cứu lịch bay, so sánh chuyến thẳng hoặc nối chuyến và đặt vé trong vài bước rõ ràng.</p>
+          <div class="eyebrow gold">APTECH AIRLINES · {{lang.pick('BAY XA HƠN','FLY BEYOND')}}</div>
+          <h1>{{lang.pick('Tìm chuyến bay phù hợp cho hành trình của bạn.','Find the right flight for your journey.')}}</h1>
+          <p>{{lang.pick('Tra cứu lịch bay, so sánh chuyến thẳng hoặc nối chuyến và đặt vé trong vài bước rõ ràng.','Explore schedules, compare direct and connecting flights, and book in a few simple steps.')}}</p>
           <div class="hero-points">
-            <span><app-icon name="calendar" [size]="17"/> Lịch bay rõ ràng</span>
-            <span><app-icon name="seat" [size]="17"/> Chọn ghế linh hoạt</span>
-            <span><app-icon name="swap" [size]="17"/> Quản lý vé trực tuyến</span>
+            <span><app-icon name="calendar" [size]="17"/> {{lang.pick('Lịch bay rõ ràng','Clear flight schedules')}}</span>
+            <span><app-icon name="seat" [size]="17"/> {{lang.pick('Chọn ghế linh hoạt','Flexible seat selection')}}</span>
+            <span><app-icon name="swap" [size]="17"/> {{lang.pick('Quản lý vé trực tuyến','Online ticket management')}}</span>
           </div>
         </div>
 
         <div class="search card">
           <div class="trip-tabs">
-            <button [class.on]="!roundTrip" (click)="setRoundTrip(false)">Một chiều</button>
-            <button [class.on]="roundTrip" (click)="setRoundTrip(true)">Khứ hồi</button>
+            <button [class.on]="!roundTrip" (click)="setRoundTrip(false)">{{lang.pick('Một chiều','One way')}}</button>
+            <button [class.on]="roundTrip" (click)="setRoundTrip(true)">{{lang.pick('Khứ hồi','Round trip')}}</button>
           </div>
 
           <div class="grid grid-2">
             <div class="field location-field">
-              <span>Nơi đi</span>
+              <span>{{lang.pick('Nơi đi','From')}}</span>
               <input
                 class="control"
                 [(ngModel)]="origin"
@@ -49,7 +50,7 @@ type LocationSuggestion = {
                 (focus)="suggestLocation('origin')"
                 (blur)="closeSuggestions('origin')"
                 autocomplete="off"
-                placeholder="SGN hoặc Ho Chi Minh"
+                [placeholder]="lang.pick('SGN hoặc Hồ Chí Minh','SGN or Ho Chi Minh City')"
               >
               @if(suggestions.origin.length){
                 <div class="suggestions">
@@ -64,7 +65,7 @@ type LocationSuggestion = {
             </div>
 
             <div class="field location-field">
-              <span>Nơi đến</span>
+              <span>{{lang.pick('Nơi đến','To')}}</span>
               <input
                 class="control"
                 [(ngModel)]="destination"
@@ -72,7 +73,7 @@ type LocationSuggestion = {
                 (focus)="suggestLocation('destination')"
                 (blur)="closeSuggestions('destination')"
                 autocomplete="off"
-                placeholder="HAN hoặc Ha Noi"
+                [placeholder]="lang.pick('HAN hoặc Hà Nội','HAN or Hanoi')"
               >
               @if(suggestions.destination.length){
                 <div class="suggestions">
@@ -87,53 +88,53 @@ type LocationSuggestion = {
             </div>
           </div>
 
-          <p class="location-help">Bạn có thể nhập mã IATA hoặc tên thành phố. Nếu điểm đó chưa được khai thác trực tiếp, hệ thống sẽ đề xuất sân bay gần nhất.</p>
+          <p class="location-help">{{lang.pick('Bạn có thể nhập mã IATA hoặc tên thành phố. Nếu điểm đó chưa được khai thác trực tiếp, hệ thống sẽ đề xuất sân bay gần nhất.','Enter an IATA code or city name. If direct service is unavailable, we will suggest the closest served airport.')}}</p>
 
-          <label class="range-toggle"><input type="checkbox" [(ngModel)]="flexibleDates" (change)="toggleFlexibleDates()"> Tìm chuyến trong khoảng ngày</label>
+          <label class="range-toggle"><input type="checkbox" [(ngModel)]="flexibleDates" (change)="toggleFlexibleDates()"> {{lang.pick('Tìm chuyến trong khoảng ngày','Search a date range')}}</label>
 
           <div class="grid search-options row">
-            <div class="field"><span>Ngày đi</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
-            @if(flexibleDates){<div class="field"><span>Đến ngày</span><input class="control" type="date" [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"></div>}
-            @if(roundTrip){<div class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"></div>}
+            <div class="field"><span>{{lang.pick('Ngày đi','Departure date')}}</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
+            @if(flexibleDates){<div class="field"><span>{{lang.pick('Đến ngày','Through date')}}</span><input class="control" type="date" [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"></div>}
+            @if(roundTrip){<div class="field"><span>{{lang.pick('Ngày về','Return date')}}</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"></div>}
           </div>
 
           <div class="travellers">
-            <div><span>Người lớn</span><b><button (click)="adults=Math.max(1,adults-1)">−</button>{{adults}}<button (click)="adults=adults+1">+</button></b></div>
-            <div><span>Trẻ em</span><b><button (click)="children=Math.max(0,children-1)">−</button>{{children}}<button (click)="children=children+1">+</button></b></div>
-            <div><span>Cao tuổi</span><b><button (click)="seniors=Math.max(0,seniors-1)">−</button>{{seniors}}<button (click)="seniors=seniors+1">+</button></b></div>
+            <div><span>{{lang.pick('Người lớn','Adults')}}</span><b><button (click)="adults=Math.max(1,adults-1)">−</button>{{adults}}<button (click)="adults=adults+1">+</button></b></div>
+            <div><span>{{lang.pick('Trẻ em','Children')}}</span><b><button (click)="children=Math.max(0,children-1)">−</button>{{children}}<button (click)="children=children+1">+</button></b></div>
+            <div><span>{{lang.pick('Cao tuổi','Seniors')}}</span><b><button (click)="seniors=Math.max(0,seniors-1)">−</button>{{seniors}}<button (click)="seniors=seniors+1">+</button></b></div>
           </div>
 
           
-          <button class="btn btn-primary full" (click)="search()"><app-icon name="search" [size]="18"/>Tìm chuyến bay</button>
+          <button class="btn btn-primary full" (click)="search()"><app-icon name="search" [size]="18"/>{{lang.pick('Tìm chuyến bay','Search flights')}}</button>
         </div>
       </div>
     </section>
 
     <section class="container experience-section" aria-labelledby="experience-heading">
       <div class="section-copy">
-        <div class="eyebrow">TRẢI NGHIỆM BAY</div>
-        <h2 id="experience-heading">Mọi thứ bạn cần cho một hành trình chủ động</h2>
-        <p>Từ lúc tìm chuyến đến sau khi đặt vé, các thao tác quan trọng đều được thiết kế để khách hàng dễ theo dõi và tự quản lý.</p>
+        <div class="eyebrow">{{lang.pick('TRẢI NGHIỆM BAY','FLIGHT EXPERIENCE')}}</div>
+        <h2 id="experience-heading">{{lang.pick('Mọi thứ bạn cần cho một hành trình chủ động','Everything you need to travel with confidence')}}</h2>
+        <p>{{lang.pick('Từ lúc tìm chuyến đến sau khi đặt vé, các thao tác quan trọng đều được thiết kế để khách hàng dễ theo dõi và tự quản lý.','From flight search to post-booking changes, essential actions are easy to track and manage.')}}</p>
       </div>
       <div class="grid grid-3 feature">
-        <article class="card"><span class="feature-icon"><app-icon name="search" [size]="26"/></span><h3>Tìm chuyến dễ dàng</h3><p>Tra cứu chuyến thẳng và nối chuyến theo ngày, số hành khách và so sánh giá các hạng vé ngay trong kết quả.</p></article>
-        <article class="card"><span class="feature-icon"><app-icon name="seat" [size]="26"/></span><h3>Chọn chỗ ngồi theo ý bạn</h3><p>Xem sơ đồ ghế, vị trí ngồi và phụ phí trước khi hoàn tất đặt vé.</p></article>
-        <article class="card"><span class="feature-icon"><app-icon name="swap" [size]="26"/></span><h3>Quản lý chuyến đi trực tuyến</h3><p>Tra cứu vé, đổi chuyến hoặc hủy vé theo chính sách ngay trong tài khoản của bạn.</p></article>
+        <article class="card"><span class="feature-icon"><app-icon name="search" [size]="26"/></span><h3>{{lang.pick('Tìm chuyến dễ dàng','Easy flight search')}}</h3><p>{{lang.pick('Tra cứu chuyến thẳng và nối chuyến theo ngày, số hành khách và so sánh giá các hạng vé ngay trong kết quả.','Compare direct and connecting flights by date, passengers and fare class.')}}</p></article>
+        <article class="card"><span class="feature-icon"><app-icon name="seat" [size]="26"/></span><h3>{{lang.pick('Chọn chỗ ngồi theo ý bạn','Choose your preferred seat')}}</h3><p>{{lang.pick('Xem sơ đồ ghế, vị trí ngồi và phụ phí trước khi hoàn tất đặt vé.','Review the seat map, seat location and fees before booking.')}}</p></article>
+        <article class="card"><span class="feature-icon"><app-icon name="swap" [size]="26"/></span><h3>{{lang.pick('Quản lý chuyến đi trực tuyến','Manage trips online')}}</h3><p>{{lang.pick('Tra cứu vé, đổi chuyến hoặc hủy vé theo chính sách ngay trong tài khoản của bạn.','Track, reschedule or cancel eligible tickets in your account.')}}</p></article>
       </div>
     </section>
 
     <section class="service-band" aria-labelledby="services-heading">
       <div class="container">
         <div class="section-copy compact-copy">
-          <div class="eyebrow">DỊCH VỤ NỔI BẬT</div>
-          <h2 id="services-heading">Linh hoạt trước và sau khi đặt vé</h2>
-          <p>Thông tin rõ ràng giúp bạn chủ động hơn khi kế hoạch thay đổi.</p>
+          <div class="eyebrow">{{lang.pick('DỊCH VỤ NỔI BẬT','OUR SERVICES')}}</div>
+          <h2 id="services-heading">{{lang.pick('Linh hoạt trước và sau khi đặt vé','Flexibility before and after booking')}}</h2>
+          <p>{{lang.pick('Thông tin rõ ràng giúp bạn chủ động hơn khi kế hoạch thay đổi.','Clear information helps you adapt when plans change.')}}</p>
         </div>
         <div class="service-grid">
-          <a class="service-card" routerLink="/lookup"><app-icon name="calendar" [size]="22"/><span><b>Tra cứu lịch bay</b><small>Xem giờ khởi hành và trạng thái chuyến bay.</small></span><app-icon name="arrow" [size]="18"/></a>
-          <a class="service-card" routerLink="/seat-fees"><app-icon name="seat" [size]="22"/><span><b>Ghế & phụ phí</b><small>Xem cách chọn ghế và mức phí áp dụng.</small></span><app-icon name="arrow" [size]="18"/></a>
-          <a class="service-card" routerLink="/reschedule-info"><app-icon name="swap" [size]="22"/><span><b>Đổi chuyến</b><small>Đổi ngày hoặc chuyến bay trên hành trình phù hợp.</small></span><app-icon name="arrow" [size]="18"/></a>
-          <a class="service-card" routerLink="/cancellation-refund"><app-icon name="ticket" [size]="22"/><span><b>Hủy vé & hoàn tiền</b><small>Xem chính sách và quy trình hoàn tiền.</small></span><app-icon name="arrow" [size]="18"/></a>
+          <a class="service-card" routerLink="/lookup"><app-icon name="calendar" [size]="22"/><span><b>{{lang.pick('Tra cứu lịch bay','Flight schedules')}}</b><small>{{lang.pick('Xem giờ khởi hành và trạng thái chuyến bay.','View departure times and flight status.')}}</small></span><app-icon name="arrow" [size]="18"/></a>
+          <a class="service-card" routerLink="/seat-fees"><app-icon name="seat" [size]="22"/><span><b>{{lang.pick('Ghế & phụ phí','Seats & fees')}}</b><small>{{lang.pick('Xem cách chọn ghế và mức phí áp dụng.','Learn about seat selection and applicable fees.')}}</small></span><app-icon name="arrow" [size]="18"/></a>
+          <a class="service-card" routerLink="/reschedule-info"><app-icon name="swap" [size]="22"/><span><b>{{lang.pick('Đổi chuyến','Reschedule')}}</b><small>{{lang.pick('Đổi ngày hoặc chuyến bay trên hành trình phù hợp.','Change dates or flights for eligible itineraries.')}}</small></span><app-icon name="arrow" [size]="18"/></a>
+          <a class="service-card" routerLink="/cancellation-refund"><app-icon name="ticket" [size]="22"/><span><b>{{lang.pick('Hủy vé & hoàn tiền','Cancellation & refunds')}}</b><small>{{lang.pick('Xem chính sách và quy trình hoàn tiền.','Review cancellation policies and refund procedures.')}}</small></span><app-icon name="arrow" [size]="18"/></a>
         </div>
       </div>
     </section>
@@ -141,11 +142,11 @@ type LocationSuggestion = {
     <section class="container seo-section" aria-labelledby="booking-heading">
       <div class="seo-copy">
         <div class="eyebrow">APTECH AIRLINES</div>
-        <h2 id="booking-heading">Đặt vé máy bay và quản lý hành trình trong một nơi</h2>
-        <p>Aptech Airlines giúp bạn tìm chuyến bay theo điểm đi, điểm đến và ngày khởi hành; xem lựa chọn chuyến thẳng hoặc nối chuyến; so sánh hạng vé và kiểm tra chỗ ngồi trước khi đặt vé.</p>
-        <p>Sau khi có vé, bạn có thể theo dõi hành trình, tra cứu lịch bay, chọn ghế, đổi chuyến và xem chính sách hủy vé trực tuyến.</p>
+        <h2 id="booking-heading">{{lang.pick('Đặt vé máy bay và quản lý hành trình trong một nơi','Book flights and manage your trip in one place')}}</h2>
+        <p>{{lang.pick('Aptech Airlines giúp bạn tìm chuyến bay theo điểm đi, điểm đến và ngày khởi hành; xem lựa chọn chuyến thẳng hoặc nối chuyến; so sánh hạng vé và kiểm tra chỗ ngồi trước khi đặt vé.','Search by origin, destination and departure date, compare direct or connecting flights and fares, and check seats before booking.')}}</p>
+        <p>{{lang.pick('Sau khi có vé, bạn có thể theo dõi hành trình, tra cứu lịch bay, chọn ghế, đổi chuyến và xem chính sách hủy vé trực tuyến.','After booking, track your journey, check schedules, select seats, reschedule and review cancellation policies online.')}}</p>
       </div>
-      <a class="btn btn-dark seo-cta" routerLink="/lookup">Xem lịch bay <app-icon name="arrow" [size]="17"/></a>
+      <a class="btn btn-dark seo-cta" routerLink="/lookup">{{lang.pick('Xem lịch bay','View flight schedules')}} <app-icon name="arrow" [size]="17"/></a>
     </section>
   `,
   styles: [`
@@ -153,6 +154,7 @@ type LocationSuggestion = {
   `]
 })
 export class HomeComponent {
+  readonly lang = inject(LanguageService);
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   private api = inject(ApiService);
@@ -245,11 +247,11 @@ export class HomeComponent {
     this.error = '';
     const origin = this.origin.trim();
     const destination = this.destination.trim();
-    if (!origin || !destination || !this.departure) { this.error = 'Vui lòng nhập nơi đi, nơi đến và ngày bay.'; return; }
-    if (origin.toUpperCase() === destination.toUpperCase()) { this.error = 'Nơi đi và nơi đến phải khác nhau.'; return; }
-    if (this.flexibleDates && (!this.departureEnd || this.departureEnd < this.departure)) { this.error = 'Khoảng ngày đi không hợp lệ.'; return; }
+    if (!origin || !destination || !this.departure) { this.error = this.lang.pick('Vui lòng nhập nơi đi, nơi đến và ngày bay.','Please enter your departure, destination and travel date.'); return; }
+    if (origin.toUpperCase() === destination.toUpperCase()) { this.error = this.lang.pick('Nơi đi và nơi đến phải khác nhau.','Origin and destination must be different.'); return; }
+    if (this.flexibleDates && (!this.departureEnd || this.departureEnd < this.departure)) { this.error = this.lang.pick('Khoảng ngày đi không hợp lệ.','Invalid departure date range.'); return; }
     const latestOutbound = this.flexibleDates ? this.departureEnd : this.departure;
-    if (this.roundTrip && (!this.returnDate || this.returnDate < latestOutbound)) { this.error = 'Ngày về phải bằng hoặc sau ngày đi cuối cùng.'; return; }
+    if (this.roundTrip && (!this.returnDate || this.returnDate < latestOutbound)) { this.error = this.lang.pick('Ngày về phải bằng hoặc sau ngày đi cuối cùng.','Return date must be on or after the latest departure date.'); return; }
 
     const q = {
       origin,

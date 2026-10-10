@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
+import { LanguageService } from '../core/language.service';
 
 type Step = 1 | 2 | 3 | 4;
 interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string; price: number; seats: number; legs: any[]; }
@@ -11,7 +12,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
 /**
  * Staff (CLERK/ADMIN) "đặt vé hộ khách" wizard:
  * 1. tìm / tạo nhanh khách  2. tìm chuyến (thẳng + nối chuyến)
- * 3. hành khách + ghế       4. giữ chỗ (>14 ngày) hoặc mua bằng thẻ hồ sơ.
+ * 3. hành khách + ghế       4. giữ chỗ (>14 ngày), khách tự thanh toán PayPal.
  * Booking luôn được tạo với user_id = khách đã chọn (backend kiểm tra role CUSTOMER).
  */
 @Component({
@@ -20,11 +21,11 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
   template: `
     <div class="eyebrow">CLERK / ADMIN</div>
     <h1 class="title">Quầy đặt vé hộ khách</h1>
-    <p class="subtitle">4 bước: chọn khách → tìm chuyến → hành khách &amp; ghế → giữ chỗ hoặc mua.</p>
+    <p class="subtitle" translate="no">{{language.pick('4 bước: chọn khách → tìm chuyến → hành khách & ghế → giữ chỗ để khách thanh toán PayPal.', '4 steps: select customer → search flights → passengers & seats → hold for customer PayPal checkout.')}}</p>
 
     <ol class="stepper">
       @for(s of stepLabels;track s.n){
-        <li [class.on]="step===s.n" [class.done]="step>s.n"><button type="button" (click)="goto(s.n)" [disabled]="!canGoto(s.n)"><span class="step">{{s.n}}</span>{{s.label}}</button></li>
+        <li [class.on]="step===s.n" [class.done]="step>s.n"><button type="button" (click)="goto(s.n)" [disabled]="!canGoto(s.n)"><span class="step">{{s.n}}</span><span translate="no">{{s.label}}</span></button></li>
       }
     </ol>
     
@@ -44,14 +45,13 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
             <div class="customers">
               @for(c of matches;track c._id){
                 <button class="customer" [class.selected]="customer?._id===c._id" (click)="selectCustomer(c)">
-                  <span class="avatar">{{initials(c)}}</span>
-                  <span class="identity"><strong>{{c.first_name}} {{c.last_name}}</strong><small>&#64;{{c.username}} · {{c.email}} · {{c.phone_number||'—'}}</small></span>
-                  <span class="pill">{{c.has_preferred_credit_card?'Có thẻ hồ sơ':'Chưa có thẻ'}}</span>
+                  <span class="avatar" translate="no">{{initials(c)}}</span>
+                  <span class="identity" translate="no"><strong>{{c.first_name}} {{c.last_name}}</strong><small>&#64;{{c.username}} · {{c.email}} · {{c.phone_number||'—'}}</small></span>
                 </button>
               }
               @if(!matches.length){<div class="empty muted">Không tìm thấy khách hàng. Tạo tài khoản mới bên dưới.</div>}
             </div>
-            <button class="btn btn-outline" (click)="showCreate=!showCreate">{{showCreate?'Đóng form tạo khách':'+ Tạo nhanh tài khoản khách'}}</button>
+            <button class="btn btn-outline" (click)="showCreate=!showCreate" translate="no">{{showCreate?language.pick('Đóng form tạo khách', 'Close customer form'):language.pick('+ Tạo nhanh tài khoản khách', '+ Create customer')}}</button>
           }
           @if(showCreate){
             <form class="create-grid" (ngSubmit)="createCustomer()">
@@ -62,9 +62,8 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               <label class="field"><span>Email *</span><input class="control" name="e" type="email" [(ngModel)]="nc.email" required></label>
               <label class="field"><span>Điện thoại *</span><input class="control" name="ph" [(ngModel)]="nc.phone_number" required></label>
               <label class="field wide"><span>Địa chỉ *</span><input class="control" name="a" [(ngModel)]="nc.address" required></label>
-              <label class="field"><span>Giới tính *</span><select class="control" name="s" [(ngModel)]="nc.sex"><option value="Male">Nam</option><option value="Female">Nữ</option><option value="Other">Khác</option></select></label>
+              <label class="field"><span>Giới tính *</span><select class="control" name="s" [(ngModel)]="nc.sex"><option value="Male">{{language.pick('Nam','Male')}}</option><option value="Female">{{language.pick('Nữ','Female')}}</option><option value="Other">{{language.pick('Khác','Other')}}</option></select></label>
               <label class="field"><span>Tuổi *</span><input class="control" name="ag" type="number" min="0" [(ngModel)]="nc.age"></label>
-              <label class="field wide"><span>Thẻ tín dụng (tùy chọn, cần để mua ngay)</span><input class="control" name="cc" [(ngModel)]="nc.preferred_credit_card" placeholder="16 chữ số"></label>
               <button class="btn btn-primary wide" [disabled]="busy">Tạo tài khoản &amp; chọn</button>
             </form>
           }
@@ -87,16 +86,16 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
             <label class="field"><span>Trẻ em</span><input class="control" type="number" min="0" [(ngModel)]="children"></label>
             <label class="field"><span>Cao tuổi</span><input class="control" type="number" min="0" [(ngModel)]="seniors"></label>
           </div>
-          <button class="btn btn-primary" (click)="search()" [disabled]="searching">{{searching?'Đang tìm…':'Tìm chuyến (thẳng + nối chuyến)'}}</button>
+          <button class="btn btn-primary" (click)="search()" [disabled]="searching" translate="no">{{searching?language.pick('Đang tìm…', 'Searching…'):language.pick('Tìm chuyến (thẳng + nối chuyến)', 'Search flights (direct + connecting)')}}</button>
           @if(results){
-            <h4>Chiều đi @if(outbound){<span class="pill pill-gold">Đã chọn: {{optText(outbound)}}</span>}</h4>
+          <h4>Chiều đi @if(outbound){<span class="pill pill-gold" translate="no">{{language.pick('Đã chọn:', 'Selected:')}} {{optText(outbound)}}</span>}</h4>
             <table class="table">
               <thead><tr><th>Loại</th><th>Chuyến</th><th>Khởi hành</th><th>Hạng</th><th>Còn</th><th>Giá đoàn</th><th></th></tr></thead>
               <tbody>
                 @for(o of outOptions;track o.key){
                   <tr [class.sel]="outbound?.key===o.key">
-                    <td><span class="pill">{{o.kind==='DIRECT'?'Bay thẳng':'Nối chuyến'}}</span></td>
-                    <td>{{optText(o)}}</td><td>{{dt(o.legs[0]?.scheduled_departure)}}</td><td>{{label(o.cabin)}}</td><td>{{o.seats}}</td><td>{{money(o.price)}}</td>
+                    <td><span class="pill" translate="no">{{o.kind==='DIRECT'?language.pick('Bay thẳng', 'Direct'):language.pick('Nối chuyến', 'Connecting')}}</span></td>
+                    <td translate="no">{{optText(o)}}</td><td>{{dt(o.legs[0]?.scheduled_departure)}}</td><td translate="no">{{label(o.cabin)}}</td><td>{{o.seats}}</td><td>{{money(o.price)}}</td>
                     <td><button class="btn btn-outline" (click)="outbound=o">Chọn</button></td>
                   </tr>
                 }
@@ -104,14 +103,14 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               </tbody>
             </table>
             @if(roundTrip){
-              <h4>Chiều về @if(inbound){<span class="pill pill-gold">Đã chọn: {{optText(inbound)}}</span>}</h4>
+              <h4>Chiều về @if(inbound){<span class="pill pill-gold" translate="no">{{language.pick('Đã chọn:', 'Selected:')}} {{optText(inbound)}}</span>}</h4>
               <table class="table">
                 <thead><tr><th>Loại</th><th>Chuyến</th><th>Khởi hành</th><th>Hạng</th><th>Còn</th><th>Giá đoàn</th><th></th></tr></thead>
                 <tbody>
                   @for(o of inOptions;track o.key){
                     <tr [class.sel]="inbound?.key===o.key">
-                      <td><span class="pill">{{o.kind==='DIRECT'?'Bay thẳng':'Nối chuyến'}}</span></td>
-                      <td>{{optText(o)}}</td><td>{{dt(o.legs[0]?.scheduled_departure)}}</td><td>{{label(o.cabin)}}</td><td>{{o.seats}}</td><td>{{money(o.price)}}</td>
+                      <td><span class="pill" translate="no">{{o.kind==='DIRECT'?language.pick('Bay thẳng', 'Direct'):language.pick('Nối chuyến', 'Connecting')}}</span></td>
+                      <td translate="no">{{optText(o)}}</td><td>{{dt(o.legs[0]?.scheduled_departure)}}</td><td translate="no">{{label(o.cabin)}}</td><td>{{o.seats}}</td><td>{{money(o.price)}}</td>
                       <td><button class="btn btn-outline" (click)="inbound=o">Chọn</button></td>
                     </tr>
                   }
@@ -128,7 +127,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
           <h3>3. Hành khách &amp; ghế</h3>
           @for(p of passengers;track $index){
             <div class="pax">
-              <strong>HK{{$index+1}} · {{paxLabel(p.passenger_type)}}</strong>
+              <strong translate="no">{{language.pick('HK', 'Passenger')}} {{$index+1}} · {{paxLabel(p.passenger_type)}}</strong>
               <div class="form-grid">
                 <label class="field"><span>Họ *</span><input class="control" [(ngModel)]="p.last_name"></label>
                 <label class="field"><span>Tên *</span><input class="control" [(ngModel)]="p.first_name"></label>
@@ -143,7 +142,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
           </div>
           @if(seatLeg){
             <div class="trip-tabs">
-              @for(p of passengers;track $index){<button type="button" [class.on]="seatPax===$index" (click)="seatPax=$index">HK{{$index+1}}: {{seatFor($index,seatLeg.flight_id)||'Tự động'}}</button>}
+              @for(p of passengers;track $index){<button type="button" [class.on]="seatPax===$index" (click)="seatPax=$index">{{language.pick('HK','Passenger')}} {{$index+1}}: {{seatFor($index,seatLeg.flight_id)||language.pick('Tự động','Automatic')}}</button>}
             </div>
             @if(seatLoading){<div class="empty muted">Đang tải sơ đồ ghế…</div>}
             @else if(seatMapData){
@@ -160,18 +159,18 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
                   </div>
                 }
               </div>
-              <button class="btn btn-outline" (click)="clearSeat()">Bỏ chọn ghế HK{{seatPax+1}}</button>
+              <button class="btn btn-outline" (click)="clearSeat()">{{language.pick('Bỏ chọn ghế hành khách','Clear seat for passenger')}} {{seatPax+1}}</button>
             }
           }
           <div class="nav-row">
             <button class="btn btn-outline" (click)="step=2">Quay lại</button>
-            <button class="btn btn-primary" (click)="toCheckout()">Tiếp tục: Giữ chỗ / Mua</button>
+             <button class="btn btn-primary" (click)="toCheckout()" translate="no">{{language.pick('Tiếp tục: Giữ chỗ', 'Continue: Hold booking')}}</button>
           </div>
         }
 
         <!-- STEP 4 -->
         @if(step===4){
-          <h3>4. Giữ chỗ hoặc Mua</h3>
+           <h3 translate="no">{{language.pick('4. Giữ chỗ cho khách', '4. Hold for customer')}}</h3>
           @if(!result){
             @if(quoting){<div class="empty muted">Đang lấy báo giá…</div>}
             @if(quote){
@@ -179,30 +178,24 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               <div class="fare-line"><span>Phí chọn ghế</span><b>{{money(quote.total_seat_fees??quote.seat_fee_total??0)}}</b></div>
               <div class="fare-line total"><span>Tổng</span><b>{{money(quote.total_amount??quote.total??0)}}</b></div>
             }
-            <p class="muted">Khởi hành sớm nhất: <b>{{dt(earliestDeparture)}}</b> (còn {{daysToDeparture}} ngày).</p>
-            <div class="mode-grid">
-              <label class="mode" [class.on]="mode==='block'" [class.disabled]="!canBlock">
-                <input type="radio" name="mode" value="block" [(ngModel)]="mode" [disabled]="!canBlock">
-                <strong>Giữ chỗ (miễn phí)</strong><small>{{canBlock?'Mã BLK-, khách xác nhận/thanh toán sau.':'Chỉ giữ chỗ khi khởi hành còn hơn 14 ngày.'}}</small>
-              </label>
-              <label class="mode" [class.on]="mode==='buy'">
-                <input type="radio" name="mode" value="buy" [(ngModel)]="mode">
-                <strong>Mua ngay (thẻ hồ sơ)</strong><small>{{customer?.has_preferred_credit_card?'Trừ vào thẻ tín dụng trong hồ sơ khách.':'Khách chưa có thẻ hồ sơ – backend sẽ từ chối.'}}</small>
-              </label>
-            </div>
+            <p class="muted">{{language.pick('Khởi hành sớm nhất','Earliest departure')}}: <b>{{dt(earliestDeparture)}}</b> ({{language.pick('còn','in')}} {{daysToDeparture}} {{language.pick('ngày','days')}}).</p>
+             <div class="mode" [class.disabled]="!canBlock">
+               <strong translate="no">{{language.pick('Giữ chỗ (miễn phí)', 'Free booking hold')}}</strong>
+               <small translate="no">{{canBlock?language.pick('Khách nhận mã BLK- và hướng dẫn thanh toán PayPal qua email.', 'The customer receives a BLK- code and PayPal checkout instructions by email.'):language.pick('Không thể giữ chỗ khi khởi hành trong vòng 14 ngày. Khách cần tự đặt và thanh toán PayPal.', 'Holds are unavailable within 14 days of departure. The customer must book and pay using PayPal.')}}</small>
+             </div>
             <div class="nav-row">
               <button class="btn btn-outline" (click)="step=3">Quay lại</button>
-              <button class="btn btn-primary" (click)="submit()" [disabled]="busy">{{busy?'Đang xử lý…':mode==='block'?'Giữ chỗ cho khách':'Mua vé cho khách'}}</button>
+               <button class="btn btn-primary" (click)="submit()" [disabled]="busy||quoting||!canBlock" translate="no">{{busy?language.pick('Đang xử lý…', 'Processing…'):language.pick('Giữ chỗ cho khách', 'Hold for customer')}}</button>
             </div>
           }@else{
             <div class="result print-area">
-              <span class="pill pill-gold">{{result.status}}</span>
-              <div class="code">{{result.confirmation_number||result.blocking_number}}</div>
-              @if(result.pnr_code){<p>PNR: <b>{{result.pnr_code}}</b></p>}
-              <p>Khách: <b>{{customer?.first_name}} {{customer?.last_name}}</b> ({{customer?.email}})</p>
-              <p>Hành trình: {{legsText(result)}}</p>
-              <p>Tổng tiền: <b>{{money(result.total_amount)}}</b></p>
-              @if(result.status==='BLOCKED'){<p class="muted">Hạn xác nhận: trước 14 ngày so với giờ khởi hành.</p>}
+              <span class="pill pill-gold" translate="no">{{statusLabel(result.status)}}</span>
+              <div class="code" translate="no">{{result.confirmation_number||result.blocking_number}}</div>
+              @if(result.pnr_code){<p>PNR: <b translate="no">{{result.pnr_code}}</b></p>}
+              <p>{{language.pick('Khách','Customer')}}: <b translate="no">{{customer?.first_name}} {{customer?.last_name}}</b> (<span translate="no">{{customer?.email}}</span>)</p>
+              <p>{{language.pick('Hành trình','Itinerary')}}: <span translate="no">{{legsText(result)}}</span></p>
+              <p>{{language.pick('Tổng tiền','Total')}}: <b>{{money(result.total_amount)}}</b></p>
+               @if(result.status==='BLOCKED'){<p class="muted" translate="no">{{language.pick('Khách dùng mã giữ chỗ để tra cứu và thanh toán bằng PayPal. Vui lòng kiểm tra email hướng dẫn.', 'The customer can track this hold and pay via PayPal. Please check the instruction email.')}}</p>}
             </div>
             <div class="nav-row no-print">
               <button class="btn btn-outline" (click)="print()">In mã đặt chỗ</button>
@@ -218,8 +211,8 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
           <strong>Khách đang phục vụ</strong>
           @if(customer){
             <div class="selected-customer">
-              <span class="avatar">{{initials(customer)}}</span>
-              <div><strong>{{customer.first_name}} {{customer.last_name}}</strong><small>&#64;{{customer.username}} · {{customer.email}}</small><small>{{customer.phone_number||'—'}}</small></div>
+              <span class="avatar" translate="no">{{initials(customer)}}</span>
+              <div translate="no"><strong>{{customer.first_name}} {{customer.last_name}}</strong><small>&#64;{{customer.username}} · {{customer.email}}</small><small>{{customer.phone_number||'—'}}</small></div>
             </div>
             <button class="btn btn-outline" (click)="resetCustomer()">Đổi khách</button>
           }@else{<p class="muted">Chưa chọn khách.</p>}
@@ -230,11 +223,11 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
             @if(loadingBookings){<p class="muted">Đang tải…</p>}
             @for(b of customerBookings;track b._id){
               <div class="bk">
-                <div><b>{{b.confirmation_number||b.blocking_number}}</b> <span class="pill">{{statusLabel(b.status)}}</span></div>
-                <small>{{typeLabel(b.booking_type)}} · {{money(b.total_amount)}} · {{dt(b.created_at||b.createdAt)}}</small>
+                <div><b translate="no">{{b.confirmation_number||b.blocking_number}}</b> <span class="pill" translate="no">{{statusLabel(b.status)}}</span></div>
+                <small translate="no">{{typeLabel(b.booking_type)}} · {{money(b.total_amount)}} · {{dt(b.created_at||b.createdAt)}}</small>
                 @if(b.status!=='CANCELLED'){
                   <div class="bk-actions">
-                    @if(b.status==='BLOCKED'){<button class="btn btn-primary" (click)="confirmHold(b)" [disabled]="busy">Xác nhận</button>}
+                     @if(b.status==='BLOCKED'){<small translate="no">{{language.pick('Chờ khách thanh toán PayPal', 'Awaiting customer PayPal payment')}}</small>}
                     @if(b.status!=='BLOCKED'){<button class="btn btn-outline" (click)="rescheduleBooking(b)">Đổi</button>}
                     <button class="btn btn-outline danger" (click)="cancelBooking(b)" [disabled]="busy">Hủy</button>
                   </div>
@@ -271,9 +264,15 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
 export class ReservationDeskComponent {
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language = inject(LanguageService);
   api = inject(ApiService);
   router = inject(Router);
-  stepLabels = [{ n: 1 as Step, label: 'Khách hàng' }, { n: 2 as Step, label: 'Chuyến bay' }, { n: 3 as Step, label: 'Hành khách & ghế' }, { n: 4 as Step, label: 'Giữ chỗ / Mua' }];
+  get stepLabels() { return [
+    { n: 1 as Step, label: this.language.pick('Khách hàng', 'Customer') },
+    { n: 2 as Step, label: this.language.pick('Chuyến bay', 'Flights') },
+    { n: 3 as Step, label: this.language.pick('Hành khách & ghế', 'Passengers & seats') },
+     { n: 4 as Step, label: this.language.pick('Giữ chỗ', 'Hold') },
+  ]; }
   step: Step = 1; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; private __notice='';get notice(){return this.__notice}set notice(v:string){this.__notice=v;this.__toast.notifySuccess(v)}; busy = false;
   // step 1
   allCustomers: any[] = []; matches: any[] = []; query = ''; searched = false; loadingCustomers = false; customer: any = null; showCreate = false;
@@ -285,7 +284,7 @@ export class ReservationDeskComponent {
   passengers: any[] = []; seatRequests: any[] = []; seatLeg: any = null; seatPax = 0; seatMapData: any = null; seatLoading = false; private seatCache = new Map<string, any>();
   today = new Date().toISOString().slice(0, 10);
   // step 4
-  quote: any = null; quoting = false; mode: 'block' | 'buy' = 'buy'; result: any = null;
+   quote: any = null; quoting = false; result: any = null;
   // bookings panel
   customerBookings: any[] = []; loadingBookings = false; policies: any[] = [];
 
@@ -307,7 +306,7 @@ export class ReservationDeskComponent {
   }
   async searchCustomer() {
     this.error = ''; const q = this.query.trim().toLowerCase();
-    if (!q) { this.error = 'Nhập email, số điện thoại hoặc username.'; return; }
+    if (!q) { this.error = this.language.pick('Nhập email, số điện thoại hoặc username.','Enter an email, phone number, or username.'); return; }
     try {
       await this.ensureCustomers(true);
       const digits = q.replace(/\D/g, '');
@@ -316,7 +315,7 @@ export class ReservationDeskComponent {
         || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q));
       this.searched = true;
       if (!this.matches.length) { this.showCreate = true; this.prefillCreate(q); }
-    } catch (e) { this.error = this.msg(e, 'Không tải được danh sách khách hàng.'); }
+    } catch (e) { this.error = this.msg(e, this.language.pick('Không tải được danh sách khách hàng.','Unable to load customers.')); }
   }
   private prefillCreate(q: string) {
     if (q.includes('@')) { this.nc.email = q; this.nc.username = q.split('@')[0]; }
@@ -331,39 +330,38 @@ export class ReservationDeskComponent {
   async createCustomer() {
     this.error = '';
     const n = this.nc; const required = ['username', 'password', 'first_name', 'last_name', 'email', 'phone_number', 'address', 'sex'];
-    if (required.some(k => !String(n[k] ?? '').trim()) || n.age === '' || n.age == null) { this.error = 'Vui lòng nhập đủ các trường bắt buộc (*).'; return; }
-    if (String(n.password).length < 6) { this.error = 'Mật khẩu tối thiểu 6 ký tự.'; return; }
+    if (required.some(k => !String(n[k] ?? '').trim()) || n.age === '' || n.age == null) { this.error = this.language.pick('Vui lòng nhập đủ các trường bắt buộc (*).','Complete all required fields (*).'); return; }
+    if (String(n.password).length < 6) { this.error = this.language.pick('Mật khẩu tối thiểu 6 ký tự.','Password must contain at least 6 characters.'); return; }
     const body: any = { ...n, username: n.username.trim(), email: n.email.trim(), age: Math.max(0, Math.floor(Number(n.age) || 0)) };
-    if (!String(body.preferred_credit_card || '').trim()) delete body.preferred_credit_card;
     this.busy = true;
     try {
       // POST /auth/register: public CUSTOMER sign-up (CLERK can't call POST /users). Token returned is ignored – staff session is untouched.
       await firstValueFrom(this.api.register(body));
       await this.ensureCustomers(true);
       const created = this.allCustomers.find(c => String(c.email).toLowerCase() === body.email.toLowerCase() || c.username === body.username);
-      if (!created) throw new Error('Đã tạo tài khoản nhưng không tìm thấy trong danh sách.');
-      this.notice = `Đã tạo tài khoản khách ${created.username}.`;
+      if (!created) throw new Error(this.language.pick('Đã tạo tài khoản nhưng không tìm thấy trong danh sách.','The account was created but could not be found in the customer list.'));
+      this.notice = this.language.pick(`Đã tạo tài khoản khách ${created.username}.`,`Customer account ${created.username} created.`);
       this.showCreate = false; this.nc = this.blankCustomer();
       this.selectCustomer(created);
-    } catch (e) { this.error = this.msg(e, 'Không tạo được tài khoản khách.'); }
+    } catch (e) { this.error = this.msg(e, this.language.pick('Không tạo được tài khoản khách.','Unable to create customer account.')); }
     finally { this.busy = false; }
   }
-  private blankCustomer() { return { username: '', password: '', first_name: '', last_name: '', email: '', phone_number: '', address: '', sex: 'Male', age: 30, preferred_credit_card: '' }; }
+  private blankCustomer() { return { username: '', password: '', first_name: '', last_name: '', email: '', phone_number: '', address: '', sex: 'Male', age: 30 }; }
 
   // ---------- step 2 ----------
   search() {
     this.error = '';
     const origin = this.origin.trim().toUpperCase(), destination = this.destination.trim().toUpperCase();
     this.adults = Math.max(1, Math.floor(Number(this.adults) || 1)); this.children = Math.max(0, Math.floor(Number(this.children) || 0)); this.seniors = Math.max(0, Math.floor(Number(this.seniors) || 0));
-    if (!origin || !destination || !this.departure) { this.error = 'Vui lòng nhập nơi đi, nơi đến và ngày đi.'; return; }
-    if (origin === destination) { this.error = 'Nơi đi và nơi đến phải khác nhau.'; return; }
-    if (this.roundTrip && (!this.returnDate || this.returnDate < this.departure)) { this.error = 'Ngày về phải bằng hoặc sau ngày đi.'; return; }
+    if (!origin || !destination || !this.departure) { this.error = this.language.pick('Vui lòng nhập nơi đi, nơi đến và ngày đi.','Enter origin, destination, and departure date.'); return; }
+    if (origin === destination) { this.error = this.language.pick('Nơi đi và nơi đến phải khác nhau.','Origin and destination must be different.'); return; }
+    if (this.roundTrip && (!this.returnDate || this.returnDate < this.departure)) { this.error = this.language.pick('Ngày về phải bằng hoặc sau ngày đi.','Return date must be on or after the departure date.'); return; }
     const q: any = { origin, destination, departure_date: this.departure, adults: this.adults, children: this.children, seniors: this.seniors, include_connecting: true };
     if (this.roundTrip) q.return_date = this.returnDate;
     this.searching = true; this.outbound = this.inbound = null; this.results = null;
     this.api.searchFlights(q).subscribe({
       next: r => { this.results = r; this.searching = false; },
-      error: e => { this.error = this.msg(e, 'Không tìm được chuyến bay.'); this.searching = false; },
+      error: e => { this.error = this.msg(e, this.language.pick('Không tìm được chuyến bay.','Unable to find flights.')); this.searching = false; },
     });
   }
   get partySize() { return this.adults + this.children + this.seniors; }
@@ -418,7 +416,7 @@ export class ReservationDeskComponent {
     this.seatLoading = true; this.seatMapData = null;
     this.api.seatMap(l.flight_id).subscribe({
       next: r => { this.seatCache.set(l.flight_id, r); if (this.seatLeg === l) this.seatMapData = r; this.seatLoading = false; },
-      error: e => { this.error = this.msg(e, 'Không tải được sơ đồ ghế.'); this.seatLoading = false; },
+      error: e => { this.error = this.msg(e, this.language.pick('Không tải được sơ đồ ghế.','Unable to load seat map.')); this.seatLoading = false; },
     });
   }
   seatFor(pax: number, flightId: string) { return this.seatRequests.find(r => r.passenger_index === pax && r.flight_id === flightId)?.seat_code || ''; }
@@ -432,8 +430,7 @@ export class ReservationDeskComponent {
   fee(s: any) { return Number(s?.fee ?? s?.seat_fee ?? s?.price ?? 0); }
   toCheckout() {
     this.error = '';
-    if (this.passengers.some(p => !String(p.first_name).trim() || !String(p.last_name).trim())) { this.error = 'Nhập họ và tên cho tất cả hành khách.'; return; }
-    this.mode = this.canBlock ? this.mode : 'buy';
+    if (this.passengers.some(p => !String(p.first_name).trim() || !String(p.last_name).trim())) { this.error = this.language.pick('Nhập họ và tên cho tất cả hành khách.','Enter first and last names for every passenger.'); return; }
     this.step = 4; this.loadQuote();
   }
 
@@ -441,27 +438,27 @@ export class ReservationDeskComponent {
   get earliestDeparture() { const t = this.legs.map(l => new Date(l.scheduled_departure || '').getTime()).filter(Number.isFinite); return t.length ? new Date(Math.min(...t)).toISOString() : ''; }
   get daysToDeparture() { const e = this.earliestDeparture; return e ? Math.floor((new Date(e).getTime() - Date.now()) / 86_400_000) : 0; }
   get canBlock() { const e = this.earliestDeparture; return !!e && (new Date(e).getTime() - Date.now()) / 86_400_000 > 14; }
-  private payload(isBlock: boolean) {
+  private payload() {
     const passengers = this.passengers.map(p => { const x: any = { ...p }; for (const k of ['id_card_or_passport', 'date_of_birth']) if (!x[k]) delete x[k]; return x; });
-    return { user_id: this.customer._id, booking_type: this.bookingType, is_block: isBlock, passengers,
+    return { user_id: this.customer._id, booking_type: this.bookingType, is_block: true, passengers,
       legs: this.legs.map(l => ({ flight_id: l.flight_id, inventory_id: l.inventory_id, leg_type: l.leg_type })),
-      seat_requests: this.seatRequests, ...(isBlock ? {} : { payment_method: 'PROFILE_CARD' }) };
+      seat_requests: this.seatRequests };
   }
   loadQuote() {
     this.quoting = true; this.quote = null;
-    this.api.quoteBooking(this.payload(false)).subscribe({
+    this.api.quoteBooking(this.payload()).subscribe({
       next: q => { this.quote = q; this.quoting = false; },
-      error: e => { this.error = this.msg(e, 'Không lấy được báo giá.'); this.quoting = false; },
+      error: e => { this.error = this.msg(e, this.language.pick('Không lấy được báo giá.','Unable to retrieve quote.')); this.quoting = false; },
     });
   }
   async submit() {
     this.error = '';
-    if (this.mode === 'block' && !this.canBlock) { this.error = 'Chỉ được giữ chỗ khi ngày khởi hành còn hơn 14 ngày.'; return; }
+    if (!this.canBlock) { this.error = this.language.pick('Chỉ được giữ chỗ khi ngày khởi hành còn hơn 14 ngày. Khách cần tự đặt và thanh toán PayPal.', 'Holds require departure more than 14 days away. The customer must book and pay via PayPal.'); return; }
     this.busy = true;
     try {
-      this.result = await firstValueFrom(this.api.createBooking(this.payload(this.mode === 'block')));
+      this.result = await firstValueFrom(this.api.createBooking(this.payload()));
       this.loadBookings();
-    } catch (e) { this.error = this.msg(e, 'Không tạo được booking.'); }
+    } catch (e) { this.error = this.msg(e, this.language.pick('Không tạo được booking.','Unable to create booking.')); }
     finally { this.busy = false; }
   }
   legsText(b: any) { const c = b?.flight_coupons || b?.legs || []; return c.length ? c.map((x: any) => x.flight_number || x.flight_id?.flight_number || '').filter(Boolean).join(' + ') || this.legs.map(l => l.flight_number).join(' + ') : this.legs.map(l => l.flight_number).join(' + '); }
@@ -474,15 +471,8 @@ export class ReservationDeskComponent {
     this.loadingBookings = true;
     this.api.customerBookings(this.customer._id).subscribe({
       next: r => { this.customerBookings = (r || []).sort((a: any, b: any) => String(b.created_at || b.createdAt || '').localeCompare(String(a.created_at || a.createdAt || ''))); this.loadingBookings = false; },
-      error: e => { this.error = this.msg(e, 'Không tải được booking của khách.'); this.loadingBookings = false; },
+      error: e => { this.error = this.msg(e, this.language.pick('Không tải được booking của khách.','Unable to load customer bookings.')); this.loadingBookings = false; },
     });
-  }
-  async confirmHold(b: any) {
-    if (!confirm(`Xác nhận giữ chỗ ${b.blocking_number} và thanh toán bằng thẻ hồ sơ của khách?`)) return;
-    this.busy = true; this.error = '';
-    try { const r = await firstValueFrom(this.api.confirm({ blocking_number: b.blocking_number, payment_method: 'PROFILE_CARD' })); this.notice = `Đã xác nhận: ${r.confirmation_number || b.blocking_number}.`; this.loadBookings(); }
-    catch (e) { this.error = this.msg(e, 'Không xác nhận được giữ chỗ.'); }
-    finally { this.busy = false; }
   }
   rescheduleBooking(b: any) { this.router.navigate(['/reschedule'], { queryParams: { code: b.confirmation_number || b.pnr_code } }); }
   async cancelBooking(b: any) {
@@ -493,14 +483,27 @@ export class ReservationDeskComponent {
       const live = tracked?.booking_info || b;
       const pct = this.refundPercent(live, tracked?.flight_coupons || []);
       const amount = Math.round(Number(live.total_amount || 0) * pct / 100);
-      const q = live.status === 'BLOCKED'
-        ? `Hủy giữ chỗ ${code}? Ghế sẽ được giải phóng, không phát sinh hoàn tiền.`
-        : `Hủy booking ${code}?\nTheo chính sách: hoàn dự kiến ${pct}% ≈ ${this.money(amount)} về phương thức thanh toán gốc.`;
-      if (!confirm(q)) return;
+      const isBlocked = live.status === 'BLOCKED';
+      const confirmed = await this.__toast.confirm({
+        titleVi: isBlocked ? 'Hủy giữ chỗ?' : 'Hủy đặt chỗ?',
+        titleEn: isBlocked ? 'Cancel hold?' : 'Cancel booking?',
+        messageVi: isBlocked
+          ? `Hủy giữ chỗ ${code}? Ghế sẽ được giải phóng, không phát sinh hoàn tiền.`
+          : `Hủy đặt chỗ ${code}? Theo chính sách: hoàn dự kiến ${pct}% ≈ ${this.money(amount)} về phương thức thanh toán gốc.`,
+        messageEn: isBlocked
+          ? `Cancel hold ${code}? Seats will be released and no refund is due.`
+          : `Cancel booking ${code}? Estimated refund: ${pct}% ≈ ${this.money(amount)} to the original payment method.`,
+        confirmVi: 'Hủy đặt chỗ',
+        confirmEn: 'Cancel booking',
+      });
+      if (!confirmed) return;
       const r = await firstValueFrom(this.api.cancel(code, 'Hủy tại quầy bởi nhân viên'));
-      this.notice = `Đã hủy. Mã hủy: ${r.cancellation_number}. Hoàn ${this.money(r.refund_amount)} (${r.refund_percentage ?? 0}%).`;
+      this.notice = this.language.pick(
+        `Đã hủy. Mã hủy: ${r.cancellation_number}. Hoàn ${this.money(r.refund_amount)} (${r.refund_percentage ?? 0}%).`,
+        `Cancelled. Cancellation number: ${r.cancellation_number}. Refund ${this.money(r.refund_amount)} (${r.refund_percentage ?? 0}%).`,
+      );
       this.loadBookings();
-    } catch (e) { this.error = this.msg(e, 'Không hủy được booking.'); }
+    } catch (e) { this.error = this.msg(e, this.language.pick('Không hủy được booking.','Unable to cancel booking.')); }
     finally { this.busy = false; }
   }
   private refundPercent(booking: any, coupons: any[]) {
@@ -514,11 +517,11 @@ export class ReservationDeskComponent {
 
   // ---------- helpers ----------
   initials(c: any) { return `${c?.first_name?.[0] || ''}${c?.last_name?.[0] || c?.username?.[0] || ''}`.toUpperCase(); }
-  label(v: string) { return ({ ECONOMY: 'Phổ thông', CLUB: 'Club', BUSINESS: 'Thương gia', FIRST: 'Hạng nhất' } as any)[v] || v; }
-  paxLabel(v: string) { return ({ ADULT: 'Người lớn', CHILD: 'Trẻ em', SENIOR: 'Cao tuổi' } as any)[v] || v; }
-  statusLabel(v: string) { return ({ BLOCKED: 'Đang giữ chỗ', CONFIRMED: 'Đã xác nhận', RESCHEDULED: 'Đã đổi chuyến', CANCELLED: 'Đã hủy' } as any)[v] || v; }
-  typeLabel(v: string) { return ({ ONE_WAY: 'Một chiều', ROUND_TRIP: 'Khứ hồi', CONNECTING: 'Nối chuyến' } as any)[v] || v; }
-  money(v: number) { return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(v) || 0); }
-  dt(v?: string) { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? v : new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(d); }
-  msg(e: any, f: string) { const m = e?.error?.message; return Array.isArray(m) ? m.join(' · ') : m || e?.message || f; }
+  label(v: string) { return this.language.cabinLabel(v); }
+  paxLabel(v: string) { return this.language.passengerTypeLabel(v); }
+  statusLabel(v: string) { return this.language.bookingStatusLabel(v); }
+  typeLabel(v: string) { return this.language.bookingTypeLabel(v); }
+  money(v: number) { return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US', { style:'currency', currency:'VND', maximumFractionDigits:0 }).format(Number(v) || 0); }
+  dt(v?: string) { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? v : new Intl.DateTimeFormat(this.language.language()==='vi'?'vi-VN':'en-US', { dateStyle:'short', timeStyle:'short' }).format(d); }
+  msg(e: any, f: string) { const m = e?.error?.message; const detail=Array.isArray(m)?m.join(' · '):m||e?.message||f; return this.language.translateNotice(detail); }
 }

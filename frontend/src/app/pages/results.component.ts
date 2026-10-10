@@ -5,6 +5,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { BookingLeg, BookingStateService } from '../core/booking-state.service';
 import { IconComponent } from '../shared/icon.component';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -15,8 +16,8 @@ import { IconComponent } from '../shared/icon.component';
         <button class="btn back" (click)="router.navigate(['/'])">← Sửa tìm kiếm</button>
         <div class="summary-title">
           <div class="eyebrow gold">KẾT QUẢ CHUYẾN BAY</div>
-          <h1>{{q['origin']}} <span>→</span> {{q['destination']}}</h1>
-          <p>{{outboundDateLabel}}{{q['return_date'] ? ' → '+q['return_date'] : ''}} · {{passengers}} hành khách · So sánh mọi hạng vé</p>
+          <h1 translate="no">{{q['origin']}} <span>→</span> {{q['destination']}}</h1>
+          <p><span translate="no">{{outboundDateLabel}}{{q['return_date'] ? ' → '+q['return_date'] : ''}} · {{passengers}} {{language.pick('hành khách', 'passengers')}}</span> · So sánh mọi hạng vé</p>
         </div>
       </div>
     </section>
@@ -30,18 +31,18 @@ import { IconComponent } from '../shared/icon.component';
         @if(unresolvedLocations.length){
           <div class="card location-alert location-error">
             <app-icon name="search" [size]="20"/>
-            <div><strong>Chưa nhận diện được {{unresolvedLocations.join(' và ')}}</strong><p>Hãy quay lại và chọn thành phố hoặc sân bay từ danh sách gợi ý để tìm chính xác hơn.</p></div>
+            <div><strong>{{language.pick('Chưa nhận diện được','Could not identify')}} {{unresolvedLocations.join(language.pick(' và ',' and '))}}</strong><p>Hãy quay lại và chọn thành phố hoặc sân bay từ danh sách gợi ý để tìm chính xác hơn.</p></div>
           </div>
         }
         @for(message of locationNotices;track message){
           <div class="card location-alert">
             <app-icon name="pin" [size]="20"/>
-            <div><strong>Điểm bay đã được xác định</strong><p>{{message}}</p></div>
+            <div><strong>{{language.pick('Điểm bay đã được xác định','Airport resolved')}}</strong><p translate="no">{{message}}</p></div>
           </div>
         }
         <section class="direction">
           <div class="section-head">
-            <div><div class="eyebrow">CHIỀU ĐI · {{outboundDateLabel}}</div><h2>{{q['origin']}} → {{q['destination']}}</h2></div>
+            <div><div class="eyebrow">{{language.pick('CHIỀU ĐI','OUTBOUND')}} · {{outboundDateLabel}}</div><h2 translate="no">{{q['origin']}} → {{q['destination']}}</h2></div>
             @if(selectedOutbound){<span class="pill pill-success">Đã chọn chiều đi</span>}
           </div>
           <ng-container *ngTemplateOutlet="flightGroup; context:{direct:direct, connections:connections, direction:'OUTBOUND'}"/>
@@ -50,7 +51,7 @@ import { IconComponent } from '../shared/icon.component';
         @if(isRoundTrip){
           <section class="direction return-block" [class.dimmed]="!selectedOutbound">
             <div class="section-head">
-              <div><div class="eyebrow">CHIỀU VỀ · {{q['return_date']}}</div><h2>{{q['destination']}} → {{q['origin']}}</h2></div>
+              <div><div class="eyebrow">{{language.pick('CHIỀU VỀ','RETURN')}} · {{q['return_date']}}</div><h2 translate="no">{{q['destination']}} → {{q['origin']}}</h2></div>
               @if(selectedInbound){<span class="pill pill-success">Đã chọn chiều về</span>}
             </div>
             @if(!selectedOutbound){<div class="notice">Chọn chuyến đi trước, sau đó chọn chuyến về.</div>}
@@ -62,14 +63,14 @@ import { IconComponent } from '../shared/icon.component';
           <section class="card policies">
             <div><div class="eyebrow">CHÍNH SÁCH HỦY VÉ</div><h3>Hoàn tiền theo thời điểm hủy</h3><p>Áp dụng theo số ngày còn lại trước chuyến khởi hành sớm nhất.</p></div>
             <div class="policy-list">
-              @for(p of policies;track p._id){<span><b>{{p.refund_percentage}}%</b><small>{{p.min_days_before}} – {{p.max_days_before??'∞'}} ngày</small></span>}
+              @for(p of policies;track p._id){<span><b>{{p.refund_percentage}}%</b><small>{{p.min_days_before}} – {{p.max_days_before??'∞'}} {{language.pick('ngày','days')}}</small></span>}
             </div>
           </section>
         }
 
         @if(isRoundTrip && selectedOutbound && selectedInbound){
           <div class="continue card">
-            <div><strong>Đã chọn đủ hành trình khứ hồi</strong><span>{{selectionText(selectedOutbound)}} · {{selectionText(selectedInbound)}}</span></div>
+            <div><strong>Đã chọn đủ hành trình khứ hồi</strong><span translate="no">{{selectionText(selectedOutbound)}} · {{selectionText(selectedInbound)}}</span></div>
             <button class="btn btn-primary" (click)="continueRoundTrip()">Tiếp tục nhập hành khách</button>
           </div>
         }
@@ -79,7 +80,7 @@ import { IconComponent } from '../shared/icon.component';
             <div class="group-title">Chuyến bay thẳng</div>
             @for(f of direct;track directKey(f)){
               <article class="card flight" [class.chosen]="isDirectChosen(f,direction)">
-                <div class="code"><small>APTECH AIRLINES · {{dateLabel(f)}}</small><strong>{{f.flight_number}}</strong>@if(f.early_bird_label){<span class="pill pill-gold">{{f.early_bird_label}}</span>}@if(f.load_adjustment_percent){<span class="pill pill-success">{{f.load_adjustment_label}} {{f.load_adjustment_percent>0?'+':''}}{{f.load_adjustment_percent}}%</span>}@if(f.pricing_profile_name){<small>{{f.pricing_profile_name}}</small>}</div>
+                <div class="code"><small>APTECH AIRLINES · {{dateLabel(f)}}</small><strong translate="no">{{f.flight_number}}</strong>@if(f.early_bird_label){<span class="pill pill-gold">{{f.early_bird_label}}</span>}@if(f.load_adjustment_percent){<span class="pill pill-success">{{f.load_adjustment_label}} {{f.load_adjustment_percent>0?'+':''}}{{f.load_adjustment_percent}}%</span>}@if(f.pricing_profile_name){<small translate="no">{{f.pricing_profile_name}}</small>}</div>
                 <div class="time"><strong>{{clock(f.scheduled_departure_local||f.scheduled_departure)}}</strong><span>{{f.origin_iata}}</span></div>
                 <div class="line"><span>{{duration(f.duration_minutes)}}</span><i></i><small>Bay thẳng</small></div>
                 <div class="time right"><strong>{{clock(f.scheduled_arrival_local||f.scheduled_arrival)}}</strong><span>{{f.dest_iata}}</span></div>
@@ -87,9 +88,9 @@ import { IconComponent } from '../shared/icon.component';
                   <span class="fare-heading">Chọn hạng vé</span>
                   @for(v of f.variants;track v.inventory_id){
                     <div class="fare-option" [class.on]="isDirectCabinChosen(f,v,direction)">
-                      <div><b>{{label(v.cabin_class)}}</b><small>Còn {{v.available_seats}} ghế</small></div>
+                      <div><b translate="no">{{label(v.cabin_class)}}</b><small translate="no">{{language.pick('Còn', 'Available:')}} {{v.available_seats}} {{language.pick('ghế', 'seats')}}</small></div>
                       <strong>{{money(v.total_party_price)}}</strong>
-                      <button class="btn btn-primary" [disabled]="direction==='INBOUND'&&!selectedOutbound" (click)="chooseDirect(f,v,direction)">{{isDirectCabinChosen(f,v,direction)?'Đã chọn':'Chọn'}}</button>
+                      <button class="btn btn-primary" translate="no" [disabled]="direction==='INBOUND'&&!selectedOutbound" (click)="chooseDirect(f,v,direction)">{{isDirectCabinChosen(f,v,direction)?language.pick('Đã chọn', 'Selected'):language.pick('Chọn', 'Select')}}</button>
                     </div>
                   }
                 </div>
@@ -101,16 +102,16 @@ import { IconComponent } from '../shared/icon.component';
             <div class="group-title connect-title">Chuyến bay nối</div>
             @for(r of connections;track routeKey(r,$index)){
               <article class="card connection" [class.chosen]="isConnectionChosen(r,direction)">
-                <div class="conn-head"><div><span class="pill pill-gold">{{r.legs?.length||2}} chặng · {{dateLabel(r.legs?.[0])}}</span><h3>{{r.legs?.[0]?.origin_iata}} → {{r.transit_airport||'Transit'}} → {{r.legs?.[r.legs.length-1]?.dest_iata}}</h3></div><b>{{duration(r.total_duration_minutes)}}</b></div>
+                <div class="conn-head"><div><span class="pill pill-gold">{{r.legs?.length||2}} {{language.pick('chặng','legs')}} · {{dateLabel(r.legs?.[0])}}</span><h3 translate="no">{{r.legs?.[0]?.origin_iata}} → {{r.transit_airport||'Transit'}} → {{r.legs?.[r.legs.length-1]?.dest_iata}}</h3></div><b>{{duration(r.total_duration_minutes)}}</b></div>
                 @for(l of r.legs;track l.flight_id){<div class="leg"><strong>{{l.flight_number}}</strong><span>{{l.origin_iata}} {{clock(l.scheduled_departure_local||l.scheduled_departure||l.departure)}}</span><app-icon name="arrow" [size]="15"/><span>{{l.dest_iata}} {{clock(l.scheduled_arrival_local||l.scheduled_arrival||l.arrival)}}</span></div>}
                 <div class="conn-foot">
-                  <span class="muted">Nối chuyến: {{duration(layover(r))}}</span>
+                  <span class="muted">{{language.pick('Nối chuyến','Layover')}}: {{duration(layover(r))}}</span>
                   <div class="connection-fares">
                     @for(v of connectionCabinOptions(r);track v.cabin_class){
                       <div class="fare-option" [class.on]="isConnectionCabinChosen(r,v.cabin_class,direction)">
-                        <div><b>{{label(v.cabin_class)}}</b><small>Còn tối thiểu {{v.available_seats}} ghế</small></div>
+                        <div><b translate="no">{{label(v.cabin_class)}}</b><small translate="no">{{language.pick('Còn tối thiểu', 'At least')}} {{v.available_seats}} {{language.pick('ghế', 'seats')}} {{language.pick('còn trống', 'available')}}</small></div>
                         <strong>{{money(v.total_party_price)}}</strong>
-                        <button class="btn btn-primary" [disabled]="direction==='INBOUND'&&!selectedOutbound" (click)="chooseConnection(r,v.cabin_class,direction)">{{isConnectionCabinChosen(r,v.cabin_class,direction)?'Đã chọn':'Chọn'}}</button>
+                        <button class="btn btn-primary" translate="no" [disabled]="direction==='INBOUND'&&!selectedOutbound" (click)="chooseConnection(r,v.cabin_class,direction)">{{isConnectionCabinChosen(r,v.cabin_class,direction)?language.pick('Đã chọn', 'Selected'):language.pick('Chọn', 'Select')}}</button>
                       </div>
                     }
                   </div>
@@ -133,6 +134,7 @@ import { IconComponent } from '../shared/icon.component';
 export class ResultsComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language=inject(LanguageService);
   private route=inject(ActivatedRoute);
   private api=inject(ApiService);
   private state=inject(BookingStateService);
@@ -147,10 +149,10 @@ export class ResultsComponent{
   get isRoundTrip(){return !!this.q['return_date']}
   get passengers(){return Number(this.q['adults']||1)+Number(this.q['children']||0)+Number(this.q['seniors']||0)}
   get outboundDateLabel(){return this.q['departure_date_end']?`${this.q['departure_date']} – ${this.q['departure_date_end']}`:this.q['departure_date']}
-  get unresolvedLocations(){const x:string[]=[];if(this.data?.origin_scope?.kind==='none')x.push('nơi đi');if(this.data?.dest_scope?.kind==='none')x.push('nơi đến');return x}
-  get locationNotices(){const x:string[]=[];const o=this.locationNotice(this.data?.origin_info,this.data?.origin_scope,'Nơi đi');const d=this.locationNotice(this.data?.dest_info,this.data?.dest_scope,'Nơi đến');if(o)x.push(o);if(d)x.push(d);return x}
+  get unresolvedLocations(){const x:string[]=[];if(this.data?.origin_scope?.kind==='none')x.push(this.language.pick('nơi đi','origin'));if(this.data?.dest_scope?.kind==='none')x.push(this.language.pick('nơi đến','destination'));return x}
+  get locationNotices(){const x:string[]=[];const o=this.locationNotice(this.data?.origin_info,this.data?.origin_scope,'Nơi đi','Origin');const d=this.locationNotice(this.data?.dest_info,this.data?.dest_scope,'Nơi đến','Destination');if(o)x.push(o);if(d)x.push(d);return x}
 
-  load(){this.loading=true;this.error='';this.api.searchFlights({...this.q,adults:Number(this.q['adults']||1),children:Number(this.q['children']||0),seniors:Number(this.q['seniors']||0),include_connecting:true}).subscribe({next:r=>{this.data=r;this.loading=false},error:e=>{this.error=this.message(e,'Không thể tải kết quả tìm kiếm. Vui lòng thử lại.');this.loading=false}})}
+  load(){this.loading=true;this.error='';this.api.searchFlights({...this.q,adults:Number(this.q['adults']||1),children:Number(this.q['children']||0),seniors:Number(this.q['seniors']||0),include_connecting:true}).subscribe({next:r=>{this.data=r;this.loading=false},error:e=>{this.error=this.message(e,this.language.pick('Không thể tải kết quả tìm kiếm. Vui lòng thử lại.','Unable to load search results. Please try again.'));this.loading=false}})}
 
   chooseDirect(group:any,variant:any,direction:'OUTBOUND'|'INBOUND'){
     const option={kind:'DIRECT',source:variant,legs:this.normalizeDirect(group,variant,direction)};
@@ -208,7 +210,7 @@ export class ResultsComponent{
   isDirectCabinChosen(group:any,variant:any,direction:string){const chosen=direction==='OUTBOUND'?this.selectedOutbound:this.selectedInbound;const leg=chosen?.legs?.find((l:any)=>String(l.flight_id)===String(group.flight_id||group._id));return !!leg&&String(leg.inventory_id)===String(variant.inventory_id)}
   isConnectionChosen(route:any,direction:string){const chosen=direction==='OUTBOUND'?this.selectedOutbound:this.selectedInbound;if(!chosen)return false;const itemFlights=(route?.legs||[]).map((l:any)=>String(l.flight_id||l._id||''));const chosenFlights=(chosen?.legs||[]).map((l:any)=>String(l.flight_id||l._id||''));return itemFlights.length>0&&itemFlights.join('>')===chosenFlights.join('>')}
   isConnectionCabinChosen(route:any,cabinClass:string,direction:string){return this.isConnectionChosen(route,direction)&&((direction==='OUTBOUND'?this.selectedOutbound:this.selectedInbound)?.legs||[]).every((l:any)=>l.cabin_class===cabinClass)}
-  selectionText(x:any){const legs=x?.legs||[];return legs.map((l:any)=>l.flight_number).filter(Boolean).join(' + ')||'Hành trình đã chọn'}
+  selectionText(x:any){const legs=x?.legs||[];return legs.map((l:any)=>l.flight_number).filter(Boolean).join(' + ')||this.language.pick('Hành trình đã chọn','Selected itinerary')}
   private optionKey(option:any){return(option?.legs||[]).map((l:any)=>`${l.flight_id||''}:${l.inventory_id||''}`).join('>')}
   private restoreSelection(){
     this.selectedOutbound=null;this.selectedInbound=null;
@@ -241,12 +243,12 @@ export class ResultsComponent{
       return{cabin_class:cabin,total_party_price:inventories.reduce((s:number,i:any)=>s+Number(i?.total_party_price||0),0),available_seats:Math.min(...inventories.map((i:any)=>Number(i?.available_seats||0)))};
     }).filter(x=>x.available_seats>=this.passengers).sort((a,b)=>this.cabinRank(a.cabin_class)-this.cabinRank(b.cabin_class));
   }
-  label(v:string){return({ECONOMY:'Phổ thông',CLUB:'Club',BUSINESS:'Thương gia',FIRST:'Hạng nhất'} as any)[v]||v}
+  label(v:string){return this.language.cabinLabel(v)}
   duration(m:number){m=Number(m||0);return`${Math.floor(m/60)}h ${m%60}m`}
   layover(r:any){const x=r.layover_minutes;return Array.isArray(x)?x.reduce((a:number,b:number)=>a+b,0):Number(x||0)}
   clock(v:string){const m=(v||'').match(/(?:T|\s)(\d{2}:\d{2})/);return m?.[1]||'--:--'}
   dateLabel(f:any){const direct=f?.departure_date;if(direct)return direct;const v=f?.scheduled_departure_local||f?.scheduled_departure||f?.departure||'';const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);return m?.[1]||this.q['departure_date']||'—'}
-  money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
+  money(v:number){return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
   private groupDirect(rows:any[]){
     const groups=new Map<string,any>();
     for(const row of rows){
@@ -258,19 +260,26 @@ export class ResultsComponent{
   }
   private toCabinOption(v:any){return{inventory_id:String(v?.inventory_id||v?._id||v?.id||''),cabin_class:v?.cabin_class,available_seats:Number(v?.available_seats||0),total_party_price:Number(v?.total_party_price||0),base_price_per_adult:Number(v?.base_price_per_adult||v?.base_price||0)}}
   private cabinRank(cabin:string){return({ECONOMY:1,CLUB:2,BUSINESS:3,FIRST:4} as Record<string,number>)[String(cabin||'').toUpperCase()]||99}
-  private locationNotice(info:any,scope:any,prefix:string){
+  private locationNotice(info:any,scope:any,prefixVi:string,prefixEn:string){
     if(!info||scope?.kind==='none')return '';
     const suggestion=info.nearest_suggestion;
     if(info.using_nearest_airport&&suggestion?.airport?.iata_code){
       const distance=suggestion.distance_km!=null?` (${suggestion.distance_km} km)`:'';
-      return `${prefix} “${info.query}” chưa được khai thác trực tiếp. Hệ thống đang dùng ${suggestion.airport.iata_code} – ${suggestion.airport.airport_name||suggestion.airport.city_name||'sân bay gần nhất'}${distance}.`;
+      const airportName=suggestion.airport.airport_name||suggestion.airport.city_name||this.language.pick('sân bay gần nhất','nearest airport');
+      return this.language.pick(
+        `${prefixVi} “${info.query}” chưa được khai thác trực tiếp. Hệ thống đang dùng ${suggestion.airport.iata_code} – ${airportName}${distance}.`,
+        `${prefixEn} “${info.query}” is not served directly. Using ${suggestion.airport.iata_code} – ${airportName}${distance}.`,
+      );
     }
     const query=String(info.query||'').trim();
     const resolved=String(info.resolved_iata||'').trim();
     if(query&&resolved&&query.toUpperCase()!==resolved.toUpperCase()){
-      return `${prefix} “${query}” được xác định là ${scope?.label||resolved}${scope?.iata_codes?.length===1?` (${resolved})`:''}.`;
+      return this.language.pick(
+        `${prefixVi} “${query}” được xác định là ${scope?.label||resolved}${scope?.iata_codes?.length===1?` (${resolved})`:''}.`,
+        `${prefixEn} “${query}” was resolved as ${scope?.label||resolved}${scope?.iata_codes?.length===1?` (${resolved})`:''}.`,
+      );
     }
     return '';
   }
-  private message(e:any,fallback:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||fallback}
+  private message(e:any,fallback:string){const m=e?.error?.message;return this.language.translateNotice(Array.isArray(m)?m.join(' · '):m||fallback)}
 }

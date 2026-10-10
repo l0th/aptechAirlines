@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { PaymentMethod, PaymentTransaction } from './bookings.schema';
 
 export interface AllocatedRefundItem {
@@ -17,6 +18,32 @@ export interface AllocatedRefundItem {
   provider_refund_id?: string;
   provider_status?: string;
   failure_reason?: string;
+}
+
+/** Never commit a fare reduction that cannot be refunded to the original PayPal captures. */
+export function assertPayPalRefundAllocations(
+  allocations: AllocatedRefundItem[],
+  requestedAmountVnd: number,
+): void {
+  const allocatedTotal = allocations.reduce((sum, item) => sum + item.amount, 0);
+  const hasValidSources = allocations.length > 0 && allocations.every((item) =>
+    item.transaction_type === 'RESCHEDULE_REFUND' &&
+    item.status === 'PENDING' &&
+    item.payment_method === PaymentMethod.PAYPAL &&
+    !!item.source_payment_reference &&
+    !!item.provider_capture_id &&
+    !!item.provider_currency &&
+    Number(item.provider_amount) > 0 &&
+    Number(item.exchange_rate_vnd_per_unit) > 0 &&
+    Number.isFinite(item.amount) && item.amount > 0,
+  );
+
+  if (!Number.isFinite(requestedAmountVnd) || requestedAmountVnd <= 0 ||
+      Math.abs(allocatedTotal - requestedAmountVnd) > 0.01 || !hasValidSources) {
+    throw new BadRequestException(
+      'Cannot refund the full reschedule difference to verified PayPal captures. Please contact support.',
+    );
+  }
 }
 
 /**

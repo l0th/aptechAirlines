@@ -13,25 +13,25 @@ import { BrandLogoComponent } from './brand-logo.component';
     <div class="container nav">
       <a routerLink="/" class="brand" aria-label="Aptech Airlines"><app-brand-logo [compact]="true"/></a>
       <nav>
-        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}">Tìm chuyến</a>
-        <a routerLink="/lookup" routerLinkActive="active">Lịch bay</a>
-        <a routerLink="/trips" routerLinkActive="active">Chuyến đi</a>
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}">{{lang.pick('Tìm chuyến','Find flights')}}</a>
+        <a routerLink="/lookup" routerLinkActive="active">{{lang.pick('Lịch bay','Flight schedule')}}</a>
+        <a routerLink="/trips" routerLinkActive="active">{{lang.pick('Chuyến đi','My trips')}}</a>
         <a routerLink="/skymiles" routerLinkActive="active">SkyMiles</a>
       </nav>
       <div class="account">
-        <div class="language-switch" role="group" aria-label="Chuyển đổi ngôn ngữ"><button type="button" [class.active]="lang.language()==='vi'" (click)="lang.setLanguage('vi')">VI</button><button type="button" [class.active]="lang.language()==='en'" (click)="lang.setLanguage('en')">EN</button></div>
+        <div class="language-switch" role="group" [attr.aria-label]="lang.pick('Chuyển đổi ngôn ngữ','Change language')"><button type="button" [class.active]="lang.language()==='vi'" (click)="lang.setLanguage('vi')">VI</button><button type="button" [class.active]="lang.language()==='en'" (click)="lang.setLanguage('en')">EN</button></div>
         @if(auth.staff()){<a class="admin-link" routerLink="/admin">Staff Portal</a>}
-        @if(auth.authenticated()){<button class="user-btn" routerLink="/profile"><app-icon name="user" [size]="16"/>{{auth.user()?.first_name||auth.user()?.username}}</button><button class="logout" (click)="auth.logout()">Thoát</button>}@else{<a class="login" routerLink="/auth">Đăng nhập</a>}
+        @if(auth.authenticated()){<button class="user-btn" routerLink="/profile"><app-icon name="user" [size]="16"/>{{auth.user()?.first_name||auth.user()?.username}}</button><button class="logout" (click)="auth.logout()">{{lang.pick('Thoát','Log out')}}</button>}@else{<a class="login" routerLink="/auth">{{lang.pick('Đăng nhập','Log in')}}</a>}
       </div>
     </div>
   </header>
   @if(auth.staff()&&booking.staffCustomer()){
     <div class="staff-context">
       <div class="container staff-context-inner">
-        <span>ĐANG PHỤC VỤ</span>
+        <span>{{lang.pick('ĐANG PHỤC VỤ','SERVING CUSTOMER')}}</span>
         <strong>{{booking.staffCustomer()?.first_name}} {{booking.staffCustomer()?.last_name}}</strong>
         <small>@{{booking.staffCustomer()?.username}} · {{booking.staffCustomer()?.email}}</small>
-        <a routerLink="/admin/reservation-desk">Đổi khách hàng</a>
+        <a routerLink="/admin/reservation-desk">{{lang.pick('Đổi khách hàng','Change customer')}}</a>
       </div>
     </div>
   }
@@ -41,13 +41,13 @@ import { BrandLogoComponent } from './brand-logo.component';
     <div class="container footer-main">
       <div class="footer-about">
         <app-brand-logo/>
-        <p>Bay thông minh hơn với hành trình rõ ràng, quản lý vé trực tuyến, ghế linh hoạt và SkyMiles cho khách hàng thân thiết.</p>
-        <div class="trust-row"><span>330 ngày đặt trước</span><span>PayPal Checkout</span><span>VI / EN</span></div>
+        <p>{{lang.pick('Bay thông minh hơn với hành trình rõ ràng, quản lý vé trực tuyến, ghế linh hoạt và SkyMiles cho khách hàng thân thiết.','Fly smarter with transparent itineraries, online ticket management, flexible seating and SkyMiles loyalty rewards.')}}</p>
+        <div class="trust-row"><span>{{lang.pick('330 ngày đặt trước','Book up to 330 days ahead')}}</span><span>PayPal Checkout</span><span>VI / EN</span></div>
       </div>
-      <div class="footer-col"><strong>Khám phá</strong><a routerLink="/">Tìm chuyến bay</a><a routerLink="/lookup">Lịch bay</a><a routerLink="/skymiles">SkyMiles</a></div>
-      <div class="footer-col"><strong>Quản lý chuyến đi</strong><a routerLink="/trips">Chuyến đi của tôi</a><a routerLink="/reschedule-info">Đổi chuyến</a><a routerLink="/cancellation-refund">Hủy vé & hoàn tiền</a></div>
-      <div class="footer-col"><strong>Trải nghiệm bay</strong><a routerLink="/seat-fees">Chọn ghế & phụ phí</a><a routerLink="/track">Tra cứu vé</a><a routerLink="/profile">Hồ sơ khách hàng</a></div>
-      <div class="footer-col"><strong>Hỗ trợ</strong><span>Giữ chỗ khi chuyến còn hơn 14 ngày</span><span>Hoàn tiền theo nguồn thanh toán gốc</span><span>Thanh toán online qua PayPal</span></div>
+      <div class="footer-col"><strong>{{lang.pick('Khám phá','Explore')}}</strong><a routerLink="/">{{lang.pick('Tìm chuyến bay','Find flights')}}</a><a routerLink="/lookup">{{lang.pick('Lịch bay','Flight schedule')}}</a><a routerLink="/skymiles">SkyMiles</a></div>
+      <div class="footer-col"><strong>{{lang.pick('Quản lý chuyến đi','Manage trips')}}</strong><a routerLink="/trips">{{lang.pick('Chuyến đi của tôi','My trips')}}</a><a routerLink="/reschedule-info">{{lang.pick('Đổi chuyến','Change flight')}}</a><a routerLink="/cancellation-refund">{{lang.pick('Hủy vé & hoàn tiền','Cancellation & refunds')}}</a></div>
+      <div class="footer-col"><strong>{{lang.pick('Trải nghiệm bay','Onboard experience')}}</strong><a routerLink="/seat-fees">{{lang.pick('Chọn ghế & phụ phí','Seats & fees')}}</a><a routerLink="/track">{{lang.pick('Tra cứu vé','Track booking')}}</a><a routerLink="/profile">{{lang.pick('Hồ sơ khách hàng','My profile')}}</a></div>
+      <div class="footer-col"><strong>{{lang.pick('Hỗ trợ','Support')}}</strong><span>{{lang.pick('Giữ chỗ khi chuyến còn hơn 14 ngày','Hold flights departing in more than 14 days')}}</span><span>{{lang.pick('Hoàn tiền theo nguồn thanh toán gốc','Refunds to the original payment source')}}</span><span>{{lang.pick('Thanh toán online qua PayPal','Online payment with PayPal')}}</span></div>
     </div>
     <div class="container footer-bottom"><span>© 2026 Aptech Airlines</span><span>Fly Beyond · Travel with confidence</span></div>
   </footer>

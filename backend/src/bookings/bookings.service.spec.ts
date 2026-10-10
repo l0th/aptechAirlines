@@ -7,6 +7,7 @@ import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
 import { PoliciesService } from '../policies/policies.service';
 import { MailService } from '../mail/mail.service';
+import { PaypalService } from '../paypal/paypal.service';
 import { BadRequestException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
 import { BookingStatus, BookingType, PassengerType, PaymentMethod } from './bookings.schema';
 import { UserRole } from '../users/users.schema';
@@ -15,12 +16,60 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PassengerInputDto } from './bookings.dto';
 
+// Provider-free payment evidence for business-logic tests. This still goes through
+// assertPayPalPaymentProof, including authoritative VND/USD amount validation.
+function makeSyntheticPayPalProof(expectedAmountVnd: number) {
+  const exchangeRate = 25000;
+  return {
+    payment_method: PaymentMethod.PAYPAL,
+    status: 'SUCCESS',
+    expected_amount_vnd: expectedAmountVnd,
+    provider_order_id: 'test-paypal-order',
+    provider_capture_id: 'test-paypal-capture',
+    provider_currency: 'USD',
+    exchange_rate_vnd_per_unit: exchangeRate,
+    provider_amount: (Math.round((expectedAmountVnd / exchangeRate) * 100) / 100).toFixed(2),
+  } as any;
+}
+
+// A deterministic captured charge for refund tests. The miniature VND fares in
+// these fixtures use a fixture-only exchange-rate snapshot, never live PayPal.
+function makeSyntheticCapturedCharge(amountVnd: number) {
+  return {
+    transaction_type: 'PAYMENT',
+    payment_method: PaymentMethod.PAYPAL,
+    payment_reference: 'PAY-TEST-001',
+    payment_provider: 'PAYPAL',
+    amount: amountVnd,
+    currency: 'VND',
+    provider_order_id: 'ORDER-TEST-001',
+    provider_capture_id: 'CAPTURE-TEST-001',
+    provider_amount: '1.00',
+    provider_currency: 'USD',
+    exchange_rate_vnd_per_unit: amountVnd,
+    status: 'SUCCESS',
+    created_at: new Date(),
+  };
+}
+
+function makeMockPaypalService() {
+  return {
+    isPayPalActive: jest.fn().mockReturnValue(true),
+    convertVndToPresentment: jest.fn((amountVnd: number) => ({
+      provider_amount: (Math.round((amountVnd / 25000) * 100) / 100).toFixed(2),
+      provider_currency: 'USD',
+      exchange_rate_vnd_per_unit: 25000,
+    })),
+  };
+}
+
 describe('BookingsService', () => {
   let service: BookingsService;
   let bookingModel: any;
   let flightsService: any;
   let usersService: any;
   let policiesService: any;
+  let mailService: any;
 
   beforeEach(async () => {
     bookingModel = function(data: any) {
@@ -36,6 +85,7 @@ describe('BookingsService', () => {
     flightsService = {
       findById: jest.fn(),
       reserveSeats: jest.fn(),
+      getAirportTimeZone: jest.fn().mockResolvedValue('Asia/Ho_Chi_Minh'),
       updateAvailableSeats: jest.fn(),
       restoreSeatsWithSaga: jest.fn().mockResolvedValue(true),
     };
@@ -50,6 +100,7 @@ describe('BookingsService', () => {
     policiesService = {
       calculateRefundPercentage: jest.fn(),
     };
+    mailService = { sendHoldCreatedEmail: jest.fn().mockResolvedValue(true) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -58,6 +109,8 @@ describe('BookingsService', () => {
         { provide: FlightsService, useValue: flightsService },
         { provide: UsersService, useValue: usersService },
         { provide: PoliciesService, useValue: policiesService },
+        { provide: MailService, useValue: mailService },
+        { provide: PaypalService, useValue: makeMockPaypalService() },
       ],
     }).compile();
 
@@ -68,6 +121,14 @@ describe('BookingsService', () => {
     let baseDto: any;
     let mockUser: any;
     let mockFlight: any;
+
+    async function createPaidBooking(dto: any) {
+      const quote = await service.quoteBooking(dto, dto.user_id);
+      return service.createBooking(
+        { ...dto, payment_method: PaymentMethod.PAYPAL },
+        makeSyntheticPayPalProof(quote.total_amount),
+      );
+    }
 
     beforeEach(() => {
       baseDto = {
@@ -80,7 +141,7 @@ describe('BookingsService', () => {
         payment_method: PaymentMethod.PROFILE_CARD,
       };
 
-      mockUser = { _id: 'user1', preferred_credit_card: '4111222233334444' };
+      mockUser = { _id: 'user1', email: 'owner@example.com', first_name: 'Customer', preferred_credit_card: '4111222233334444' };
       usersService.findById.mockResolvedValue(mockUser);
 
       mockFlight = {
@@ -142,12 +203,24 @@ describe('BookingsService', () => {
       expect(result.blocking_number).toBeDefined();
       expect(result.time_limit_deadline).toBeDefined();
       expect(result.total_miles_accrued).toBe(0);
+      expect(mailService.sendHoldCreatedEmail).toHaveBeenCalledWith(expect.objectContaining({
+        toEmail: 'owner@example.com',
+        bookingReference: result.pnr_code,
+        blockingNumber: result.blocking_number,
+      }));
+    });
+
+    it('keeps a committed hold even if the mail provider fails', async () => {
+      baseDto.is_block = true;
+      mailService.sendHoldCreatedEmail.mockRejectedValueOnce(new Error('SMTP offline'));
+      const result = await service.createBooking(baseDto);
+      expect(result.status).toBe(BookingStatus.BLOCKED);
     });
 
     it('sets CONFIRMED + confirmation_number + payment transaction + accrues miles when buying', async () => {
       baseDto.is_block = false;
       baseDto.passengers.push({ passenger_type: PassengerType.ADULT, first_name: 'C', last_name: 'D' }); // 2 adults
-      const result = await service.createBooking(baseDto);
+      const result = await createPaidBooking(baseDto);
       expect(result.status).toBe(BookingStatus.CONFIRMED);
       expect(result.confirmation_number).toBeDefined();
       expect(result.payment_transactions.length).toBe(1);
@@ -160,7 +233,7 @@ describe('BookingsService', () => {
         { passenger_type: PassengerType.CHILD, first_name: 'C', last_name: '1' },
         { passenger_type: PassengerType.SENIOR, first_name: 'S', last_name: '1' },
       ];
-      const result = await service.createBooking(baseDto);
+      const result = await createPaidBooking(baseDto);
       // base=100, 45 days → earlyBird 0.92 → final=92
       // child = round(92*0.75) = 69, senior = round(92*0.85) = 78. Total = 147
       expect(result.total_amount).toBe(147);
@@ -187,7 +260,7 @@ describe('BookingsService', () => {
         if (fId === 'f2') return false; // Fails on second leg
       });
 
-      await expect(service.createBooking(baseDto)).rejects.toThrow(BadRequestException);
+      await expect(createPaidBooking(baseDto)).rejects.toThrow(BadRequestException);
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1);
     });
 
@@ -202,7 +275,7 @@ describe('BookingsService', () => {
       ];
       baseDto.legs.push({ flight_id: 'f1', inventory_id: 'i1', leg_type: 'INBOUND' }); // Mocking same flight for simplicity
 
-      const result = await service.createBooking(baseDto);
+      const result = await createPaidBooking(baseDto);
       expect(result.ticket_coupons.find((c: any) => c.leg_type === 'OUTBOUND').seat_code).toBe('1A');
       expect(result.ticket_coupons.find((c: any) => c.leg_type === 'INBOUND').seat_code).toBe('2B');
     });
@@ -256,7 +329,7 @@ describe('BookingsService', () => {
     it('releases all reserved legs when SkyMiles credit fails', async () => {
       usersService.addSkyMiles.mockRejectedValue(new Error('miles write failed'));
 
-      await expect(service.createBooking(baseDto)).rejects.toThrow('miles write failed');
+      await expect(createPaidBooking(baseDto)).rejects.toThrow('miles write failed');
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledTimes(1);
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1);
     });
@@ -267,7 +340,7 @@ describe('BookingsService', () => {
         return { ...data, save: jest.fn().mockRejectedValue(new Error('booking write failed')) };
       };
 
-      await expect(service.createBooking(baseDto)).rejects.toThrow('booking write failed');
+      await expect(createPaidBooking(baseDto)).rejects.toThrow('booking write failed');
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f1', 'i1', 1);
       expect(usersService.setSkyMiles).toHaveBeenCalledWith('user1', 321);
     });
@@ -331,7 +404,7 @@ describe('BookingsService', () => {
         return Promise.resolve({ o1: out1, o2: out2, r1: ret1, r2: ret2 }[id]);
       });
 
-      const res = await service.createBooking(baseDto);
+      const res = await createPaidBooking(baseDto);
       expect(res.status).toBe(BookingStatus.CONFIRMED);
       expect(res.ticket_coupons.length).toBe(4);
     });
@@ -416,7 +489,7 @@ describe('BookingsService', () => {
       baseDto.legs = [{ flight_id: 'f_boundary', inventory_id: 'i_bound', leg_type: 'OUTBOUND' }];
       flightsService.findById.mockResolvedValue(boundaryFlight);
 
-      const result = await service.createBooking(baseDto);
+      const result = await createPaidBooking(baseDto);
 
       expect(result).toBeDefined();
       expect(result.status).toBe(BookingStatus.CONFIRMED);
@@ -490,7 +563,7 @@ describe('BookingsService', () => {
         return Promise.resolve({ c1: conn1, c2: conn2 }[id]);
       });
 
-      const res = await service.createBooking(baseDto);
+      const res = await createPaidBooking(baseDto);
 
       expect(res).toBeDefined();
       expect(res.status).toBe(BookingStatus.CONFIRMED);
@@ -585,7 +658,7 @@ describe('BookingsService', () => {
         return Promise.resolve({ rt_out: outFlight, rt_ret: retFlight }[id]);
       });
 
-      const res = await service.createBooking(baseDto);
+      const res = await createPaidBooking(baseDto);
 
       expect(res).toBeDefined();
       expect(res.status).toBe(BookingStatus.CONFIRMED);
@@ -681,7 +754,10 @@ describe('BookingsService', () => {
     });
 
     it('blocked -> confirmed with new confirmation_number and miles added', async () => {
-      await service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD });
+      await service.confirmTicket(
+        { blocking_number: 'BLK-1', payment_method: PaymentMethod.PAYPAL },
+        makeSyntheticPayPalProof(mockBooking.total_amount),
+      );
       expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
       expect(mockBooking.confirmation_number).toBeDefined();
       expect(mockBooking.total_miles_accrued).toBe(500);
@@ -699,7 +775,10 @@ describe('BookingsService', () => {
         if (id === 'f2') return Promise.resolve({ distance_miles: 600 });
       });
 
-      const res = await service.confirmTicket({ blocking_number: 'BLK-1', payment_method: PaymentMethod.PROFILE_CARD });
+      const res = await service.confirmTicket(
+        { blocking_number: 'BLK-1', payment_method: PaymentMethod.PAYPAL },
+        makeSyntheticPayPalProof(mockBooking.total_amount),
+      );
       expect(res.status).toBe(BookingStatus.CONFIRMED);
       expect(res.confirmation_number).toBeDefined();
       expect(flightsService.reserveSeats).not.toHaveBeenCalled(); // No double reservation!
@@ -747,6 +826,14 @@ describe('BookingsService', () => {
   describe('rescheduleTicket', () => {
     let mockBooking: any;
     let mockUser: any;
+
+    async function rescheduleWithPayPal(dto: any) {
+      const quote = await service.quoteRescheduleTicket(dto);
+      return service.rescheduleTicket(
+        { ...dto, payment_method: PaymentMethod.PAYPAL },
+        quote.price_difference > 0 ? makeSyntheticPayPalProof(quote.price_difference) : undefined,
+      );
+    }
 
     const DAYS_UNTIL = 45;
     const msUntil = DAYS_UNTIL * 86400000;
@@ -799,15 +886,7 @@ describe('BookingsService', () => {
         passengers: [{ passenger_type: PassengerType.ADULT, first_name: 'A', last_name: 'B' }],
         booking_type: 'ONE_WAY',
         ticket_coupons: [{ leg_type: 'OUTBOUND', flight_id: 'f1', inventory_id: 'i1', fare_paid: 100, seat_code: '1A' }],
-        payment_transactions: [
-          {
-            transaction_type: 'PAYMENT',
-            amount: 100,
-            card_masked: '**** **** **** 4242',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          },
-        ],
+        payment_transactions: [makeSyntheticCapturedCharge(100)],
         save: jest.fn(),
       };
       bookingModel.exec.mockResolvedValue(mockBooking);
@@ -895,7 +974,7 @@ describe('BookingsService', () => {
     it('3. booking.save fails -> new seats released (updateAvailableSeats called with +passengerCount on new flight)', async () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
+        rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
       expect(flightsService.updateAvailableSeats).toHaveBeenCalledWith('f2', 'i2', 1);
     });
@@ -903,7 +982,7 @@ describe('BookingsService', () => {
     it('4. booking.save fails -> old seats untouched because old seats are never released pre-commit', async () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
+        rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
       const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
       expect(oldSeatCalls.length).toBe(0);
@@ -916,7 +995,7 @@ describe('BookingsService', () => {
       mockBooking.save.mockRejectedValue(new Error('DB error'));
 
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
+        rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
 
       const oldSeatCalls = flightsService.updateAvailableSeats.mock.calls.filter((c: any) => c[0] === 'f1');
@@ -925,7 +1004,7 @@ describe('BookingsService', () => {
     });
 
     it('6. SkyMiles positive delta (one-way longer distance) -> addSkyMiles called with correct delta', async () => {
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
+      await rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 500);
     });
 
@@ -956,24 +1035,23 @@ describe('BookingsService', () => {
     it('9. ROUND_TRIP outbound-only delta ignores unchanged return -> delta = outbound change only', async () => {
       mockBooking.booking_type = 'ROUND_TRIP';
       mockBooking.ticket_coupons.push({ leg_type: 'INBOUND', flight_id: 'f3', inventory_id: 'i3', fare_paid: 100 });
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
+      await rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 500);
     });
 
     it('10. ROUND_TRIP both legs delta correct -> combined delta', async () => {
       mockBooking.booking_type = 'ROUND_TRIP';
       mockBooking.ticket_coupons.push({ leg_type: 'INBOUND', flight_id: 'f3', inventory_id: 'i3', fare_paid: 100 });
-      await service.rescheduleTicket({
+      await rescheduleWithPayPal({
         confirmation_number: 'CNF',
         new_flight_id: 'f2', new_inventory_id: 'i2',
         new_return_flight_id: 'f4', new_return_inventory_id: 'i4',
-        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 600); // 500 outbound + 100 return
     });
 
     it('11. dynamic pricing exact deterministic result -> total_amount = 138 for base=150, 45 days, MEMBER', async () => {
-      await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
+      await rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
       expect(mockBooking.total_amount).toBe(138); // 150 * 0.92
     });
 
@@ -1067,11 +1145,10 @@ describe('BookingsService', () => {
         if (id === 'f4') return Promise.resolve(f4);
         return Promise.resolve(null);
       });
-      const res = await service.rescheduleTicket({
+      const res = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
         new_flight_id: 'f2', new_inventory_id: 'i2',
         new_return_flight_id: 'f4', new_return_inventory_id: 'i4',
-        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(res).toBeDefined();
     });
@@ -1114,10 +1191,9 @@ describe('BookingsService', () => {
         return Promise.resolve(null);
       });
 
-      const res = await service.rescheduleTicket({
+      const res = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
         new_flight_id: 'f2', new_inventory_id: 'i2',
-        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
       expect(res).toBeDefined();
     });
@@ -1188,7 +1264,7 @@ describe('BookingsService', () => {
       const origMiles = mockBooking.total_miles_accrued;
 
       await expect(
-        service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any)
+        rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any)
       ).rejects.toThrow('DB error');
 
       expect(mockBooking.confirmation_number).toBe(origConf);
@@ -1198,7 +1274,7 @@ describe('BookingsService', () => {
     });
 
     it('25. VND response -> message contains \'VND\', not \'USD\'', async () => {
-      const res = await service.rescheduleTicket({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2', payment_method: PaymentMethod.PROFILE_CARD } as any);
+      const res = await rescheduleWithPayPal({ confirmation_number: 'CNF', new_flight_id: 'f2', new_inventory_id: 'i2' } as any);
       expect(res.message).toContain('VND');
       expect(res.message).not.toContain('USD');
     });
@@ -1248,11 +1324,8 @@ describe('BookingsService', () => {
         return Promise.resolve(null);
       });
 
-      const res = await service.rescheduleTicket({
+      const res = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        new_flight_id: 'f_new1',
-        new_inventory_id: 'inv_new1',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'f_new1', inventory_id: 'inv_new1' },
           { flight_id: 'f_new2', inventory_id: 'inv_new2' },
@@ -1307,8 +1380,6 @@ describe('BookingsService', () => {
       await expect(
         service.rescheduleTicket({
           confirmation_number: 'CNF',
-          new_flight_id: 'f_new1',
-          new_inventory_id: 'inv_new1',
           new_legs: [
             { flight_id: 'f_new1', inventory_id: 'inv_new1' },
             { flight_id: 'f_new2', inventory_id: 'inv_new2' },
@@ -1365,8 +1436,6 @@ describe('BookingsService', () => {
       await expect(
         service.rescheduleTicket({
           confirmation_number: 'CNF',
-          new_flight_id: 'f_new1',
-          new_inventory_id: 'inv_new1',
           new_legs: [
             { flight_id: 'f_new1', inventory_id: 'inv_new1' },
             { flight_id: 'f_new2', inventory_id: 'inv_new2' },
@@ -1430,8 +1499,6 @@ describe('BookingsService', () => {
       await expect(
         service.rescheduleTicket({
           confirmation_number: 'CNF',
-          new_flight_id: 'f_new1',
-          new_inventory_id: 'inv_new1',
           new_legs: [
             { flight_id: 'f_new1', inventory_id: 'inv_new1' },
             { flight_id: 'f_new2', inventory_id: 'inv_new2' },
@@ -1458,9 +1525,8 @@ describe('BookingsService', () => {
       newLeg2.scheduled_arrival = new Date(newLeg2.scheduled_departure.getTime() + 60 * 60000);
       flightsService.findById.mockImplementation((id: string) => Promise.resolve({ f1: oldLeg1, f2: oldLeg2, n1: newLeg1, n2: newLeg2 }[id]));
 
-      await expect(service.rescheduleTicket({
+      await expect(rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1527,9 +1593,8 @@ describe('BookingsService', () => {
         return Promise.resolve(map[id]);
       });
 
-      const result = await service.rescheduleTicket({
+      const result = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1576,9 +1641,8 @@ describe('BookingsService', () => {
         return Promise.resolve(map[id]);
       });
 
-      const result = await service.rescheduleTicket({
+      const result = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_return_legs: [
           { flight_id: 'nr1', inventory_id: 'nri1' },
           { flight_id: 'nr2', inventory_id: 'nri2' },
@@ -1633,9 +1697,8 @@ describe('BookingsService', () => {
         return Promise.resolve(map[id]);
       });
 
-      const result = await service.rescheduleTicket({
+      const result = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [{ flight_id: 'n1', inventory_id: 'ni1' }, { flight_id: 'n2', inventory_id: 'ni2' }],
         new_return_legs: [{ flight_id: 'nr1', inventory_id: 'nri1' }, { flight_id: 'nr2', inventory_id: 'nri2' }],
       } as any);
@@ -1679,9 +1742,8 @@ describe('BookingsService', () => {
         return Promise.resolve(map[id]);
       });
 
-      await expect(service.rescheduleTicket({
+      await expect(rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [{ flight_id: 'n1', inventory_id: 'ni1' }, { flight_id: 'n2', inventory_id: 'ni2' }],
       } as any)).rejects.toThrow('DB save failed');
 
@@ -1734,11 +1796,10 @@ describe('BookingsService', () => {
       });
 
       // Direct reschedule: new_flight_id/new_inventory_id — should follow existing direct ROUND_TRIP path, NOT mixed
-      const result = await service.rescheduleTicket({
+      const result = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
         new_flight_id: 'f2',
         new_inventory_id: 'i2',
-        payment_method: PaymentMethod.PROFILE_CARD,
       } as any);
 
       expect(result.booking.status).toBe(BookingStatus.CONFIRMED);
@@ -1777,9 +1838,8 @@ describe('BookingsService', () => {
         return Promise.resolve(map[id]);
       });
 
-      const result = await service.rescheduleTicket({
+      const result = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'n1', inventory_id: 'ni1' },
           { flight_id: 'n2', inventory_id: 'ni2' },
@@ -1838,7 +1898,7 @@ describe('BookingsService', () => {
           { flight_id: 'n3', inventory_id: 'ni3' },
           { flight_id: 'n4', inventory_id: 'ni4' },
         ],
-      } as any)).rejects.toThrow(/2 or 3 legs/);
+      } as any)).rejects.toThrow(/2 or 3 flights/);
 
       // Rejected BEFORE reservations
       expect(flightsService.reserveSeats).not.toHaveBeenCalled();
@@ -1944,9 +2004,8 @@ describe('BookingsService', () => {
         return Promise.resolve(null);
       });
 
-      const res = await service.rescheduleTicket({
+      const res = await rescheduleWithPayPal({
         confirmation_number: 'CNF',
-        payment_method: PaymentMethod.PROFILE_CARD,
         new_legs: [
           { flight_id: 'c1', inventory_id: 'ci1' },
           { flight_id: 'c2', inventory_id: 'ci2' },
@@ -2092,15 +2151,16 @@ describe('BookingsService', () => {
           new_inventory_id: 'i2',
           payment_method: PaymentMethod.PROFILE_CARD,
         } as any),
-      ).rejects.toThrow('Payment card is required for reschedule fare difference.');
+      ).rejects.toThrow('Saved card payments are no longer supported. Complete PayPal checkout.');
     });
 
-    it('47. reschedule refund with priceDiff < 0 -> uses original payment card_masked as destination', async () => {
+    it('47. reschedule fare reduction reserves refund against original PayPal capture', async () => {
       flightsService.findById.mockImplementation((id: string) => {
         if (id === 'f1') return Promise.resolve(F1());
         return Promise.resolve(mkFlight('f2', 'FL2', 500, futureDate, futureArrival, 'SGN', 'HAN', [{ _id: 'i2', id: 'i2', available_seats: 10, base_price: 50 }]));
       });
       mockBooking.total_amount = 200;
+      mockBooking.payment_transactions = [makeSyntheticCapturedCharge(200)];
       const res = await service.rescheduleTicket({
         confirmation_number: 'CNF',
         new_flight_id: 'f2',
@@ -2110,7 +2170,10 @@ describe('BookingsService', () => {
       expect(res.price_difference).toBeLessThan(0);
       const refundTx = mockBooking.payment_transactions.find((t: any) => t.transaction_type === 'RESCHEDULE_REFUND');
       expect(refundTx).toBeDefined();
-      expect(refundTx.card_masked).toBe('**** **** **** 4242');
+      expect(refundTx.payment_method).toBe(PaymentMethod.PAYPAL);
+      expect(refundTx.source_payment_reference).toBe('PAY-TEST-001');
+      expect(refundTx.provider_capture_id).toBe('CAPTURE-TEST-001');
+      expect(refundTx.status).toBe('PENDING');
     });
   });
 
@@ -2124,15 +2187,7 @@ describe('BookingsService', () => {
         user_id: 'user1',
         passengers: [{}],
         ticket_coupons: [{ flight_id: 'f1', inventory_id: 'i1', coupon_status: 'ACTIVE' }],
-        payment_transactions: [
-          {
-            transaction_type: 'PAYMENT',
-            amount: 1000,
-            card_masked: '**** **** **** 4242',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          },
-        ],
+        payment_transactions: [makeSyntheticCapturedCharge(1000)],
         save: jest.fn().mockResolvedValue(true),
       };
       bookingModel.exec.mockResolvedValue(mockBooking);
@@ -2166,58 +2221,37 @@ describe('BookingsService', () => {
       expect(res.currency).toBe('VND');
       expect(res.message).toContain('VND');
       expect(res.message).not.toContain('USD');
-      expect(res.message).toContain('Refund: 900 VND (90%)');
+      expect(res.message).toContain('Refund amount: 900 VND (90%)');
+      expect(res.message).toContain('Refund status: PENDING');
     });
 
-    it('Case C (Payment transaction card provenance): refund uses real masked card from latest successful PAYMENT transaction', async () => {
+    it('Case C (PayPal payment provenance): refund allocates newest capture first', async () => {
       mockBooking.payment_transactions = [
-        {
-          transaction_type: 'PAYMENT',
-          amount: 500,
-          card_masked: '**** **** **** 1111',
-          status: 'SUCCESS',
-          created_at: new Date(Date.now() - 10000),
-        },
-        {
-          transaction_type: 'PAYMENT',
-          amount: 500,
-          card_masked: '**** **** **** 9999',
-          status: 'SUCCESS',
-          created_at: new Date(),
-        },
+        { ...makeSyntheticCapturedCharge(500), payment_reference: 'PAY-OLD', provider_capture_id: 'CAP-OLD', created_at: new Date(Date.now() - 10000) },
+        { ...makeSyntheticCapturedCharge(500), payment_reference: 'PAY-NEW', provider_capture_id: 'CAP-NEW', created_at: new Date() },
       ];
       const res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 9999');
-      const refundTx = mockBooking.payment_transactions.find((tx: any) => tx.transaction_type === 'REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.card_masked).toBe('**** **** **** 9999');
-      expect(refundTx.currency).toBe('VND');
+      const refunds = mockBooking.payment_transactions.filter((tx: any) => tx.transaction_type === 'REFUND');
+      expect(refunds).toHaveLength(2);
+      expect(refunds.map((tx: any) => [tx.source_payment_reference, tx.amount, tx.status])).toEqual([
+        ['PAY-NEW', 500, 'PENDING'],
+        ['PAY-OLD', 400, 'PENDING'],
+      ]);
+      expect(refunds[0].provider_capture_id).toBe('CAP-NEW');
+      expect(res.refund_status).toBe('PENDING');
     });
 
-    it('Case C2 (Chronological order sorting): picks successful PAYMENT by newest valid created_at even if transaction array is out of order', async () => {
+    it('Case C2 (Chronological order sorting): uses newest PayPal capture even when transactions are out of order', async () => {
       mockBooking.payment_transactions = [
-        {
-          transaction_type: 'PAYMENT',
-          amount: 500,
-          card_masked: '**** **** **** 1111',
-          status: 'SUCCESS',
-          created_at: new Date('2026-09-20T10:00:00Z'),
-        },
-        {
-          transaction_type: 'PAYMENT',
-          amount: 500,
-          card_masked: '**** **** **** 2222',
-          status: 'SUCCESS',
-          created_at: new Date('2026-09-10T10:00:00Z'), // Older, but placed at tail of array
-        },
+        { ...makeSyntheticCapturedCharge(500), payment_reference: 'PAY-NEWER', created_at: new Date('2026-09-20T10:00:00Z') },
+        { ...makeSyntheticCapturedCharge(500), payment_reference: 'PAY-OLDER', created_at: new Date('2026-09-10T10:00:00Z') },
       ];
-      const res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 1111');
-      const refundTx = mockBooking.payment_transactions.find((tx: any) => tx.transaction_type === 'REFUND');
-      expect(refundTx.card_masked).toBe('**** **** **** 1111');
+      await service.cancelTicket({ identifier: 'CNF-1' } as any);
+      const refunds = mockBooking.payment_transactions.filter((tx: any) => tx.transaction_type === 'REFUND');
+      expect(refunds.map((tx: any) => tx.source_payment_reference)).toEqual(['PAY-NEWER', 'PAY-OLDER']);
     });
 
-    it('Case C3 (Raw historical card normalization): normalizes raw historical unmasked card to **** **** **** <last4>', async () => {
+    it('Case C3 (Legacy raw card): refuses automatic refund without PayPal capture', async () => {
       mockBooking.payment_transactions = [
         {
           transaction_type: 'PAYMENT',
@@ -2227,13 +2261,12 @@ describe('BookingsService', () => {
           created_at: new Date(),
         },
       ];
-      const res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 9999');
-      const refundTx = mockBooking.payment_transactions.find((tx: any) => tx.transaction_type === 'REFUND');
-      expect(refundTx.card_masked).toBe('**** **** **** 9999');
+      await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
-    it('Case D (Fake placeholders rejected): skips placeholder masks and falls back to earlier valid PAYMENT transaction or preferred credit card', async () => {
+    it('Case D (Legacy placeholders): refuses card-only refunds even when an older mask looks valid', async () => {
       // Scenario 1: Falls back to an earlier valid PAYMENT transaction
       mockBooking.payment_transactions = [
         {
@@ -2265,8 +2298,7 @@ describe('BookingsService', () => {
           created_at: new Date(),
         },
       ];
-      let res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 8888');
+      await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
 
       // Scenario 2: If all transactions are placeholders, falls back to user.preferred_credit_card
       mockBooking.status = BookingStatus.CONFIRMED;
@@ -2283,11 +2315,12 @@ describe('BookingsService', () => {
         sky_miles: 5000,
         preferred_credit_card: '4111222233337777',
       });
-      res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 7777');
+      await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
+      expect(flightsService.updateAvailableSeats).not.toHaveBeenCalled();
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
-    it('Case D2 (Placeholder preferred card rejected): rejects placeholder preferred card without creating **** **** **** AULT', async () => {
+    it('Case D2 (Placeholder preferred card rejected): cannot substitute saved card for PayPal capture', async () => {
       mockBooking.payment_transactions = [];
       usersService.findById.mockResolvedValue({
         sky_miles: 5000,
@@ -2295,24 +2328,22 @@ describe('BookingsService', () => {
       });
       await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow(BadRequestException);
       await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow(
-        'Cannot process refund: no valid payment card found for this booking.',
+        'Automatic cancellation refund requires a captured PayPal payment',
       );
     });
 
-    it('Case E (Fallback to user preferred card): when no valid PAYMENT transaction exists, falls back to masked user.preferred_credit_card', async () => {
+    it('Case E (No PayPal capture): refuses to fall back to a valid preferred card', async () => {
       mockBooking.payment_transactions = [];
       usersService.findById.mockResolvedValue({
         sky_miles: 5000,
         preferred_credit_card: '4000123456781234',
       });
-      const res = await service.cancelTicket({ identifier: 'CNF-1' } as any);
-      expect(res.refund_card_masked).toBe('**** **** **** 1234');
-      const refundTx = mockBooking.payment_transactions.find((tx: any) => tx.transaction_type === 'REFUND');
-      expect(refundTx).toBeDefined();
-      expect(refundTx.card_masked).toBe('**** **** **** 1234');
+      await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow('Automatic cancellation refund requires a captured PayPal payment');
+      expect(mockBooking.status).toBe(BookingStatus.CONFIRMED);
+      expect(mockBooking.save).not.toHaveBeenCalled();
     });
 
-    it('Case F (No card rejects before mutation): throws BadRequestException before seat release, miles deduction, or booking save', async () => {
+    it('Case F (No captured PayPal): rejects before seat release, miles deduction, or booking save', async () => {
       mockBooking.payment_transactions = [];
       usersService.findById.mockResolvedValue({
         sky_miles: 5000,
@@ -2320,7 +2351,7 @@ describe('BookingsService', () => {
       });
       await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow(BadRequestException);
       await expect(service.cancelTicket({ identifier: 'CNF-1' } as any)).rejects.toThrow(
-        'Cannot process refund: no valid payment card found for this booking.',
+        'Automatic cancellation refund requires a captured PayPal payment',
       );
       expect(flightsService.updateAvailableSeats).not.toHaveBeenCalled();
       expect(usersService.deductSkyMiles).not.toHaveBeenCalled();
@@ -2756,6 +2787,7 @@ describe('BookingsService', () => {
           { provide: UsersService, useValue: usersService },
           { provide: PoliciesService, useValue: policiesService },
           { provide: MailService, useValue: mailService },
+          { provide: PaypalService, useValue: makeMockPaypalService() },
         ],
       }).compile();
 
@@ -2783,15 +2815,7 @@ describe('BookingsService', () => {
             coupon_status: 'ACTIVE',
           },
         ],
-        payment_transactions: [
-          {
-            transaction_type: 'PAYMENT',
-            amount: 1000000,
-            card_masked: '411111******1111',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          },
-        ],
+        payment_transactions: [makeSyntheticCapturedCharge(1000000)],
         save: jest.fn().mockResolvedValue(true),
       };
 
@@ -2816,7 +2840,9 @@ describe('BookingsService', () => {
       expect(callData.blockingNumber).toBeUndefined();
       expect(callData.refundAmount).toBe(900000);
       expect(callData.refundPercentage).toBe(90);
-      expect(callData.maskedCard).toBe('**** **** **** 1111');
+      expect(callData.refundDetails).toEqual(expect.arrayContaining([
+        expect.objectContaining({ paymentMethod: PaymentMethod.PAYPAL, status: 'PENDING' }),
+      ]));
       expect(callData.departureTimeFormatted).toContain('(Asia/Ho_Chi_Minh)');
     });
 

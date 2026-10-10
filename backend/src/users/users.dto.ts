@@ -1,8 +1,6 @@
-import { IsEmail, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsEmail, IsEmpty, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength, ValidateIf } from 'class-validator';
 import { UserRole } from './users.schema';
 import {
-  CREDIT_CARD_MESSAGE,
-  CREDIT_CARD_REGEX,
   PHONE_NUMBER_MESSAGE,
   PHONE_NUMBER_REGEX,
 } from '../common/validation.constants';
@@ -46,9 +44,7 @@ export class CreateUserDto {
   @Min(0)
   age?: number;
 
-  @IsOptional()
-  @IsString()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
+  @IsEmpty({ message: 'Saving credit cards is no longer supported. Use PayPal checkout.' })
   preferred_credit_card?: string;
 
   @IsOptional()
@@ -92,9 +88,7 @@ export class UpdateUserDto {
   @Min(0)
   age?: number;
 
-  @IsOptional()
-  @IsString()
-  @Matches(CREDIT_CARD_REGEX, { message: CREDIT_CARD_MESSAGE })
+  @IsEmpty({ message: 'Saving credit cards is no longer supported. Use PayPal checkout.' })
   preferred_credit_card?: string;
 
   // Staff-only field. UsersController rejects any non-staff (CUSTOMER) payload

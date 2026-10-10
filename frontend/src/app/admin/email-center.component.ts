@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ApiService } from '../core/api.service';
 import { ToastService } from '../core/toast.service';
+import { LanguageService } from '../core/language.service';
 
 type Tab = 'templates' | 'logs' | 'jobs';
 type Job = 'run-reminders' | 'run-travel-reminders' | 'run-expiry';
@@ -13,6 +14,9 @@ interface MailTemplateRow {
   name: string;
   description: string;
   trigger: string;
+  nameEn?: string;
+  descriptionEn?: string;
+  triggerEn?: string;
   enabled: boolean;
 }
 
@@ -42,14 +46,14 @@ interface MailTemplateRow {
           @for(t of templates;track t.key){
             <article class="ec-item" [class.active]="selected?.key===t.key" (click)="select(t)">
               <div class="ec-item-head">
-                <strong>{{t.name}}</strong>
+                <strong translate="no">{{tName(t)}}</strong>
                 <label class="ec-switch" (click)="$event.stopPropagation()" [title]="t.enabled ? 'Đang bật' : 'Đang tắt'">
                   <input type="checkbox" [checked]="t.enabled" (change)="toggle(t, $any($event.target).checked)" />
                   <span class="pill" [class.pill-gold]="t.enabled">{{t.enabled ? 'Bật' : 'Tắt'}}</span>
                 </label>
               </div>
-              <p class="ec-desc">{{t.description}}</p>
-              <p class="ec-when"><b>Khi nào gửi:</b> {{t.trigger}}</p>
+              <p class="ec-desc" translate="no">{{tDesc(t)}}</p>
+              <p class="ec-when"><b>Khi nào gửi:</b> <span translate="no">{{tTrigger(t)}}</span></p>
             </article>
           } @empty {
             <p class="empty-row">{{loadingTemplates ? 'Đang tải…' : 'Không có mẫu email.'}}</p>
@@ -58,8 +62,9 @@ interface MailTemplateRow {
 
         <section class="card ec-preview">
           @if(selected){
-            <div class="eyebrow">XEM TRƯỚC · {{selected.key}}</div>
-            <p class="ec-subject"><b>Tiêu đề:</b> {{preview?.subject || '…'}}</p>
+            <div class="eyebrow">{{language.pick('XEM TRƯỚC','PREVIEW')}} · <span translate="no">{{selected.key}}</span></div>
+            <p class="ec-hint">Email song ngữ: Tiếng Việt phía trên, English phía dưới (trong cùng một email).</p>
+            <p class="ec-subject"><b>Tiêu đề:</b> <span translate="no">{{preview?.subject || '…'}}</span></p>
             <form class="ec-test" (ngSubmit)="sendTest()">
               <label class="field">
                 <span>Gửi thử tới email</span>
@@ -83,7 +88,7 @@ interface MailTemplateRow {
         <label class="field"><span>Mẫu</span>
           <select class="control" [(ngModel)]="logFilter.template" (change)="reloadLogs()">
             <option value="">Tất cả</option>
-            @for(t of templates;track t.key){<option [value]="t.key">{{t.name}}</option>}
+            @for(t of templates;track t.key){<option [value]="t.key" translate="no">{{tName(t)}}</option>}
             <option value="CUSTOM">Khác (CUSTOM)</option>
           </select>
         </label>
@@ -109,9 +114,9 @@ interface MailTemplateRow {
               @for(l of logs;track l._id){
                 <tr>
                   <td>{{l.created_at | date:'dd/MM/yyyy HH:mm:ss'}}</td>
-                  <td>{{templateName(l.template_key)}}</td>
+                  <td translate="no">{{templateName(l.template_key)}}</td>
                   <td>{{l.to}}</td>
-                  <td class="ec-subj-cell">{{l.subject}}</td>
+                  <td class="ec-subj-cell" translate="no">{{l.subject}}</td>
                   <td>{{l.booking_reference || '—'}}</td>
                   <td>
                     <span class="pill" [class.pill-gold]="l.status==='SENT'" [class.ec-fail]="l.status==='FAILED'">{{statusLabel(l.status)}}</span>
@@ -126,7 +131,7 @@ interface MailTemplateRow {
         </div>
       </section>
       <div class="ec-pager">
-        <span>Tổng {{logTotal}} email · Trang {{logPage}}/{{logPages}}</span>
+        <span>{{language.pick('Tổng','Total')}} {{logTotal}} email · {{language.pick('Trang','Page')}} {{logPage}}/{{logPages}}</span>
         <button class="btn btn-outline compact" type="button" [disabled]="logPage<=1" (click)="goLogPage(logPage-1)">‹ Trước</button>
         <button class="btn btn-outline compact" type="button" [disabled]="logPage>=logPages" (click)="goLogPage(logPage+1)">Sau ›</button>
       </div>
@@ -158,7 +163,7 @@ interface MailTemplateRow {
         </div>
         @if(jobResult){
           <div class="ec-result">
-            <div class="eyebrow">KẾT QUẢ · {{jobResult.label}} · {{jobResult.at | date:'HH:mm:ss'}}</div>
+            <div class="eyebrow">{{language.pick('KẾT QUẢ','RESULT')}} · {{jobResult.label}} · {{jobResult.at | date:'HH:mm:ss'}}</div>
             <p>{{jobResult.message}}</p>
           </div>
         }
@@ -179,6 +184,7 @@ interface MailTemplateRow {
     .ec-when{margin:0;color:var(--muted,#68778a);font-size:12px}
     .ec-preview{padding:16px}
     .ec-subject{margin:6px 0 12px}
+    .ec-hint{margin:0 0 6px;color:var(--muted,#68778a);font-size:12px}
     .ec-test{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
     .ec-test .field{flex:1;min-width:220px}
     .ec-note{color:var(--warn,#a76b00);font-size:13px}
@@ -201,6 +207,7 @@ export class EmailCenterComponent implements OnInit {
   private api = inject(ApiService);
   private toast = inject(ToastService);
   private sanitizer = inject(DomSanitizer);
+  readonly language = inject(LanguageService);
 
   tab: Tab = 'templates';
   private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
@@ -235,7 +242,8 @@ export class EmailCenterComponent implements OnInit {
 
   private fail(e: any, fallback: string) {
     const msg = e?.error?.message;
-    this.error = Array.isArray(msg) ? msg.join(', ') : msg || fallback;
+    const detail = Array.isArray(msg) ? msg.join(', ') : msg || fallback;
+    this.error = this.language.translateNotice(detail);
   }
 
   loadTemplates() {
@@ -248,7 +256,7 @@ export class EmailCenterComponent implements OnInit {
       },
       error: (e) => {
         this.loadingTemplates = false;
-        this.fail(e, 'Không tải được danh sách mẫu email.');
+        this.fail(e, this.language.pick('Không tải được danh sách mẫu email.','Unable to load email templates.'));
       },
     });
   }
@@ -266,7 +274,7 @@ export class EmailCenterComponent implements OnInit {
           `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:16px;background:#f5f7fa">${res.html}</body></html>`,
         );
       },
-      error: (e) => this.fail(e, 'Không tải được bản xem trước.'),
+      error: (e) => this.fail(e, this.language.pick('Không tải được bản xem trước.','Unable to load preview.')),
     });
   }
 
@@ -277,7 +285,7 @@ export class EmailCenterComponent implements OnInit {
       next: () => this.toast.success({ titleVi: `${enabled ? 'Đã bật' : 'Đã tắt'} mẫu “${t.name}”`, titleEn: `Template ${enabled ? 'enabled' : 'disabled'}` }),
       error: (e) => {
         t.enabled = prev;
-        this.fail(e, 'Không cập nhật được trạng thái mẫu.');
+        this.fail(e, this.language.pick('Không cập nhật được trạng thái mẫu.','Unable to update template status.'));
       },
     });
   }
@@ -289,12 +297,12 @@ export class EmailCenterComponent implements OnInit {
     this.api.sendMailTemplateTest(this.selected.key, this.testTo.trim()).subscribe({
       next: (res) => {
         this.sending = false;
-        if (res?.success) this.toast.success({ titleVi: 'Đã gửi email thử', titleEn: 'Test email sent', messageVi: res.message, messageEn: res.message });
-        else this.error = res?.message || 'Gửi email thử thất bại.';
+        if (res?.success) this.toast.success({ titleVi: 'Đã gửi email thử', titleEn: 'Test email sent', messageVi: res.messageVi, messageEn: res.messageEn });
+        else this.error = this.language.pick(res?.messageVi || 'Gửi email thử thất bại.', res?.messageEn || 'Unable to send test email.');
       },
       error: (e) => {
         this.sending = false;
-        this.fail(e, 'Gửi email thử thất bại.');
+        this.fail(e, this.language.pick('Gửi email thử thất bại.','Unable to send test email.'));
       },
     });
   }
@@ -320,34 +328,66 @@ export class EmailCenterComponent implements OnInit {
       },
       error: (e) => {
         this.loadingLogs = false;
-        this.fail(e, 'Không tải được lịch sử gửi email.');
+        this.fail(e, this.language.pick('Không tải được lịch sử gửi email.','Unable to load email history.'));
       },
     });
   }
 
+  private get isEn() {
+    return this.language.language() === 'en';
+  }
+
+  tName(t: MailTemplateRow) {
+    return (this.isEn && t.nameEn) || t.name;
+  }
+
+  tDesc(t: MailTemplateRow) {
+    return (this.isEn && t.descriptionEn) || t.description;
+  }
+
+  tTrigger(t: MailTemplateRow) {
+    return (this.isEn && t.triggerEn) || t.trigger;
+  }
+
   templateName(key: string) {
-    return this.templates.find((t) => t.key === key)?.name || key;
+    const t = this.templates.find((x) => x.key === key);
+    return t ? this.tName(t) : key;
   }
 
   statusLabel(s: string) {
-    return s === 'SENT' ? 'Đã gửi' : s === 'FAILED' ? 'Thất bại' : s === 'DEV_FALLBACK' ? 'Dev (console)' : s;
+    return s === 'SENT'
+      ? this.language.pick('Đã gửi','Sent')
+      : s === 'FAILED'
+        ? this.language.pick('Thất bại','Failed')
+        : s === 'DEV_FALLBACK'
+          ? this.language.pick('Dev (console)','Dev (console)')
+          : s;
   }
 
   async run(job: Job) {
-    const labels: Record<Job, string> = {
+    const labelsVi: Record<Job, string> = {
       'run-reminders': 'Gửi nhắc giữ chỗ',
       'run-travel-reminders': 'Gửi nhắc chuyến sắp bay',
       'run-expiry': 'Hủy giữ chỗ hết hạn',
     };
-    const warn = job === 'run-expiry'
+    const labelsEn: Record<Job, string> = {
+      'run-reminders': 'Send hold reminders',
+      'run-travel-reminders': 'Send upcoming-trip reminders',
+      'run-expiry': 'Cancel expired holds',
+    };
+    const warnVi = job === 'run-expiry'
       ? 'Tác vụ này sẽ HỦY THẬT các vé giữ chỗ đã quá hạn và hoàn ghế về kho. Tiếp tục?'
-      : `Chạy ngay tác vụ “${labels[job]}”? Email thật sẽ được gửi cho khách hàng đủ điều kiện.`;
+      : `Chạy ngay tác vụ “${labelsVi[job]}”? Email thật sẽ được gửi cho khách hàng đủ điều kiện.`;
+    const warnEn = job === 'run-expiry'
+      ? 'This job will actually cancel expired holds and release their seats. Continue?'
+      : `Run “${labelsEn[job]}” now? Real emails will be sent to eligible customers.`;
     const ok = await this.toast.confirm({
-      titleVi: labels[job],
-      titleEn: 'Run scheduled job now?',
-      messageVi: warn,
-      messageEn: warn,
+      titleVi: labelsVi[job],
+      titleEn: labelsEn[job],
+      messageVi: warnVi,
+      messageEn: warnEn,
       confirmVi: 'Chạy ngay',
+      confirmEn: 'Run now',
     });
     if (!ok) return;
     this.running = true;
@@ -355,11 +395,15 @@ export class EmailCenterComponent implements OnInit {
     this.api.runBookingScheduler(job).subscribe({
       next: (res) => {
         this.running = false;
-        this.jobResult = { label: labels[job], message: res?.message || JSON.stringify(res), at: new Date() };
+        this.jobResult = {
+          label: this.language.pick(labelsVi[job], labelsEn[job]),
+          message: this.language.pick(res?.messageVi || res?.message || JSON.stringify(res), res?.messageEn || res?.message || JSON.stringify(res)),
+          at: new Date(),
+        };
       },
       error: (e) => {
         this.running = false;
-        this.fail(e, 'Chạy tác vụ thất bại.');
+        this.fail(e, this.language.pick('Chạy tác vụ thất bại.','Unable to run scheduled job.'));
       },
     });
   }

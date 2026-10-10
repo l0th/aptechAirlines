@@ -4,47 +4,48 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { ApiService } from '../core/api.service';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
   imports:[FormsModule,RouterLink],
   template:`
   <div class="container page">
-    <div class="eyebrow">PROFILE</div>
-    <h1 class="title">Hồ sơ & SkyMiles</h1>
+    <div class="eyebrow">{{language.pick('HỒ SƠ','PROFILE')}}</div>
+    <h1 class="title">{{language.pick('Hồ sơ & SkyMiles','Profile & SkyMiles')}}</h1>
     @if(!auth.authenticated()){
-      <div class="card empty">Vui lòng đăng nhập.</div>
+      <div class="card empty">{{language.pick('Vui lòng đăng nhập.','Please sign in.')}}</div>
     }@else{
       <div class="profile-grid">
         <section class="card profile">
           <div class="avatar">{{initials}}</div>
-          <h2>{{auth.user()?.first_name}} {{auth.user()?.last_name}}</h2>
-          <p class="muted">{{auth.user()?.email}}</p>
+          <h2 translate="no">{{auth.user()?.first_name}} {{auth.user()?.last_name}}</h2>
+          <p class="muted" translate="no">{{auth.user()?.email}}</p>
           <div class="miles">
-            <span>SkyMiles hiện tại</span>
+            <span>{{language.pick('SkyMiles hiện tại','Current SkyMiles')}}</span>
             <strong>{{auth.user()?.sky_miles||0}}</strong>
-            <a routerLink="/skymiles">Xem hạng thành viên & quyền lợi →</a>
+            <a routerLink="/skymiles">{{language.pick('Xem hạng thành viên & quyền lợi →','View membership tier & benefits →')}}</a>
           </div>
           <div class="payment-card">
             <div class="paypal-mark">PayPal</div>
-            <div><strong>Thanh toán trực tuyến</strong><span>Thanh toán được thực hiện tại PayPal Checkout. Aptech Airlines không yêu cầu lưu số thẻ trong hồ sơ.</span></div>
+            <div><strong>{{language.pick('Thanh toán trực tuyến','Online payment')}}</strong><span>{{language.pick('Thanh toán được thực hiện tại PayPal Checkout. Aptech Airlines không yêu cầu lưu số thẻ trong hồ sơ.','Payments are processed through PayPal Checkout. Aptech Airlines does not require a saved card number in your profile.')}}</span></div>
           </div>
-          <a class="support-link" routerLink="/cancellation-refund">Chính sách hủy vé & hoàn tiền</a>
+          <a class="support-link" routerLink="/cancellation-refund">{{language.pick('Chính sách hủy vé & hoàn tiền','Cancellation & refund policy')}}</a>
         </section>
 
         <section class="card form">
-          <div class="section-title"><div><span>THÔNG TIN CÁ NHÂN</span><h2>Cập nhật hồ sơ</h2></div><small>Thông tin này được dùng để tự điền hành khách khi bạn đặt vé.</small></div>
+          <div class="section-title"><div><span>{{language.pick('THÔNG TIN CÁ NHÂN','PERSONAL INFORMATION')}}</span><h2>{{language.pick('Cập nhật hồ sơ','Update profile')}}</h2></div><small>{{language.pick('Thông tin này được dùng để tự điền hành khách khi bạn đặt vé.','This information is used to prefill passenger details when booking.')}}</small></div>
           <div class="grid grid-2">
-            <div class="field"><span>Họ</span><input class="control" [(ngModel)]="model.first_name"></div>
-            <div class="field"><span>Tên</span><input class="control" [(ngModel)]="model.last_name"></div>
+            <div class="field"><span>{{language.pick('Họ','Last name')}}</span><input class="control" [(ngModel)]="model.first_name"></div>
+            <div class="field"><span>{{language.pick('Tên','First name')}}</span><input class="control" [(ngModel)]="model.last_name"></div>
             <div class="field"><span>Email</span><input class="control" [(ngModel)]="model.email"></div>
-            <div class="field"><span>Điện thoại</span><input class="control" [(ngModel)]="model.phone_number"></div>
-            <div class="field"><span>Giới tính</span><select class="control" [(ngModel)]="model.sex"><option value="MALE">Nam</option><option value="FEMALE">Nữ</option><option value="OTHER">Khác</option></select></div>
-            <div class="field"><span>Tuổi</span><input class="control" type="number" min="0" [(ngModel)]="model.age"></div>
+            <div class="field"><span>{{language.pick('Điện thoại','Phone number')}}</span><input class="control" [(ngModel)]="model.phone_number"></div>
+            <div class="field"><span>{{language.pick('Giới tính','Gender')}}</span><select class="control" [(ngModel)]="model.sex"><option value="MALE">{{language.pick('Nam','Male')}}</option><option value="FEMALE">{{language.pick('Nữ','Female')}}</option><option value="OTHER">{{language.pick('Khác','Other')}}</option></select></div>
+            <div class="field"><span>{{language.pick('Tuổi','Age')}}</span><input class="control" type="number" min="0" [(ngModel)]="model.age"></div>
           </div>
-          <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="model.address"></div>
-          <div class="checkout-note"><strong>Không cần khai báo thẻ ngân hàng.</strong><span>Khi mua vé hoặc trả chênh lệch đổi chuyến, hệ thống mở PayPal Checkout để bạn thanh toán.</span></div>
-          <button class="btn btn-primary" (click)="save()">Lưu thay đổi</button>
+          <div class="field"><span>{{language.pick('Địa chỉ','Address')}}</span><input class="control" [(ngModel)]="model.address"></div>
+          <div class="checkout-note"><strong>{{language.pick('Không cần khai báo thẻ ngân hàng.','No saved bank card required.')}}</strong><span>{{language.pick('Khi mua vé hoặc trả chênh lệch đổi chuyến, hệ thống mở PayPal Checkout để bạn thanh toán.','Use PayPal Checkout to pay for bookings or reschedule fare differences.')}}</span></div>
+          <button class="btn btn-primary" (click)="save()">{{language.pick('Lưu thay đổi','Save changes')}}</button>
           
           
         </section>
@@ -58,6 +59,7 @@ import { ApiService } from '../core/api.service';
 export class ProfileComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
+  readonly language=inject(LanguageService);
   auth=inject(AuthService);api=inject(ApiService);model:any={};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
   constructor(){this.model={...(this.auth.user()||{})}}
   get initials(){return`${this.auth.user()?.first_name?.[0]||''}${this.auth.user()?.last_name?.[0]||''}`.toUpperCase()}
@@ -65,6 +67,6 @@ export class ProfileComponent{
     const id=this.auth.user()?._id||this.auth.user()?.id;if(!id)return;
     this.message='';this.error='';
     const body:any={first_name:this.model.first_name,last_name:this.model.last_name,email:this.model.email,phone_number:this.model.phone_number,address:this.model.address,sex:this.model.sex,age:Number(this.model.age||0)};
-    this.api.updateUser(id,body).subscribe({next:()=>{this.message='Đã cập nhật hồ sơ.';this.auth.refresh()},error:e=>this.error=Array.isArray(e?.error?.message)?e.error.message.join(' · '):(e?.error?.message||'Không cập nhật được hồ sơ.')})
+    this.api.updateUser(id,body).subscribe({next:()=>{this.message=this.language.pick('Đã cập nhật hồ sơ.','Profile updated successfully.');this.auth.refresh()},error:e=>this.error=this.language.translateNotice(Array.isArray(e?.error?.message)?e.error.message.join(' · '):(e?.error?.message||this.language.pick('Không cập nhật được hồ sơ.','Unable to update profile.')))})
   }
 }

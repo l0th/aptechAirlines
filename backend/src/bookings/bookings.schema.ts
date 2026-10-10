@@ -10,6 +10,29 @@ export enum BookingStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum HoldEmailStatus {
+  PENDING = 'PENDING',
+  SENDING = 'SENDING',
+  SENT = 'SENT',
+  FAILED = 'FAILED',
+}
+
+@Schema({ _id: false })
+export class HoldEmailDelivery {
+  @Prop({ type: String, enum: HoldEmailStatus, required: true })
+  status: HoldEmailStatus;
+
+  @Prop({ type: Number, default: 0 })
+  attempt_count: number;
+
+  @Prop() next_retry_at?: Date;
+  @Prop() lease_until?: Date;
+  @Prop() sent_at?: Date;
+  @Prop() last_error?: string;
+}
+
+const HoldEmailDeliverySchema = SchemaFactory.createForClass(HoldEmailDelivery);
+
 export enum BookingType {
   ONE_WAY = 'ONE_WAY',
   ROUND_TRIP = 'ROUND_TRIP',
@@ -221,6 +244,11 @@ export class Booking {
   // 2 weeks before departure deadline for blocked tickets
   @Prop()
   time_limit_deadline?: Date;
+
+  // Durable notification state for an unpaid hold, including clerk-created holds.
+  // Absent for pre-existing bookings and purchases; no historical backfill is implied.
+  @Prop({ type: HoldEmailDeliverySchema })
+  hold_email?: HoldEmailDelivery;
 
   // 3 weeks reminder flag
   @Prop({ default: false })

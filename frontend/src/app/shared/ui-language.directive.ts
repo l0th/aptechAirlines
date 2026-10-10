@@ -86,6 +86,8 @@ export class UiLanguageDirective implements AfterViewInit, OnDestroy {
 
     const element = node as Element;
     if (element.matches('script, style, code, pre')) return;
+    // Content that must stay exactly as rendered (e.g. email previews) opts out.
+    if (element.matches('[translate="no"], .notranslate')) return;
     this.translateAttributes(element);
     for (const child of Array.from(element.childNodes)) this.translateTree(child);
   }

@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   BookingStatus,
 } from './bookings.schema';
@@ -149,6 +149,11 @@ export class BookingsPayPalOrderService extends BookingsPayPalPart {
     const booking = await this.bookingModel.findOne({ blocking_number: dto.blocking_number }).exec();
     if (!booking) {
       throw new NotFoundException(`Booking with blocking number ${dto.blocking_number} not found`);
+    }
+    // Staff may create the hold on behalf of a customer, but only that customer
+    // may start a PayPal checkout for it. Check before any expiration side effects.
+    if (String(booking.user_id) !== String(userId)) {
+      throw new ForbiddenException('You can only pay for your own reservation.');
     }
     if (booking.status !== BookingStatus.BLOCKED) {
       throw new BadRequestException(`Cannot confirm booking in ${booking.status} status.`);

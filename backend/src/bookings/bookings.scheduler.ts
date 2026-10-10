@@ -2,11 +2,13 @@ import { BadRequestException, Injectable, Logger, NotFoundException, Optional } 
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Booking, BookingDocument, BookingStatus } from './bookings.schema';
+import { Booking, BookingDocument, BookingStatus, HoldEmailStatus } from './bookings.schema';
+import { deliverHoldCreatedEmail, HOLD_EMAIL_MAX_ATTEMPTS } from './hold-email-delivery';
 import { BookingsService } from './bookings.service';
 import { FlightsService } from '../flights/flights.service';
-import { BlockedReminderLeg, ItineraryLegData, MailService, renderBlockedTicketReminder } from '../mail/mail.service';
+import { BlockedReminderLeg, ItineraryLegData, MailService, normalizeMailLang, renderBlockedTicketReminder } from '../mail/mail.service';
 import { formatLocalTime } from '../common/timezone.util';
+import { renderBilingualMail } from '../mail/mail-i18n';
 import { SeatAllocationService } from '../seat-allocation/seat-allocation.service';
 import {
   BookingSeatSagaOperation,
@@ -31,6 +33,34 @@ export class BookingsScheduler {
     @InjectModel(BookingSeatSagaOperation.name)
     private readonly sagaModel?: Model<BookingSeatSagaOperationDocument>,
   ) {}
+
+  /** Recover undelivered hold-created emails after crashes or SMTP outages. */
+  @Cron('*/5 * * * *')
+  async retryHoldCreatedEmails(): Promise<number> {
+    const now = new Date();
+    const candidates = await this.bookingModel.find({
+      status: BookingStatus.BLOCKED,
+      time_limit_deadline: { $gt: now },
+      'hold_email.attempt_count': { $lt: HOLD_EMAIL_MAX_ATTEMPTS },
+      $or: [
+        { 'hold_email.status': { $in: [HoldEmailStatus.PENDING, HoldEmailStatus.FAILED] },
+          'hold_email.next_retry_at': { $lte: now } },
+        { 'hold_email.status': HoldEmailStatus.SENDING, 'hold_email.lease_until': { $lte: now } },
+      ],
+    }).select('_id').limit(50).lean().exec();
+
+    let delivered = 0;
+    for (const booking of candidates) {
+      try {
+        if (await deliverHoldCreatedEmail(this.bookingModel, this.flightsService, this.mailService, booking._id)) {
+          delivered++;
+        }
+      } catch (err: any) {
+        this.logger.error(`Hold email retry failed for booking ${booking._id}: ${err?.message || err}`);
+      }
+    }
+    return delivered;
+  }
 
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledJobs(): Promise<void> {
@@ -57,7 +87,7 @@ export class BookingsScheduler {
         status: BookingStatus.BLOCKED,
         is_reminder_sent: false,
       })
-      .populate('user_id', 'email first_name last_name')
+      .populate('user_id', 'email first_name last_name preferred_language')
       .exec();
 
     let sent = 0;
@@ -112,7 +142,7 @@ export class BookingsScheduler {
     const threeDaysFromNow = new Date(now.getTime() + 3 * DAY_MS);
     const candidates = await this.bookingModel
       .find({ status: { $in: [BookingStatus.CONFIRMED, BookingStatus.RESCHEDULED] } })
-      .populate('user_id', 'email first_name last_name')
+      .populate('user_id', 'email first_name last_name preferred_language')
       .exec();
 
     let sent = 0;
@@ -130,10 +160,15 @@ export class BookingsScheduler {
   }
 
   /** Admin/demo action: send the correct reminder template for one booking now. */
-  async sendManualReminder(bookingId: string): Promise<{ type: 'HOLD_PAYMENT' | 'UPCOMING_TRIP'; message: string }> {
+  async sendManualReminder(bookingId: string): Promise<{
+    type: 'HOLD_PAYMENT' | 'UPCOMING_TRIP';
+    message: string;
+    messageVi: string;
+    messageEn: string;
+  }> {
     const booking = await this.bookingModel
       .findById(bookingId)
-      .populate('user_id', 'email first_name last_name')
+      .populate('user_id', 'email first_name last_name preferred_language')
       .exec();
     if (!booking) throw new NotFoundException('Booking not found.');
 
@@ -147,14 +182,18 @@ export class BookingsScheduler {
       if (!ok) throw new BadRequestException('Email delivery failed. Check SMTP configuration/logs.');
       booking.is_reminder_sent = true;
       await booking.save();
-      return { type: 'HOLD_PAYMENT', message: `Đã gửi email nhắc thanh toán cho ${booking.pnr_code}.` };
+      const messageVi = `Đã gửi email nhắc thanh toán cho ${booking.pnr_code}.`;
+      const messageEn = `Payment reminder email sent for ${booking.pnr_code}.`;
+      return { type: 'HOLD_PAYMENT', message: messageVi, messageVi, messageEn };
     }
 
     if (booking.status === BookingStatus.CONFIRMED || booking.status === BookingStatus.RESCHEDULED) {
       const itinerary = await this.resolveActiveItinerary(booking);
       const ok = await this.sendUpcomingForBooking(booking, itinerary);
       if (!ok) throw new BadRequestException('Email delivery failed. Check SMTP configuration/logs.');
-      return { type: 'UPCOMING_TRIP', message: `Đã gửi email nhắc lịch bay cho ${booking.pnr_code}.` };
+      const messageVi = `Đã gửi email nhắc lịch bay cho ${booking.pnr_code}.`;
+      const messageEn = `Upcoming-trip reminder email sent for ${booking.pnr_code}.`;
+      return { type: 'UPCOMING_TRIP', message: messageVi, messageVi, messageEn };
     }
 
     throw new BadRequestException('Only BLOCKED, CONFIRMED, or RESCHEDULED bookings can receive reminders.');
@@ -175,6 +214,7 @@ export class BookingsScheduler {
       confirmationNumber: booking.confirmation_number,
       departureTimeFormatted,
       itinerary: itinerary.legs,
+      lang: normalizeMailLang(user.preferred_language),
     });
     if (!ok) return false;
     booking.departure_reminder_key = itinerary.key;
@@ -315,7 +355,7 @@ export class BookingsScheduler {
         : `${new Date(booking.time_limit_deadline).toISOString().replace('T', ' ').substring(0, 16)} (UTC)`;
     }
 
-    return renderBlockedTicketReminder({
+    const data = {
       toEmail: user?.email || '',
       passengerName,
       bookingReference: booking.pnr_code,
@@ -323,7 +363,8 @@ export class BookingsScheduler {
       earliestDepartureFormatted: earliestStr,
       deadlineFormatted: deadlineStr,
       legs,
-    }).html;
+    };
+    return renderBilingualMail((lang) => renderBlockedTicketReminder({ ...data, lang })).html;
   }
 
   /**

@@ -33,7 +33,6 @@ import {
   CreatePayPalConfirmHoldOrderDto,
   CreatePayPalRescheduleOrderDto,
 } from './bookings.dto';
-import { CREDIT_CARD_REGEX } from '../common/validation.constants';
 import { AirportsService } from '../airports/airports.service';
 import { FlightsService } from '../flights/flights.service';
 import { UsersService } from '../users/users.service';
@@ -49,6 +48,7 @@ import {
   assertPayPalRefundExecutionSnapshot,
   classifyPayPalRefundStatus,
 } from '../paypal/paypal.service';
+import { PaypalRefundScheduler } from '../paypal/paypal-refund.scheduler';
 import {
   PayPalCheckoutSession,
   PayPalCheckoutSessionDocument,
@@ -201,6 +201,7 @@ export class BookingsService {
     @Optional()
     @InjectModel(PayPalCheckoutSession.name)
     private readonly paypalCheckoutModel?: Model<PayPalCheckoutSessionDocument>,
+    @Optional() private readonly paypalRefundScheduler?: PaypalRefundScheduler,
   ) {
     const self = this;
     const paypalDeps: BookingsPayPalDependencies = {
@@ -227,6 +228,7 @@ export class BookingsService {
       get usersService() { return self.usersService; },
       get seatAllocationService() { return self.seatAllocationService; },
       get sagaModel() { return self.sagaModel; },
+      get mailService() { return self.mailService; },
     };
     const coreBridge: BookingsCoreBridge = {
       generateCode: (prefix) => this.generateCode(prefix),
@@ -265,8 +267,6 @@ export class BookingsService {
       distinctCouponLegs: (coupons) => this.distinctCouponLegs(coupons),
       buildCouponWithFare: (passenger, flight, inventory, legType, fare) =>
         this.buildCouponWithFare(passenger, flight, inventory, legType, fare),
-      resolveRescheduleCard: (booking, paymentMethod, isCharge) =>
-        this.resolveRescheduleCard(booking, paymentMethod, isCharge),
       executePostCommitRefunds: (bookingId, refundAllocations, pnrCode) =>
         this.executePostCommitRefunds(bookingId, refundAllocations, pnrCode),
       rescheduleMixedRoundTrip: (...args) =>
@@ -287,6 +287,7 @@ export class BookingsService {
       get seatAllocationService() { return self.seatAllocationService; },
       get mailService() { return self.mailService; },
       get paypalService() { return self.paypalService; },
+      get paypalRefundScheduler() { return self.paypalRefundScheduler; },
     };
     const lifecycleBridge: BookingsLifecycleBridge = {
       generateCode: (prefix) => this.generateCode(prefix),
@@ -307,6 +308,7 @@ export class BookingsService {
       get paypalService() { return self.paypalService; },
     };
     const quoteBridge: BookingsQuoteBridge = {
+      loadDistinctCouponFlights: (coupons) => this.loadDistinctCouponFlights(coupons),
       normalizeLegType: (legType) => normalizeLegType(legType),
       assertBookableFlight: (flight, context) => this.assertBookableFlight(flight, context),
       validateBookingWindow: (flightOrFlights, directionName) =>
@@ -372,88 +374,6 @@ export class BookingsService {
     externalPaymentProof?: ExternalPaymentProof,
   ): Promise<BookingDocument> {
     return this.confirmService.confirmTicket(dto, externalPaymentProof);
-  }
-
-  private async resolveRescheduleCard(
-    booking: BookingDocument,
-    paymentMethod?: PaymentMethod,
-    isCharge: boolean = true,
-  ): Promise<{ maskedCard: string; paymentMethod?: PaymentMethod }> {
-    const user = booking.user_id
-      ? await this.usersService.findById(booking.user_id.toString())
-      : null;
-
-    const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
-
-    if (isCharge) {
-      if (!paymentMethod) {
-        throw new BadRequestException('Payment method is required for reschedule fare difference.');
-      }
-      if (paymentMethod === PaymentMethod.PAYPAL) {
-        throw new BadRequestException('PayPal reschedule charge requires completing PayPal checkout.');
-      }
-      if (paymentMethod !== PaymentMethod.PROFILE_CARD) {
-        throw new BadRequestException('Invalid payment method.');
-      }
-
-      const rawCard = (user?.preferred_credit_card || '').trim();
-      if (
-        !rawCard ||
-        placeholders.has(rawCard.toUpperCase()) ||
-        rawCard.startsWith('*') ||
-        !CREDIT_CARD_REGEX.test(rawCard)
-      ) {
-        throw new BadRequestException('Payment card is required for reschedule fare difference.');
-      }
-      const digits = rawCard.replace(/\D/g, '');
-      return {
-        maskedCard: `**** **** **** ${digits.slice(-4)}`,
-        paymentMethod: PaymentMethod.PROFILE_CARD,
-      };
-    } else {
-      // 1. Prefer original successful transaction's card_masked and payment_method
-      if (Array.isArray(booking.payment_transactions) && booking.payment_transactions.length > 0) {
-        const paymentTx = booking.payment_transactions
-          .slice()
-          .reverse()
-          .find((t) => t.status === 'SUCCESS' && (t.transaction_type === 'PAYMENT' || t.transaction_type === 'RESCHEDULE_CHARGE'));
-
-        if (paymentTx?.card_masked) {
-          const masked = paymentTx.card_masked.trim();
-          if (masked && !placeholders.has(masked.toUpperCase())) {
-            return {
-              maskedCard: masked,
-              paymentMethod: (paymentTx.payment_method as PaymentMethod) || undefined,
-            };
-          }
-        }
-      }
-
-      // 2. Fall back to valid preferred card if needed
-      const rawCard = (user?.preferred_credit_card || '').trim();
-      if (rawCard && !placeholders.has(rawCard.toUpperCase()) && !rawCard.startsWith('*') && CREDIT_CARD_REGEX.test(rawCard)) {
-        const digits = rawCard.replace(/\D/g, '');
-        if (digits.length >= 4) {
-          return {
-            maskedCard: `**** **** **** ${digits.slice(-4)}`,
-            paymentMethod: PaymentMethod.PROFILE_CARD,
-          };
-        }
-      }
-
-      // 3. Fall back to PayPal if booking has successful PayPal payments
-      const hasPaypal = booking.payment_transactions?.some(
-        (t) => t.status === 'SUCCESS' && t.payment_method === PaymentMethod.PAYPAL,
-      );
-      if (hasPaypal) {
-        return {
-          maskedCard: '',
-          paymentMethod: PaymentMethod.PAYPAL,
-        };
-      }
-
-      throw new BadRequestException('Cannot process refund: no valid payment card found for this booking.');
-    }
   }
 
   async rescheduleTicket(
@@ -752,6 +672,7 @@ export class BookingsService {
     booking: BookingDocument;
     refund_amount: number;
     refund_percentage: number;
+    refund_status: 'NOT_APPLICABLE' | 'PENDING' | 'SUCCESS' | 'FAILED';
     cancellation_number: string;
     currency: string;
     refund_card_masked?: string;

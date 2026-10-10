@@ -213,7 +213,7 @@ export class SeatsComponent{
     const id=this.currentLeg?.flight_id;if(!id)return;
     const cached=this.cache.get(id);if(cached){this.seatMap=cached;this.rows=cached.rows||[];this.syncRequestFees(id);this.loading=false;this.error='';return}
     this.loading=true;this.error='';
-    this.api.seatMap(id).subscribe({next:r=>{this.seatMap=r;this.rows=r.rows||[];this.cache.set(id,r);this.syncRequestFees(id);this.loading=false},error:e=>{this.error=this.message(e,'Không tải được sơ đồ ghế.');this.loading=false}})
+    this.api.seatMap(id).subscribe({next:r=>{this.seatMap=r;this.rows=r.rows||[];this.cache.set(id,r);this.syncRequestFees(id);this.loading=false},error:e=>{this.error=this.message(e,this.t('Không tải được sơ đồ ghế.','Unable to load seat map.'));this.loading=false}})
   }
 
   requestFor(passenger:number,flightId?:string){return this.requests.find(r=>r.passenger_index===passenger&&r.flight_id===flightId)}
@@ -240,7 +240,7 @@ export class SeatsComponent{
   seatLetter(s:any){return String(s?.column ?? s?.column_letter ?? (String(s?.seat_code||'').replace(/^\d+/,'') || '—'))}
   seatPositionLabel(s:any){const p=String(s?.position||'').toUpperCase();return p==='WINDOW'?this.t('Cửa sổ','Window'):p==='AISLE'?this.t('Lối đi','Aisle'):p==='MIDDLE'?this.t('Ghế giữa','Middle seat'):this.t('Vị trí tiêu chuẩn','Standard position')}
   seatFeatureLabel(s:any){const tags:string[]=[];if(s?.is_exit_row)tags.push(this.t('Hàng thoát hiểm','Exit row'));if(s?.is_extra_legroom)tags.push(this.t('Chỗ để chân rộng','Extra legroom'));return tags.length?tags.join(' · '):this.t('Ghế tiêu chuẩn','Standard seat')}
-  cabinLabel(c:any){const v=String(c||'').toUpperCase();if(this.lang.language()==='en')return v==='ECONOMY'?'Economy':v==='BUSINESS'?'Business':v==='FIRST'?'First class':v==='CLUB'?'Premium / Club':c||'—';return v==='ECONOMY'?'Phổ thông':v==='BUSINESS'?'Thương gia':v==='FIRST'?'Hạng nhất':v==='CLUB'?'Premium / Club':c||'—'}
+  cabinLabel(c:any){return this.lang.cabinLabel(String(c||'').toUpperCase())||'—'}
 
   switchCabin(option:any){
     if(!option||option.cabin_class===this.currentCabin)return;
@@ -299,7 +299,7 @@ export class SeatsComponent{
   feeValue(s:any){return Number(s.fee??s.seat_fee??s.price??0)}
   fee(v:number){return v?`+${Math.round(v/1000)}k`:'0'}
   money(v:number){return new Intl.NumberFormat(this.lang.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
-  t(vi:string,en:string){return this.lang.language()==='vi'?vi:en}
+  t(vi:string,en:string){return this.lang.pick(vi,en)}
 
   next(){
     this.state.seatFeeTotal.set(this.totalSeatFee);
@@ -340,5 +340,5 @@ export class SeatsComponent{
 
   private cabinRank(cabin:string){return({ECONOMY:1,CLUB:2,BUSINESS:3,FIRST:4} as Record<string,number>)[String(cabin||'').toUpperCase()]||99}
 
-  private message(e:any,fallback:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||fallback}
+  private message(e:any,fallback:string){const m=e?.error?.message;return this.lang.translateNotice(Array.isArray(m)?m.join(' · '):m||fallback)}
 }

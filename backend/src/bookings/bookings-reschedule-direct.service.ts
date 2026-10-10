@@ -16,7 +16,8 @@ import {
   SagaOperationType,
   SagaState,
 } from '../seat-allocation/booking-seat-saga-operation.schema';
-import { allocateRefundSources, AllocatedRefundItem } from './refund-allocation.util';
+import { allocateRefundSources, AllocatedRefundItem, assertPayPalRefundAllocations } from './refund-allocation.util';
+import { validateRescheduleSeatRequests } from './reschedule-seat-requests.util';
 import {
   BookingsRescheduleBridge,
   BookingsRescheduleDependencies,
@@ -46,6 +47,38 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
       throw new BadRequestException('Only confirmed tickets can be rescheduled.');
     }
 
+    // Each replacement must be a complete direction, never a partial connecting leg.
+    const hasOutboundDirect = !!dto.new_flight_id || !!dto.new_inventory_id;
+    const hasReturnDirect = !!dto.new_return_flight_id || !!dto.new_return_inventory_id;
+    const hasOutboundLegsInput = dto.new_legs !== undefined;
+    const hasReturnLegsInput = dto.new_return_legs !== undefined;
+    if (Boolean(dto.new_flight_id) !== Boolean(dto.new_inventory_id) ||
+        Boolean(dto.new_return_flight_id) !== Boolean(dto.new_return_inventory_id)) {
+      throw new BadRequestException('Both flight and inventory IDs must be provided for each direct direction.');
+    }
+    if ((hasOutboundDirect && hasOutboundLegsInput) || (hasReturnDirect && hasReturnLegsInput)) {
+      throw new BadRequestException('Select either a direct flight or a full connecting itinerary for each direction.');
+    }
+    if ((hasOutboundLegsInput && (dto.new_legs!.length < 2 || dto.new_legs!.length > 3)) ||
+        (hasReturnLegsInput && (dto.new_return_legs!.length < 2 || dto.new_return_legs!.length > 3))) {
+      throw new BadRequestException('A connecting direction must contain 2 or 3 flights.');
+    }
+    if (!hasOutboundDirect && !hasOutboundLegsInput && !hasReturnDirect && !hasReturnLegsInput) {
+      throw new BadRequestException('Select at least one complete direction to reschedule.');
+    }
+    if (booking.booking_type !== BookingType.ROUND_TRIP && (hasReturnDirect || hasReturnLegsInput)) {
+      throw new BadRequestException('Return direction is only applicable to round-trip bookings.');
+    }
+
+    validateRescheduleSeatRequests(
+      dto.seat_requests,
+      [
+        ...(dto.new_legs?.map((leg) => leg.flight_id) || (dto.new_flight_id ? [dto.new_flight_id] : [])),
+        ...(dto.new_return_legs?.map((leg) => leg.flight_id) || (dto.new_return_flight_id ? [dto.new_return_flight_id] : [])),
+      ],
+      booking.passengers.length,
+    );
+
     // CONNECTING reschedule
     if (booking.booking_type === BookingType.CONNECTING) {
       if (!dto.new_legs || dto.new_legs.length < 2) {
@@ -72,20 +105,26 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
 
     let outboundCoupons: any[];
     let inboundCoupons: any[];
+    const activeCoupons = booking.ticket_coupons.filter(
+      (c) => String(c.coupon_status || 'ACTIVE').toUpperCase() === 'ACTIVE',
+    );
 
     if (booking.booking_type === BookingType.ROUND_TRIP) {
-      outboundCoupons = booking.ticket_coupons.filter((c) => isOutboundLeg(c.leg_type));
-      inboundCoupons = booking.ticket_coupons.filter((c) => isInboundLeg(c.leg_type));
+      outboundCoupons = activeCoupons.filter((c) => isOutboundLeg(c.leg_type));
+      inboundCoupons = activeCoupons.filter((c) => isInboundLeg(c.leg_type));
     } else {
-      outboundCoupons = booking.ticket_coupons.filter((c) => c.leg_type === 'OUTBOUND');
-      inboundCoupons = booking.ticket_coupons.filter((c) => c.leg_type !== 'OUTBOUND');
+      outboundCoupons = activeCoupons.filter((c) => c.leg_type === 'OUTBOUND');
+      inboundCoupons = activeCoupons.filter((c) => c.leg_type !== 'OUTBOUND');
     }
-    if (outboundCoupons.length === 0 && booking.ticket_coupons.length > 0) {
-      outboundCoupons = [booking.ticket_coupons[0]];
-      inboundCoupons = booking.ticket_coupons.slice(1);
+    if (outboundCoupons.length === 0 && activeCoupons.length > 0 && booking.booking_type !== BookingType.ROUND_TRIP) {
+      outboundCoupons = [activeCoupons[0]];
+      inboundCoupons = activeCoupons.slice(1);
     }
     if (outboundCoupons.length === 0) {
       throw new BadRequestException('Booking has no ticket coupons to reschedule');
+    }
+    if (booking.booking_type === BookingType.ROUND_TRIP && inboundCoupons.length === 0) {
+      throw new BadRequestException('Round-trip booking has no active return coupons to reschedule.');
     }
 
     // Detect direction types using DISTINCT (flight_id, inventory_id) legs — not raw coupon count
@@ -121,16 +160,15 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
       );
     }
 
-    // Mixed ROUND_TRIP: delegate to rescheduleMixedRoundTrip when EITHER direction is connecting
-    if (booking.booking_type === BookingType.ROUND_TRIP && (outboundIsConnecting || returnIsConnecting)) {
+    // Mixed flow handles direct/connecting transitions and return-only changes as well.
+    if (booking.booking_type === BookingType.ROUND_TRIP) {
       return this.bridge.rescheduleMixedRoundTrip(
         booking, dto, outboundCoupons, inboundCoupons,
         outboundIsConnecting, returnIsConnecting, externalPaymentProof,
       );
     }
 
-    const shouldRescheduleReturn =
-      booking.booking_type === BookingType.ROUND_TRIP && hasReturnFlight;
+    const shouldRescheduleReturn = hasReturnFlight;
 
     if (!dto.new_flight_id || !dto.new_inventory_id) {
       throw new BadRequestException(
@@ -240,7 +278,7 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
           'Return flight must depart after the outbound flight arrives.',
         );
       }
-    } else if (booking.booking_type === BookingType.ROUND_TRIP && !shouldRescheduleReturn) {
+    } else if (inboundCoupons.length > 0 && !shouldRescheduleReturn) {
       // Validate existing return against new outbound arrival
       const existingReturnFlightId = inboundCoupons[0]?.flight_id?.toString();
       if (existingReturnFlightId) {
@@ -651,18 +689,13 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
             created_at: new Date(),
           });
         } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, true);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_CHARGE',
-            payment_method: resCard.paymentMethod,
-            payment_provider: resCard.paymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
-            payment_reference: this.bridge.generateCode('PAY'),
-            amount: priceDiff,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
+          if (!dto.payment_method) {
+            throw new BadRequestException('Payment method is required for reschedule fare difference.');
+          }
+          if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
+            throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
+          }
+          throw new BadRequestException('A PayPal payment is required for the reschedule fare difference.');
         }
       } else if (priceDiff < 0) {
         const refundAmt = Math.abs(priceDiff);
@@ -672,24 +705,18 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
           'RESCHEDULE_REFUND',
           (p) => this.bridge.generateCode(p),
         );
-        if (allocations.length > 0) {
-          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
-          for (const alloc of allocations) {
-            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
-              const rawMasked = (alloc.card_masked || '').trim();
-              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
-                const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
-                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
-              }
-            }
+        assertPayPalRefundAllocations(allocations, refundAmt);
+        if (!this.paypalService?.isPayPalActive()) {
+          throw new BadRequestException('PayPal refunds are unavailable. Please contact support before rescheduling.');
+        }
+        for (const alloc of allocations) {
             refundAllocations.push(alloc);
             booking.payment_transactions.push({
               transaction_type: alloc.transaction_type,
               payment_reference: alloc.payment_reference,
               source_payment_reference: alloc.source_payment_reference,
               payment_method: alloc.payment_method,
-              payment_provider: alloc.payment_method === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
+              payment_provider: 'PAYPAL',
               amount: alloc.amount,
               currency: alloc.currency,
               card_masked: alloc.card_masked,
@@ -699,22 +726,9 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
               provider_currency: alloc.provider_currency,
               exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
               status: alloc.status,
+              next_retry_at: alloc.status === 'PENDING' ? new Date() : undefined,
               created_at: new Date(),
             });
-          }
-        } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_REFUND',
-            payment_method: resCard.paymentMethod,
-            payment_provider: resCard.paymentMethod === PaymentMethod.PAYPAL ? 'PAYPAL' : 'PROFILE_CARD',
-            payment_reference: this.bridge.generateCode('REF'),
-            amount: refundAmt,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
         }
       }
 
@@ -863,14 +877,20 @@ export class BookingsRescheduleDirectService extends BookingsReschedulePart {
       }
 
       if (this.paypalService && refundAllocations.length > 0) {
-        await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        try {
+          await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        } catch (refundError) {
+          // Seats and booking have already committed; the persisted PENDING refund
+          // is reconciled asynchronously. Never report the reschedule as rolled back.
+          this.logger.error(`Post-commit refund dispatch failed for ${booking.pnr_code}: ${refundError}`);
+        }
       }
 
       const legsMessage = shouldRescheduleReturn ? 'Outbound and return legs' : 'Outbound leg';
       return {
         booking,
         price_difference: priceDiff,
-        message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.`,
+        message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.${priceDiff < 0 ? ' PayPal refund requested; check its settlement status separately.' : ''}`,
       };
     } catch (err) {
       if (businessCommitted) {

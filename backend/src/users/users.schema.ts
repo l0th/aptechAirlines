@@ -58,6 +58,11 @@ export class User {
 
   @Prop()
   password_reset_expires_at?: Date;
+
+  // Language chosen on the website (VI/EN switch). All emails to this user are
+  // rendered entirely in this language. Defaults to Vietnamese.
+  @Prop({ type: String, enum: ['vi', 'en'], default: 'vi' })
+  preferred_language: 'vi' | 'en';
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

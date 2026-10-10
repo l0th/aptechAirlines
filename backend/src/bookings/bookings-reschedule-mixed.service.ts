@@ -15,7 +15,7 @@ import {
   SagaOperationType,
   SagaState,
 } from '../seat-allocation/booking-seat-saga-operation.schema';
-import { allocateRefundSources, AllocatedRefundItem } from './refund-allocation.util';
+import { allocateRefundSources, AllocatedRefundItem, assertPayPalRefundAllocations } from './refund-allocation.util';
 import {
   BookingsRescheduleBridge,
   BookingsRescheduleDependencies,
@@ -51,8 +51,10 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
     const hasReturnLegs = !!(dto.new_return_legs && dto.new_return_legs.length >= 2);
     const hasReturnDirect = !!(dto.new_return_flight_id && dto.new_return_inventory_id);
 
-    const rescheduleOutbound = outboundIsConnecting ? hasOutboundLegs : hasOutboundDirect;
-    const rescheduleReturn = returnIsConnecting ? hasReturnLegs : hasReturnDirect;
+    const rescheduleOutbound = hasOutboundLegs || hasOutboundDirect;
+    const rescheduleReturn = hasReturnLegs || hasReturnDirect;
+    const newOutboundIsConnecting = hasOutboundLegs;
+    const newReturnIsConnecting = hasReturnLegs;
 
     if (!rescheduleOutbound && !rescheduleReturn) {
       throw new BadRequestException(
@@ -67,7 +69,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
     const returnInventories: any[] = [];
 
     if (rescheduleOutbound) {
-      if (outboundIsConnecting) {
+      if (newOutboundIsConnecting) {
         for (const legDef of dto.new_legs!) {
           const flight = await this.flightsService.findById(legDef.flight_id);
           this.bridge.assertBookableFlight(flight, 'reschedule');
@@ -113,11 +115,13 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
         if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
           throw new BadRequestException(`Cannot reschedule to flight ${flight.flight_number}: flight is ${flight.status}.`);
         }
-        const oldOutboundFlight = await this.flightsService.findById(outboundCoupons[0].flight_id.toString());
-        if (flight.origin_iata !== oldOutboundFlight.origin_iata || flight.dest_iata !== oldOutboundFlight.dest_iata) {
+        const oldOutboundLegs = await this.bridge.loadDistinctCouponFlights(outboundCoupons);
+        const oldOrigin = oldOutboundLegs[0]?.origin_iata;
+        const oldDest = oldOutboundLegs[oldOutboundLegs.length - 1]?.dest_iata;
+        if (flight.origin_iata !== oldOrigin || flight.dest_iata !== oldDest) {
           throw new BadRequestException(
             `Route mismatch: new outbound ${flight.origin_iata}-${flight.dest_iata} ` +
-            `does not match old outbound ${oldOutboundFlight.origin_iata}-${oldOutboundFlight.dest_iata}.`,
+            `does not match old outbound ${oldOrigin}-${oldDest}.`,
           );
         }
         outboundFlights.push(flight);
@@ -130,7 +134,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
     }
 
     if (rescheduleReturn) {
-      if (returnIsConnecting) {
+      if (newReturnIsConnecting) {
         for (const legDef of dto.new_return_legs!) {
           const flight = await this.flightsService.findById(legDef.flight_id);
           this.bridge.assertBookableFlight(flight, 'reschedule');
@@ -176,11 +180,13 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
         if (flight.status === FlightStatus.CANCELLED || flight.status === FlightStatus.COMPLETED) {
           throw new BadRequestException(`Cannot reschedule to return flight ${flight.flight_number}: flight is ${flight.status}.`);
         }
-        const oldReturnFlight = await this.flightsService.findById(inboundCoupons[0]?.flight_id?.toString());
-        if (flight.origin_iata !== oldReturnFlight.origin_iata || flight.dest_iata !== oldReturnFlight.dest_iata) {
+        const oldReturnLegs = await this.bridge.loadDistinctCouponFlights(inboundCoupons);
+        const oldOrigin = oldReturnLegs[0]?.origin_iata;
+        const oldDest = oldReturnLegs[oldReturnLegs.length - 1]?.dest_iata;
+        if (flight.origin_iata !== oldOrigin || flight.dest_iata !== oldDest) {
           throw new BadRequestException(
             `Route mismatch: new return ${flight.origin_iata}-${flight.dest_iata} ` +
-            `does not match old return ${oldReturnFlight.origin_iata}-${oldReturnFlight.dest_iata}.`,
+            `does not match old return ${oldOrigin}-${oldDest}.`,
           );
         }
         returnFlights.push(flight);
@@ -283,7 +289,9 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
           sagaOp.last_progress_at = new Date();
           await sagaOp.save();
         }
-        reservedLegs.push({ ...leg, mutation_key: mutKey });
+        // Only Saga mode can safely compensate a reservation whose result is unknown.
+        // Without a Saga marker, never restore inventory for a failed reservation.
+        if (this.sagaModel) reservedLegs.push({ ...leg, mutation_key: mutKey });
 
         try {
           reserved = this.sagaModel
@@ -354,17 +362,18 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
           const f = await this.flightsService.findById(leg.flight_id);
           throw new BadRequestException(`Not enough seats on flight ${f.flight_number}. All reservations rolled back.`);
         }
+        if (!this.sagaModel) reservedLegs.push({ ...leg, mutation_key: mutKey });
       }
     };
 
     if (rescheduleOutbound) {
-      const outLegs = outboundIsConnecting
+      const outLegs = newOutboundIsConnecting
         ? dto.new_legs!.map(l => ({ flight_id: l.flight_id, inventory_id: l.inventory_id }))
         : [{ flight_id: dto.new_flight_id!, inventory_id: dto.new_inventory_id! }];
       await reserveDirection(outLegs);
     }
     if (rescheduleReturn) {
-      const retLegs = returnIsConnecting
+      const retLegs = newReturnIsConnecting
         ? dto.new_return_legs!.map(l => ({ flight_id: l.flight_id, inventory_id: l.inventory_id }))
         : [{ flight_id: dto.new_return_flight_id!, inventory_id: dto.new_return_inventory_id! }];
       await reserveDirection(retLegs);
@@ -413,7 +422,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
             (fl as any).pricing_profile_snapshot,
             inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
           );
-          const legType = outboundIsConnecting ? `CONNECTING_${i + 1}` : 'OUTBOUND';
+          const legType = newOutboundIsConnecting ? `CONNECTING_${i + 1}` : 'OUTBOUND';
           for (const p of booking.passengers) {
             let fare = pricing.final_price;
             if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
@@ -440,7 +449,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
             (fl as any).pricing_profile_snapshot,
             inventoryLoadFactor(inv.allocated_seats, inv.available_seats),
           );
-          const legType = returnIsConnecting ? `INBOUND_${i + 1}` : 'INBOUND';
+          const legType = newReturnIsConnecting ? `INBOUND_${i + 1}` : 'INBOUND';
           for (const p of booking.passengers) {
             let fare = pricing.final_price;
             if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
@@ -460,7 +469,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
           for (let i = 0; i < outboundFlights.length; i++) {
             const fl = outboundFlights[i];
             const inv = outboundInventories[i];
-            const legType = outboundIsConnecting ? `CONNECTING_${i + 1}` : 'OUTBOUND';
+            const legType = newOutboundIsConnecting ? `CONNECTING_${i + 1}` : 'OUTBOUND';
             const legCoupons = newOutboundCoupons.filter(c => c.flight_id.toString() === fl._id.toString() && c.leg_type === legType);
             const aircraftType = fl.aircraft?.model_code;
             if (!aircraftType) {
@@ -517,7 +526,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
           for (let i = 0; i < returnFlights.length; i++) {
             const fl = returnFlights[i];
             const inv = returnInventories[i];
-            const legType = returnIsConnecting ? `INBOUND_${i + 1}` : 'INBOUND';
+            const legType = newReturnIsConnecting ? `INBOUND_${i + 1}` : 'INBOUND';
             const legCoupons = newReturnCoupons.filter(c => c.flight_id.toString() === fl._id.toString() && c.leg_type === legType);
             const aircraftType = fl.aircraft?.model_code;
             if (!aircraftType) {
@@ -603,17 +612,13 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
             created_at: new Date(),
           });
         } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, true);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_CHARGE',
-            payment_method: resCard.paymentMethod,
-            payment_reference: this.bridge.generateCode('PAY'),
-            amount: priceDiff,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
+          if (!dto.payment_method) {
+            throw new BadRequestException('Payment method is required for reschedule fare difference.');
+          }
+          if (dto.payment_method === PaymentMethod.PROFILE_CARD) {
+            throw new BadRequestException('Saved card payments are no longer supported. Complete PayPal checkout.');
+          }
+          throw new BadRequestException('A PayPal payment is required for the reschedule fare difference.');
         }
       } else if (priceDiff < 0) {
         const refundAmt = Math.abs(priceDiff);
@@ -623,23 +628,18 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
           'RESCHEDULE_REFUND',
           (p) => this.bridge.generateCode(p),
         );
-        if (allocations.length > 0) {
-          const placeholders = new Set(['SAVED-CARD', 'CARD-DEFAULT', 'ORIGINAL-PAYMENT-CARD', 'UNKNOWN']);
-          for (const alloc of allocations) {
-            if (alloc.payment_method !== PaymentMethod.PAYPAL) {
-              const rawMasked = (alloc.card_masked || '').trim();
-              if (!alloc.payment_method || !rawMasked || placeholders.has(rawMasked.toUpperCase())) {
-                const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-                if (resCard.maskedCard) alloc.card_masked = resCard.maskedCard;
-                if (resCard.paymentMethod) alloc.payment_method = resCard.paymentMethod;
-              }
-            }
+        assertPayPalRefundAllocations(allocations, refundAmt);
+        if (!this.paypalService?.isPayPalActive()) {
+          throw new BadRequestException('PayPal refunds are unavailable. Please contact support before rescheduling.');
+        }
+        for (const alloc of allocations) {
             refundAllocations.push(alloc);
             booking.payment_transactions.push({
               transaction_type: alloc.transaction_type,
               payment_reference: alloc.payment_reference,
               source_payment_reference: alloc.source_payment_reference,
               payment_method: alloc.payment_method,
+              payment_provider: 'PAYPAL',
               amount: alloc.amount,
               currency: alloc.currency,
               card_masked: alloc.card_masked,
@@ -649,21 +649,9 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
               provider_currency: alloc.provider_currency,
               exchange_rate_vnd_per_unit: alloc.exchange_rate_vnd_per_unit,
               status: alloc.status,
+              next_retry_at: alloc.status === 'PENDING' ? new Date() : undefined,
               created_at: new Date(),
             });
-          }
-        } else {
-          const resCard = await this.bridge.resolveRescheduleCard(booking, dto.payment_method, false);
-          booking.payment_transactions.push({
-            transaction_type: 'RESCHEDULE_REFUND',
-            payment_method: resCard.paymentMethod,
-            payment_reference: this.bridge.generateCode('REF'),
-            amount: refundAmt,
-            card_masked: resCard.maskedCard,
-            currency: 'VND',
-            status: 'SUCCESS',
-            created_at: new Date(),
-          });
         }
       }
 
@@ -803,7 +791,11 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
       }
 
       if (this.paypalService && refundAllocations.length > 0) {
-        await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        try {
+          await this.bridge.executePostCommitRefunds(booking._id, refundAllocations, booking.pnr_code);
+        } catch (refundError) {
+          this.logger.error(`Post-commit refund dispatch failed for ${booking.pnr_code}: ${refundError}`);
+        }
       }
 
       const legsMessage = rescheduleOutbound && rescheduleReturn
@@ -811,7 +803,7 @@ export class BookingsRescheduleMixedService extends BookingsReschedulePart {
       return {
         booking,
         price_difference: priceDiff,
-        message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.`,
+        message: `${legsMessage} rescheduled successfully. New confirmation number is ${newConfirmationNumber}. Fare difference: ${priceDiff} VND.${priceDiff < 0 ? ' PayPal refund requested; check its settlement status separately.' : ''}`,
       };
     } catch (err) {
       if (businessCommitted) {

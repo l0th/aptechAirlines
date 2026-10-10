@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { ToastService } from '../core/toast.service';
 import { PaginationComponent } from '../shared/pagination.component';
+import { LanguageService } from '../core/language.service';
 
 @Component({
   standalone:true,
@@ -95,12 +96,13 @@ export class PoliciesComponent{
   private __toast=inject(ToastService);
   api=inject(ApiService);
   toast=inject(ToastService);
+  language=inject(LanguageService);
   rows:any[]=[]; editing:any=null; detailOpen=false; busy=false; private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)}; private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};page=1;pageSize=20;
   form:any=this.blank();
   constructor(){this.load()}
   get paged(){const start=(this.page-1)*this.pageSize;return this.rows.slice(start,start+this.pageSize)}
   blank(){return{min_days_before:0,max_days_before:null,refund_percentage:0}}
-  load(){this.api.policies().subscribe({next:r=>{this.rows=r;this.page=1},error:e=>this.error=this.msg(e,'Không tải được policies.')})}
+  load(){this.api.policies().subscribe({next:r=>{this.rows=r;this.page=1},error:e=>this.error=this.msg(e,this.t('Không tải được chính sách.','Unable to load policies.'))})}
   createNew(){this.error='';this.message='';this.editing=null;this.form=this.blank();this.detailOpen=true}
   openDetail(p:any){this.error='';this.message='';this.editing=p;this.form={min_days_before:p.min_days_before,max_days_before:p.max_days_before??null,refund_percentage:p.refund_percentage};this.detailOpen=true}
   closeDetail(){if(this.busy)return;this.detailOpen=false;this.editing=null;this.form=this.blank()}
@@ -132,12 +134,14 @@ export class PoliciesComponent{
       },
       error:e=>{
         this.busy=false;
-        const detail=this.msg(e,'Vui lòng thử lại.');
+        const detailVi=this.msg(e,'Vui lòng thử lại.');
+        const translatedEn=this.language.translateNotice(detailVi,'en');
+        const detailEn=translatedEn===detailVi?'Please try again.':translatedEn;
         this.toast.error({
           titleVi:'Không xóa được chính sách.',
           titleEn:'Unable to delete policy.',
-          messageVi:detail,
-          messageEn:detail,
+          messageVi:detailVi,
+          messageEn:detailEn,
         });
       }
     });
@@ -148,15 +152,16 @@ export class PoliciesComponent{
     const refundPercentage=Number(this.form.refund_percentage);
     const rawMax=this.form.max_days_before;
     const maxDays=rawMax===null||rawMax===''||rawMax===undefined?null:Number(rawMax);
-    if(!Number.isInteger(minDays)||minDays<0){this.error='Từ ngày phải là số nguyên từ 0 trở lên.';return}
-    if(maxDays!==null&&(!Number.isInteger(maxDays)||maxDays<minDays)){this.error='Đến ngày phải để trống hoặc là số nguyên lớn hơn hay bằng Từ ngày.';return}
-    if(!Number.isFinite(refundPercentage)||refundPercentage<0||refundPercentage>100){this.error='Hoàn tiền phải nằm trong khoảng 0% đến 100%.';return}
+    if(!Number.isInteger(minDays)||minDays<0){this.error=this.t('Từ ngày phải là số nguyên từ 0 trở lên.','Minimum days must be an integer of 0 or greater.');return}
+    if(maxDays!==null&&(!Number.isInteger(maxDays)||maxDays<minDays)){this.error=this.t('Đến ngày phải để trống hoặc là số nguyên lớn hơn hay bằng Từ ngày.','Maximum days must be blank or an integer greater than or equal to minimum days.');return}
+    if(!Number.isFinite(refundPercentage)||refundPercentage<0||refundPercentage>100){this.error=this.t('Hoàn tiền phải nằm trong khoảng 0% đến 100%.','Refund percentage must be between 0% and 100%.');return}
     const body:any={min_days_before:minDays,max_days_before:maxDays,refund_percentage:refundPercentage};
     const wasEditing=!!this.editing;
     this.busy=true;
     const req=this.editing?this.api.updatePolicy(this.editing._id,body):this.api.createPolicy(body);
-    req.subscribe({next:()=>{this.busy=false;this.detailOpen=false;this.editing=null;this.form=this.blank();this.message=wasEditing?'Đã cập nhật chính sách.':'Đã tạo chính sách.';this.load()},error:e=>{this.busy=false;this.error=this.msg(e,'Không lưu được chính sách.')}})
+    req.subscribe({next:()=>{this.busy=false;this.detailOpen=false;this.editing=null;this.form=this.blank();this.message=wasEditing?this.t('Đã cập nhật chính sách.','Policy updated.'):this.t('Đã tạo chính sách.','Policy created.');this.load()},error:e=>{this.busy=false;this.error=this.msg(e,this.t('Không lưu được chính sách.','Unable to save policy.'))}})
   }
-  rangeLabel(p:any){return `${p.min_days_before} – ${p.max_days_before??'∞'} ngày trước bay`}
+  rangeLabel(p:any){return this.t(`${p.min_days_before} – ${p.max_days_before??'∞'} ngày trước bay`,`${p.min_days_before} – ${p.max_days_before??'∞'} days before departure`)}
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
 }

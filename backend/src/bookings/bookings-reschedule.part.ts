@@ -2,7 +2,6 @@ import { Model } from 'mongoose';
 import {
   BookingDocument,
   ExternalPaymentProof,
-  PaymentMethod,
 } from './bookings.schema';
 import { RescheduleTicketDto } from './bookings.dto';
 import { FlightDocument } from '../flights/flights.schema';
@@ -43,11 +42,6 @@ export interface BookingsRescheduleBridge {
     legType: string,
     fare: number,
   ): any;
-  resolveRescheduleCard(
-    booking: BookingDocument,
-    paymentMethod?: PaymentMethod,
-    isCharge?: boolean,
-  ): Promise<{ maskedCard: string; paymentMethod?: PaymentMethod }>;
   executePostCommitRefunds(
     bookingId: any,
     refundAllocations: AllocatedRefundItem[],
