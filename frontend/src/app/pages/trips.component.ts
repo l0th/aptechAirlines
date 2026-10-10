@@ -8,6 +8,7 @@ import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { cancellationOutcomeMessages } from '../core/refund-copy';
 import { PaginationComponent } from '../shared/pagination.component';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
 
 @Component({
   standalone: true,
@@ -124,7 +125,7 @@ import { PaginationComponent } from '../shared/pagination.component';
                   <div><strong translate="no">{{c.flight_number}}</strong><small><span translate="no">{{legLabel(c.leg_type)}}</span> · <span translate="no">{{language.cabinLabel(c.cabin_class)}}</span></small></div>
                   <div>
                     @if(c.origin_iata||c.dest_iata){<b>{{c.origin_iata||'—'}} → {{c.dest_iata||'—'}}</b>}
-                     <small>{{c.scheduled_departure_local||dateTime(c.scheduled_departure)||t('Lịch bay sẽ hiển thị khi tra cứu','Flight schedule will appear when tracked')}}</small>
+                     <small>{{dateTime(c.scheduled_departure_local||c.scheduled_departure)||t('Lịch bay sẽ hiển thị khi tra cứu','Flight schedule will appear when tracked')}}</small>
                      @if(c.seat_code){<small>{{t('Ghế','Seat')}} {{c.seat_code}} · {{t('phụ phí','fee')}} {{money(c.seat_fee||0)}}</small>}
                   </div>
                 </div>
@@ -257,10 +258,7 @@ export class TripsComponent {
 
   flightDateTime(flight: any) {
     const local = String(flight?.scheduled_departure_local || '').trim();
-    const match = local.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
-    if (match) return this.language.isEnglish()
-      ? `${match[2]}/${match[3]}/${match[1]} · ${match[4]}`
-      : `${match[3]}/${match[2]}/${match[1]} · ${match[4]}`;
+    if (local) return formatDateTimeDayFirst(local);
     return this.dateTime(flight?.scheduled_departure);
   }
 
@@ -389,9 +387,7 @@ export class TripsComponent {
     return this.language.itineraryLegLabel(value);
   }
   dateTime(value: any) {
-    if (!value) return '—';
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat(this.language.language()==='en'?'en-US':'vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    return formatDateTimeDayFirst(value);
   }
   money(value: number) {
     return new Intl.NumberFormat(this.language.isEnglish() ? 'en-US' : 'vi-VN', {

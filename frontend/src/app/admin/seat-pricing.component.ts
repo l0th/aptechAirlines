@@ -6,6 +6,7 @@ import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { PaginationComponent } from '../shared/pagination.component';
 import { FLEET_LAYOUTS, PreviewSeat, layoutColumns, previewSeats, seatDimensions } from './pricing/fleet-layouts';
+import { formatCalendarDate } from '../core/date-format.util';
 
 type SeatRule={cabin_class:string;pricing_dimension:string;amount:number;priority:number};
 
@@ -147,7 +148,7 @@ type SeatRule={cabin_class:string;pricing_dimension:string;amount:number;priorit
         <button class="close" (click)="assignEditor=null">×</button><div class="eyebrow">{{t('GÁN HỒ SƠ GIÁ GHẾ','ASSIGN SEAT PRICING PROFILE')}}</div><h2>{{assignEditor.name}} · {{aircraftName(assignEditor.aircraft_type)}}</h2>
         <p class="muted">{{t('Chỉ hiển thị chuyến tương thích với loại máy bay của profile. Tick trực tiếp các mục cần áp dụng.','Only flights compatible with the profile aircraft type are shown. Select the items where the profile should apply.')}}</p>
         <div class="target-grid">
-          <div class="target-column"><div class="target-title"><strong>{{t('Chuyến bay cụ thể','Individual flights')}}</strong><small>{{selectedFlightIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(f of compatibleFlights;track f._id){<label class="target"><input type="checkbox" [checked]="selectedFlightIds.includes(f._id)" (change)="toggleTarget(selectedFlightIds,f._id,$event)"><span><b>{{f.flight_number}} · {{f.origin_iata}} → {{f.dest_iata}}</b><small>{{f.departure_date}} · {{t('Hiện tại:','Current:')}} {{seatProfileCode(f)}}</small></span></label>}</div></div>
+          <div class="target-column"><div class="target-title"><strong>{{t('Chuyến bay cụ thể','Individual flights')}}</strong><small>{{selectedFlightIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(f of compatibleFlights;track f._id){<label class="target"><input type="checkbox" [checked]="selectedFlightIds.includes(f._id)" (change)="toggleTarget(selectedFlightIds,f._id,$event)"><span><b>{{f.flight_number}} · {{f.origin_iata}} → {{f.dest_iata}}</b><small>{{calendarDate(f.departure_date)}} · {{t('Hiện tại:','Current:')}} {{seatProfileCode(f)}}</small></span></label>}</div></div>
           <div class="target-column"><div class="target-title"><strong>{{t('Lịch bay mẫu','Flight templates')}}</strong><small>{{selectedTemplateIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(template of compatibleTemplates;track template._id){<label class="target"><input type="checkbox" [checked]="selectedTemplateIds.includes(template._id)" (change)="toggleTarget(selectedTemplateIds,template._id,$event)"><span><b>{{template.flight_number}} · {{template.origin_iata}} → {{template.dest_iata}}</b><small>{{template.aircraft_type||'—'}} · {{t('Hiện tại:','Current:')}} {{seatProfileCode(template)}}</small></span></label>}</div></div>
         </div>
         <div class="modal-actions"><small>{{selectedFlightIds.length+selectedTemplateIds.length}} {{t('mục được chọn','items selected')}}</small><span class="spacer"></span><button class="btn btn-outline" (click)="assignEditor=null">{{t('Đóng','Close')}}</button><button class="btn btn-primary" (click)="assignProfile()" [disabled]="busy||(!selectedFlightIds.length&&!selectedTemplateIds.length)">{{t('Áp dụng giá ghế','Apply seat pricing')}}</button></div>
@@ -169,6 +170,7 @@ type SeatRule={cabin_class:string;pricing_dimension:string;amount:number;priorit
   `]
 })
 export class SeatPricingComponent{
+  calendarDate=formatCalendarDate;
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   private api=inject(ApiService);

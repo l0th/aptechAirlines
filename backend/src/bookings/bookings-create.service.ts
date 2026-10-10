@@ -71,7 +71,18 @@ export class BookingsCreateService extends BookingsCorePart {
       if (!earliestDeparture || flightDepTime < earliestDeparture) {
         earliestDeparture = flightDepTime;
       }
-      totalMiles += flight.distance_miles * passengerCount;
+      let distanceMiles = Number(flight.distance_miles || 0);
+      if (!(distanceMiles > 0)) {
+        distanceMiles = await this.flightsService.greatCircleMiles(flight.origin_iata, flight.dest_iata);
+        if (!(distanceMiles > 0)) {
+          throw new BadRequestException(
+            `Cannot calculate SkyMiles for ${flight.flight_number}: airport coordinates are unavailable.`,
+          );
+        }
+        flight.distance_miles = distanceMiles;
+        if (typeof (flight as any).save === 'function') await (flight as any).save();
+      }
+      totalMiles += distanceMiles * passengerCount;
       selectedLegs.push({ definition: leg, flight, inventory });
     }
 

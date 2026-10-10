@@ -4,10 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { PaginationComponent } from '../shared/pagination.component';
 import { LanguageService } from '../core/language.service';
+import { formatCalendarDate } from '../core/date-format.util';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 @Component({
   standalone: true,
-  imports: [FormsModule, PaginationComponent],
+  imports: [FormsModule, PaginationComponent, DayFirstDateInputComponent],
   template: `
     <div class="container page">
       <div class="eyebrow">PUBLIC FLIGHT LOOKUP</div>
@@ -21,7 +23,7 @@ import { LanguageService } from '../core/language.service';
         </div>
         <div class="field">
           <span>Ngày bay</span>
-          <input class="control" type="date" [(ngModel)]="date" (keyup.enter)="search()">
+          <app-date-input [(ngModel)]="date" (enterPressed)="search()"/>
         </div>
         <button class="btn btn-primary" (click)="search()" [disabled]="loading">
           {{loading ? 'Đang tra cứu…' : 'Tra cứu'}}
@@ -142,9 +144,7 @@ export class LookupComponent {
   }
 
   datePart(v: string) {
-    if (!v) return '—';
-    const match = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
-    return match?.[1] || '—';
+    return formatCalendarDate(v);
   }
 
   hasTimingChange(f: any) {

@@ -188,10 +188,10 @@ test('staff wizard steps and passenger seat summaries react to the selected lang
     ],
   };
 
-  assert.deepEqual(desk.stepLabels.map(s => s.label), ['Khách hàng', 'Chuyến bay', 'Hành khách & ghế', 'Giữ chỗ / Mua']);
+  assert.deepEqual(desk.stepLabels.map(s => s.label), ['Khách hàng', 'Chuyến bay', 'Hành khách & ghế', 'Giữ chỗ']);
   assert.equal(review.seatTextFor('FL-1'), 'HK1: 12A · HK2: Tự động');
   language.language.set('en');
-  assert.deepEqual(desk.stepLabels.map(s => s.label), ['Customer', 'Flights', 'Passengers & seats', 'Hold / Buy']);
+  assert.deepEqual(desk.stepLabels.map(s => s.label), ['Customer', 'Flights', 'Passengers & seats', 'Hold']);
   assert.equal(review.seatTextFor('FL-1'), 'Passenger 1: 12A · Passenger 2: Automatic');
   assert.equal(review.seatTextFor('FL-2'), 'Automatic');
 });
@@ -561,10 +561,11 @@ test('my trips notices and date labels follow shared language helper without cha
   assert.equal(toast.current()?.messageVi, 'Đã xác nhận vé. Mã xác nhận: CNF-123456.');
   assert.equal(toast.current()?.messageEn, 'Ticket confirmed. Confirmation: CNF-123456.');
   const viDate = trips.dateTime('2026-10-29T08:00:00Z');
+  assert.match(viDate, /^29\/10\/2026/);
   language.language.set('en');
   assert.equal(trips.t('Đổi vé', 'Reschedule'), 'Reschedule');
-  assert.match(trips.dateTime('2026-10-29T08:00:00Z'), /Oct/);
-  assert.notEqual(trips.dateTime('2026-10-29T08:00:00Z'), viDate);
+  assert.match(trips.dateTime('2026-10-29T08:00:00Z'), /^29\/10\/2026/);
+  assert.equal(trips.dateTime('2026-10-29T08:00:00Z'), viDate);
   assert.equal(language.pick(toast.current().messageVi, toast.current().messageEn), 'Ticket confirmed. Confirmation: CNF-123456.');
   toast.dismiss();
 });

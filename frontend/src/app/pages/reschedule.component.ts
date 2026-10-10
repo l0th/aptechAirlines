@@ -8,13 +8,14 @@ import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
 import { AuthService } from '../core/auth.service';
 import { PaypalService } from '../core/paypal.service';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 type RescheduleDirection = 'OUTBOUND' | 'RETURN' | 'BOTH';
 type DirectionKey = 'OUTBOUND' | 'RETURN';
 
 @Component({
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet],
+  imports: [FormsModule, NgTemplateOutlet, DayFirstDateInputComponent],
   template: `
   <div class="container page">
     <div class="eyebrow">{{language.pick('ĐỔI CHUYẾN','RESCHEDULE')}}</div>
@@ -61,7 +62,7 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
             <div class="grid grid-3">
               <div class="field"><span>{{language.pick('Nơi đi · giữ nguyên','Origin · unchanged')}}</span><input class="control route-locked" [value]="outboundOrigin" readonly aria-readonly="true"></div>
               <div class="field"><span>{{language.pick('Nơi đến · giữ nguyên','Destination · unchanged')}}</span><input class="control route-locked" [value]="outboundDestination" readonly aria-readonly="true"></div>
-              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><input class="control" type="date" [(ngModel)]="outboundDate" [min]="minDate" [max]="maxDate"></div>
+              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><app-date-input [(ngModel)]="outboundDate" [min]="minDate" [max]="maxDate"/></div>
             </div>
             <p class="route-note">{{language.pick('Chỉ có thể đổi ngày/chuyến bay; tuyến ban đầu được giữ nguyên.','You can change only the date or flight; the original route stays unchanged.')}} {{outboundOrigin}} → {{outboundDestination}}</p>
           </div>
@@ -73,7 +74,7 @@ type DirectionKey = 'OUTBOUND' | 'RETURN';
             <div class="grid grid-3">
               <div class="field"><span>{{language.pick('Nơi đi · giữ nguyên','Origin · unchanged')}}</span><input class="control route-locked" [value]="returnOrigin" readonly aria-readonly="true"></div>
               <div class="field"><span>{{language.pick('Nơi đến · giữ nguyên','Destination · unchanged')}}</span><input class="control route-locked" [value]="returnDestination" readonly aria-readonly="true"></div>
-              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="minDate" [max]="maxDate"></div>
+              <div class="field"><span>{{language.pick('Ngày mới','New date')}}</span><app-date-input [(ngModel)]="returnDate" [min]="minDate" [max]="maxDate"/></div>
             </div>
             <p class="route-note">{{language.pick('Chỉ có thể đổi ngày/chuyến bay; tuyến ban đầu được giữ nguyên.','You can change only the date or flight; the original route stays unchanged.')}} {{returnOrigin}} → {{returnDestination}}</p>
           </div>

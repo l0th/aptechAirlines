@@ -8,6 +8,7 @@ import { AuthService } from '../core/auth.service';
 import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { cancellationOutcomeMessages } from '../core/refund-copy';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
 
 @Component({
   standalone:true,
@@ -175,7 +176,7 @@ export class TrackComponent{
   statusLabel(v:string){return this.language.bookingStatusLabel(v)}
   passengerTypeLabel(v:string){return this.language.passengerTypeLabel(v)||this.language.pick('Hành khách','Passenger')}
   legLabel(v:string){return this.language.itineraryLegLabel(v)}
-  dateTime(v:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat(this.language.isEnglish()?'en-US':'vi-VN',{dateStyle:'medium',timeStyle:'short'}).format(d)}
+  dateTime(v:string){return formatDateTimeDayFirst(v)}
   money(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
 }

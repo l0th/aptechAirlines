@@ -7,6 +7,7 @@ import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { PaginationComponent } from '../shared/pagination.component';
 import { explainPricing } from './pricing/fare-calc';
+import { formatCalendarDate } from '../core/date-format.util';
 
 type AdvanceRule={min_days:number;max_days:number|null;adjustment_percent:number;label:string;label_en:string};
 type LoadRule={min_load_percent:number;max_load_percent:number;adjustment_percent:number;label:string;label_en:string};
@@ -132,7 +133,7 @@ type LoadRule={min_load_percent:number;max_load_percent:number;adjustment_percen
     <button class="close" (click)="closeAssign()">×</button>
     <div class="section-head assign-head"><div><h2>{{t('Áp dụng','Apply')}}: {{assignProfile?.name}}</h2><p class="subtitle">{{t('Chọn bằng checkbox. Lịch bay mẫu sẽ truyền hồ sơ giá cho các chuyến được sinh từ lịch đó.','Select targets using checkboxes. Flight templates pass their pricing profile to generated flights.')}}</p></div><span class="pill pill-gold" [title]="t('Mã nội bộ','Internal code')">{{assignProfile?.code}}</span></div>
     <div class="target-grid">
-      <div class="target-column"><div class="target-title"><strong>{{t('Chuyến bay cụ thể','Specific flights')}}</strong><small>{{selectedFlightIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(f of flights;track f._id){<label class="target"><input type="checkbox" [checked]="selectedFlightIds.includes(f._id)" (change)="toggleTarget(selectedFlightIds,f._id,$event)"><span><b>{{f.flight_number}} · {{f.origin_iata}} → {{f.dest_iata}}</b><small>{{f.departure_date}} · {{t('Hiện tại','Current')}}: {{profileCode(f)}}</small></span></label>}</div></div>
+      <div class="target-column"><div class="target-title"><strong>{{t('Chuyến bay cụ thể','Specific flights')}}</strong><small>{{selectedFlightIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(f of flights;track f._id){<label class="target"><input type="checkbox" [checked]="selectedFlightIds.includes(f._id)" (change)="toggleTarget(selectedFlightIds,f._id,$event)"><span><b>{{f.flight_number}} · {{f.origin_iata}} → {{f.dest_iata}}</b><small>{{calendarDate(f.departure_date)}} · {{t('Hiện tại','Current')}}: {{profileCode(f)}}</small></span></label>}</div></div>
       <div class="target-column"><div class="target-title"><strong>{{t('Lịch bay mẫu','Flight templates')}}</strong><small>{{selectedTemplateIds.length}} {{t('đã chọn','selected')}}</small></div><div class="target-list">@for(template of templates;track template._id){<label class="target"><input type="checkbox" [checked]="selectedTemplateIds.includes(template._id)" (change)="toggleTarget(selectedTemplateIds,template._id,$event)"><span><b>{{template.flight_number}} · {{template.origin_iata}} → {{template.dest_iata}}</b><small>{{t('Máy bay','Aircraft')}} {{template.aircraft_type||'—'}} · {{t('Hiện tại','Current')}}: {{profileCode(template)}}</small></span></label>}</div></div>
     </div>
     <div class="assign-actions"><small>{{t('Tổng','Total')}}: {{selectedFlightIds.length+selectedTemplateIds.length}} {{t('mục được chọn','targets selected')}}.</small><button class="btn btn-dark" [disabled]="busy||!assignProfileId||(!selectedFlightIds.length&&!selectedTemplateIds.length)" (click)="assign()">{{t('Áp dụng giá động','Apply dynamic pricing')}}</button></div>
@@ -145,6 +146,7 @@ type LoadRule={min_load_percent:number;max_load_percent:number;adjustment_percen
   `]
 })
 export class FarePricingComponent{
+  calendarDate=formatCalendarDate;
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   private api=inject(ApiService);

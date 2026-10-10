@@ -7,6 +7,7 @@ import { ApiService } from '../core/api.service';
 import { BookingStateService } from '../core/booking-state.service';
 import { LanguageService } from '../core/language.service';
 import { IconComponent } from '../shared/icon.component';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 type LocationField = 'origin' | 'destination';
 type LocationSuggestion = {
@@ -19,7 +20,7 @@ type LocationSuggestion = {
 
 @Component({
   standalone: true,
-  imports: [FormsModule, RouterLink, IconComponent],
+  imports: [FormsModule, RouterLink, IconComponent, DayFirstDateInputComponent],
   template: `
     <section class="hero">
       <div class="container hero-inner">
@@ -93,9 +94,9 @@ type LocationSuggestion = {
           <label class="range-toggle"><input type="checkbox" [(ngModel)]="flexibleDates" (change)="toggleFlexibleDates()"> {{lang.pick('Tìm chuyến trong khoảng ngày','Search a date range')}}</label>
 
           <div class="grid search-options row">
-            <div class="field"><span>{{lang.pick('Ngày đi','Departure date')}}</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></div>
-            @if(flexibleDates){<div class="field"><span>{{lang.pick('Đến ngày','Through date')}}</span><input class="control" type="date" [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"></div>}
-            @if(roundTrip){<div class="field"><span>{{lang.pick('Ngày về','Return date')}}</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"></div>}
+            <div class="field"><span>{{lang.pick('Ngày đi','Departure date')}}</span><app-date-input [(ngModel)]="departure" [min]="minDate" [max]="maxDate"/></div>
+            @if(flexibleDates){<div class="field"><span>{{lang.pick('Đến ngày','Through date')}}</span><app-date-input [(ngModel)]="departureEnd" [min]="departure||minDate" [max]="maxDate"/></div>}
+            @if(roundTrip){<div class="field"><span>{{lang.pick('Ngày về','Return date')}}</span><app-date-input [(ngModel)]="returnDate" [min]="departureEnd||departure||minDate" [max]="maxDate"/></div>}
           </div>
 
           <div class="travellers">

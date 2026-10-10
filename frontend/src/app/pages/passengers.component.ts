@@ -7,10 +7,11 @@ import { ApiService } from '../core/api.service';
 import { BookingStateService } from '../core/booking-state.service';
 import { LanguageService } from '../core/language.service';
 import { hasCitizenIdBirthYearMismatch, passengerTypeForBirthDate, vietnameseCitizenIdBirthYear } from '../core/passenger-profile.util';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 @Component({
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, DayFirstDateInputComponent],
   template: `
     <div class="container page">
       <div class="eyebrow">{{lang.pick('BƯỚC 2 / 4','STEP 2 / 4')}}</div>
@@ -32,7 +33,7 @@ import { hasCitizenIdBirthYearMismatch, passengerTypeForBirthDate, vietnameseCit
             <div class="field locked-field"><span>{{lang.pick('Loại hành khách','Passenger type')}}</span><strong>{{typeLabel(p.passenger_type)}}</strong><small>{{lang.pick('Được xác định từ bước tìm chuyến.','Determined by your flight search.')}}</small></div>
             <div class="field"><span>CCCD / Passport</span><input class="control" [(ngModel)]="p.id_card_or_passport" (ngModelChange)="draftChanged()" autocomplete="off"></div>
             <div class="field"><span>{{lang.pick('Quốc tịch','Nationality')}}</span><input class="control" [(ngModel)]="p.nationality" (ngModelChange)="draftChanged()" autocomplete="country-name"></div>
-            <div class="field"><span>{{lang.pick('Ngày sinh','Date of birth')}}</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" (ngModelChange)="draftChanged()" [max]="today"></div>
+            <div class="field"><span>{{lang.pick('Ngày sinh','Date of birth')}}</span><app-date-input [(ngModel)]="p.date_of_birth" (ngModelChange)="draftChanged()" [max]="today"/></div>
           </div>
           @if(i===primaryPassengerIndex&&auth.authenticated()&&!auth.staff()){
             <label class="save-profile"><input type="checkbox" [(ngModel)]="savePrimaryProfile"> <span><b>{{lang.pick('Lưu thông tin hành khách chính cho lần đặt sau','Save primary passenger details for future bookings')}}</b><small>{{lang.pick('Chỉ lưu CCCD/hộ chiếu, quốc tịch và ngày sinh vào hồ sơ khi bạn chọn mục này.','ID/passport, nationality and date of birth are saved to your profile only when selected.')}}</small></span></label>

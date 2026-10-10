@@ -5,12 +5,13 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { PaginationComponent } from '../shared/pagination.component';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
 
 @Component({
   standalone: true,
-  imports: [FormsModule, PaginationComponent],
+  imports: [FormsModule, PaginationComponent, DayFirstDateInputComponent],
   template: `
     <div class="eyebrow">AIRLABS → APTECH AIRLINES</div>
     <div class="section-head hero-head">
@@ -40,7 +41,7 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
       <div class="search-grid">
         <div class="field"><span>{{t('Nơi đi','Origin')}}</span><input class="control" [(ngModel)]="origin" placeholder="SGN"></div>
         <div class="field"><span>{{t('Nơi đến','Destination')}}</span><input class="control" [(ngModel)]="destination" placeholder="HAN"></div>
-        <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><input class="control" type="date" [(ngModel)]="departureDate"></div>
+        <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><app-date-input [(ngModel)]="departureDate"/></div>
         <div class="field"><span>{{t('Số điểm nối tối đa','Maximum stops')}}</span><select class="control" [(ngModel)]="maxStops"><option [ngValue]="0">{{t('Bay thẳng','Direct')}}</option><option [ngValue]="1">{{t('Tối đa 1 điểm nối','Up to 1 stop')}}</option><option [ngValue]="2">{{t('Tối đa 2 điểm nối','Up to 2 stops')}}</option></select></div>
         <button class="btn btn-primary search-btn" (click)="discover()" [disabled]="discovering">{{discovering?t('Đang tìm…','Searching…'):t('Tìm mạng đường bay','Discover flight routes')}}</button>
       </div>
@@ -103,7 +104,7 @@ type Cabin = 'ECONOMY' | 'BUSINESS' | 'CLUB' | 'FIRST';
         </div>
         <div class="publish-controls">
           <div class="field"><span>{{t('Khoảng ngày','Schedule window')}}</span><select class="control" [(ngModel)]="publishDays"><option [ngValue]="30">30 {{t('ngày','days')}}</option><option [ngValue]="90">90 {{t('ngày','days')}}</option><option [ngValue]="180">180 {{t('ngày','days')}}</option><option [ngValue]="330">330 {{t('ngày','days')}}</option></select></div>
-          <div class="field"><span>{{t('Ngày bắt đầu','Start date')}}</span><input class="control" type="date" [(ngModel)]="publishStart"></div>
+          <div class="field"><span>{{t('Ngày bắt đầu','Start date')}}</span><app-date-input [(ngModel)]="publishStart"/></div>
           <button class="btn btn-dark" (click)="publishJourney()" [disabled]="!allLegsCommercialized||publishing">{{publishing?t('Đang phát hành…','Publishing…'):t('Tạo lịch cho toàn hành trình','Generate full itinerary schedule')}}</button>
         </div>
         @if(!allLegsCommercialized){<p class="helper">{{t('Cần cấu hình đủ tất cả chặng trước khi phát hành.','All legs must be configured before publishing.')}}</p>}

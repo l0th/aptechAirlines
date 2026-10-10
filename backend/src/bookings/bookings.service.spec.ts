@@ -84,6 +84,7 @@ describe('BookingsService', () => {
 
     flightsService = {
       findById: jest.fn(),
+      greatCircleMiles: jest.fn(),
       reserveSeats: jest.fn(),
       getAirportTimeZone: jest.fn().mockResolvedValue('Asia/Ho_Chi_Minh'),
       updateAvailableSeats: jest.fn(),
@@ -226,6 +227,24 @@ describe('BookingsService', () => {
       expect(result.payment_transactions.length).toBe(1);
       expect(result.total_miles_accrued).toBe(2000); // 1000 miles * 2 passengers
       expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 2000);
+    });
+
+    it('repairs a zero stored distance before crediting all passengers SkyMiles', async () => {
+      mockFlight.distance_miles = 0;
+      mockFlight.save = jest.fn().mockResolvedValue(mockFlight);
+      flightsService.greatCircleMiles.mockResolvedValue(716);
+      baseDto.passengers = [
+        { passenger_type: PassengerType.ADULT, first_name: 'A', last_name: '1' },
+        { passenger_type: PassengerType.ADULT, first_name: 'A', last_name: '2' },
+        { passenger_type: PassengerType.ADULT, first_name: 'A', last_name: '3' },
+      ];
+
+      const result = await createPaidBooking(baseDto);
+
+      expect(flightsService.greatCircleMiles).toHaveBeenCalledWith('HAN', 'DAD');
+      expect(mockFlight.distance_miles).toBe(716);
+      expect(result.total_miles_accrued).toBe(2148);
+      expect(usersService.addSkyMiles).toHaveBeenCalledWith('user1', 2148);
     });
 
     it('child fare = round(applyPricing*0.75), senior = round(applyPricing*0.85)', async () => {

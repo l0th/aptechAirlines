@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
 
 @Component({
   standalone: true,
@@ -122,7 +123,7 @@ export class SeatOperationsComponent {
   seatStatus(status:string){return this.language.seatStatusLabel(status)}
   shortMoney(v:number){return v>=1000?`${Math.round(v/1000)}k`:String(v||0)}
   money(v:number){return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
-  dateTime(v:any){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?String(v):new Intl.DateTimeFormat(this.language.language()==='vi'?'vi-VN':'en-US',{dateStyle:'short',timeStyle:'short'}).format(d)}
+  dateTime(v:any){return formatDateTimeDayFirst(v)}
   start(){this.busy=true;this.error='';this.message=''}
   fail(e:any,fallback:string){const m=e?.error?.message;this.error=Array.isArray(m)?m.join(' · '):m||fallback;this.busy=false}
 }

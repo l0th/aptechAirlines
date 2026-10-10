@@ -35,6 +35,7 @@ import { MailService, ItineraryLegData, isValidMaskedCard } from '../mail/mail.s
 import { PaypalService, assertPayPalRefundExecutionSnapshot, classifyPayPalRefundStatus } from '../paypal/paypal.service';
 import { allocateRefundSources, AllocatedRefundItem } from '../bookings/refund-allocation.util';
 import { FlightsServiceBridge, FlightsServiceDependencies, FlightsServicePart } from './flights-service.part';
+import { greatCircleMilesFromCoordinates } from './flight-distance.util';
 
 export class FlightsAirlabsService extends FlightsServicePart {
   constructor(
@@ -355,29 +356,12 @@ export class FlightsAirlabsService extends FlightsServicePart {
 
     let miles = 0;
     try {
-      const col = this.flightModel.db.collection('airports');
-      const docs = (await col
-        .find(
-          { iata_code: { $in: [originIata, destIata] } },
-          { projection: { iata_code: 1, lat: 1, lng: 1 } },
-        )
-        .toArray()) as unknown as Array<{ iata_code: string; lat?: number; lng?: number }>;
-      const a = docs.find((d) => d.iata_code === originIata);
-      const b = docs.find((d) => d.iata_code === destIata);
-      if (
-        a && b &&
-        typeof a.lat === 'number' && typeof a.lng === 'number' &&
-        typeof b.lat === 'number' && typeof b.lng === 'number'
-      ) {
-        const R = 3958.8; // Earth radius in miles
-        const toRad = (deg: number) => (deg * Math.PI) / 180;
-        const dLat = toRad(b.lat - a.lat);
-        const dLng = toRad(b.lng - a.lng);
-        const h =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-        miles = Math.round(2 * R * Math.asin(Math.sqrt(h)));
-      }
+      // Repair legacy/bootstrap airports that predate latitude/longitude fields.
+      const [origin, destination] = await Promise.all([
+        this.airportsService.ensureAirportReference(originIata),
+        this.airportsService.ensureAirportReference(destIata),
+      ]);
+      miles = greatCircleMilesFromCoordinates(origin, destination);
     } catch {
       miles = 0;
     }

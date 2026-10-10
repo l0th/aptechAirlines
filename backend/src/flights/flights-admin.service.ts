@@ -43,6 +43,7 @@ import { MailService, ItineraryLegData, isValidMaskedCard } from '../mail/mail.s
 import { PaypalService, assertPayPalRefundExecutionSnapshot, classifyPayPalRefundStatus } from '../paypal/paypal.service';
 import { allocateRefundSources, AllocatedRefundItem } from '../bookings/refund-allocation.util';
 import { FlightsServiceBridge, FlightsServiceDependencies, FlightsServicePart } from './flights-service.part';
+import { greatCircleMilesFromCoordinates } from './flight-distance.util';
 
 export class FlightsAdminService extends FlightsServicePart {
   constructor(
@@ -78,6 +79,22 @@ export class FlightsAdminService extends FlightsServicePart {
     const flight = await this.flightModel.findById(id).exec();
     if (!flight) {
       throw new NotFoundException(`Flight with ID ${id} not found`);
+    }
+    if (!(Number(flight.distance_miles) > 0)) {
+      try {
+        const [origin, destination] = await Promise.all([
+          this.airportsService.ensureAirportReference(flight.origin_iata),
+          this.airportsService.ensureAirportReference(flight.dest_iata),
+        ]);
+        const repairedDistance = greatCircleMilesFromCoordinates(origin, destination);
+        if (repairedDistance > 0) {
+          flight.distance_miles = repairedDistance;
+          await flight.save();
+        }
+      } catch {
+        // Booking services perform a final authoritative check and return a clear
+        // validation error rather than silently awarding zero miles.
+      }
     }
     return flight;
   }

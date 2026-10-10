@@ -6,6 +6,8 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
 import { passengerTypeForBirthDate } from '../core/passenger-profile.util';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 type Step = 1 | 2 | 3 | 4;
 interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string; price: number; seats: number; legs: any[]; }
@@ -18,7 +20,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
  */
 @Component({
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, DayFirstDateInputComponent],
   template: `
     <div class="eyebrow">CLERK / ADMIN</div>
     <h1 class="title">Quầy đặt vé hộ khách</h1>
@@ -80,8 +82,8 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
           <div class="form-grid">
             <label class="field"><span>Nơi đi</span><input class="control" [(ngModel)]="origin" placeholder="SGN"></label>
             <label class="field"><span>Nơi đến</span><input class="control" [(ngModel)]="destination" placeholder="HAN"></label>
-            <label class="field"><span>Ngày đi</span><input class="control" type="date" [(ngModel)]="departure" [min]="minDate" [max]="maxDate"></label>
-            @if(roundTrip){<label class="field"><span>Ngày về</span><input class="control" type="date" [(ngModel)]="returnDate" [min]="departure||minDate" [max]="maxDate"></label>}
+            <label class="field"><span>Ngày đi</span><app-date-input [(ngModel)]="departure" [min]="minDate" [max]="maxDate"/></label>
+            @if(roundTrip){<label class="field"><span>Ngày về</span><app-date-input [(ngModel)]="returnDate" [min]="departure||minDate" [max]="maxDate"/></label>}
             <label class="field"><span>Hạng ghế</span><select class="control" [(ngModel)]="cabin"><option value="">Tất cả</option><option value="ECONOMY">Phổ thông</option><option value="CLUB">Club</option><option value="BUSINESS">Thương gia</option><option value="FIRST">Hạng nhất</option></select></label>
             <label class="field"><span>Người lớn</span><input class="control" type="number" min="1" [(ngModel)]="adults"></label>
             <label class="field"><span>Trẻ em</span><input class="control" type="number" min="0" [(ngModel)]="children"></label>
@@ -133,7 +135,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
                 <label class="field"><span>Họ *</span><input class="control" [(ngModel)]="p.last_name"></label>
                 <label class="field"><span>Tên *</span><input class="control" [(ngModel)]="p.first_name"></label>
                 <label class="field"><span>CCCD / Hộ chiếu</span><input class="control" [(ngModel)]="p.id_card_or_passport"></label>
-                <label class="field"><span>Ngày sinh *</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" [max]="today"></label>
+                <label class="field"><span>Ngày sinh *</span><app-date-input [(ngModel)]="p.date_of_birth" [max]="today"/></label>
               </div>
             </div>
           }
@@ -539,6 +541,6 @@ export class ReservationDeskComponent {
   statusLabel(v: string) { return this.language.bookingStatusLabel(v); }
   typeLabel(v: string) { return this.language.bookingTypeLabel(v); }
   money(v: number) { return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US', { style:'currency', currency:'VND', maximumFractionDigits:0 }).format(Number(v) || 0); }
-  dt(v?: string) { if (!v) return '—'; const d = new Date(v); return isNaN(d.getTime()) ? v : new Intl.DateTimeFormat(this.language.language()==='vi'?'vi-VN':'en-US', { dateStyle:'short', timeStyle:'short' }).format(d); }
+  dt(v?: string) { return formatDateTimeDayFirst(v); }
   msg(e: any, f: string) { const m = e?.error?.message; const detail=Array.isArray(m)?m.join(' · '):m||e?.message||f; return this.language.translateNotice(detail); }
 }

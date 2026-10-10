@@ -6,11 +6,13 @@ import { AuthService } from '../core/auth.service';
 import { ToastService } from '../core/toast.service';
 import { LanguageService } from '../core/language.service';
 import { PaginationComponent } from '../shared/pagination.component';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
+import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
 
 @Component({
   selector:'app-admin-list',
   standalone:true,
-  imports:[FormsModule,PaginationComponent],
+  imports:[FormsModule,PaginationComponent,DayFirstDateInputComponent],
   template:`
     <div class="eyebrow">ADMIN</div>
     <div class="section-head">
@@ -51,7 +53,7 @@ import { PaginationComponent } from '../shared/pagination.component';
           <div class="form-grid">
             <div class="field"><span>{{t('Số hiệu chuyến bay','Flight number')}}</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>
             @if(editorMode==='create'){<div class="field"><span>{{t('IATA nơi đi','Origin IATA')}}</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>{{t('IATA nơi đến','Destination IATA')}}</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
-            <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><input class="control" type="date" [(ngModel)]="editor.departure_date" [min]="flightMinDate" [max]="flightMaxDate"></div>
+            <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><app-date-input [(ngModel)]="editor.departure_date" [min]="flightMinDate" [max]="flightMaxDate"/></div>
             <div class="field"><span>{{t('Máy bay','Aircraft')}}</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">{{t('Chọn máy bay','Choose aircraft')}}</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} {{t('ghế','seats')}}</option>}</select></div>
             <div class="field"><span>{{t('Giờ cất cánh','Departure time')}} ({{originIata||t('nơi đi','origin')}} · {{tzOf(originIata)}})</span><input class="control" type="time" [(ngModel)]="editor.dep_time" [min]="minimumDepartureTime"></div>
             <div class="field"><span>{{t('Thời gian bay (phút)','Flight duration (minutes)')}}</span><input class="control" type="number" min="1" [(ngModel)]="editor.duration_input"></div>
@@ -425,7 +427,7 @@ export class AdminListComponent implements OnInit{
   parseIso(v:any){const s=String(v||'').trim();if(!/(Z|[+-]\d{2}:\d{2})$/i.test(s))return null;const d=new Date(s);return isNaN(d.getTime())?null:d}
   iso(v:any){if(!v)return'';const d=new Date(v);return isNaN(d.getTime())?String(v):d.toISOString()}
   coords(x:any){const lat=x.latitude??x.lat;const lon=x.longitude??x.lng??x.lon;return lat!=null&&lon!=null?`${lat}, ${lon}`:'—'}
-  dateTime(v:any){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?String(v):new Intl.DateTimeFormat(this.language.isEnglish()?'en-US':'vi-VN',{dateStyle:'short',timeStyle:'short'}).format(d)}
+  dateTime(v:any){return formatDateTimeDayFirst(v)}
   money(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
   num(v:number){return new Intl.NumberFormat(this.language.isEnglish()?'en-US':'vi-VN').format(v||0)}
   cancelRefundSummary(r:any){const state=String(r?.refund_status||r?.refund?.status||'').toUpperCase();if(state==='COMPLETED'||state==='SUCCESS'||state==='SUCCEEDED')return this.t('Khoản hoàn đã được PayPal xác nhận.','PayPal refund confirmed.');if(state==='PENDING'||state==='PROCESSING')return this.t('Khoản hoàn đang chờ xử lý.','Refund is pending.');if(state==='FAILED')return this.t('Hoàn tiền chưa thành công; cần kiểm tra lại.','Refund failed; follow-up required.');return this.t('Kiểm tra trạng thái hoàn tiền trong chi tiết đặt chỗ.','Check the refund status in booking details.')}

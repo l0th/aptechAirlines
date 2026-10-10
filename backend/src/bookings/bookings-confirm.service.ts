@@ -83,7 +83,18 @@ export class BookingsConfirmService extends BookingsCorePart {
     let totalMiles = 0;
     for (const coupon of booking.ticket_coupons) {
       const flight = await this.flightsService.findById(coupon.flight_id.toString());
-      totalMiles += flight.distance_miles;
+      let distanceMiles = Number(flight.distance_miles || 0);
+      if (!(distanceMiles > 0)) {
+        distanceMiles = await this.flightsService.greatCircleMiles(flight.origin_iata, flight.dest_iata);
+        if (!(distanceMiles > 0)) {
+          throw new BadRequestException(
+            `Cannot calculate SkyMiles for ${flight.flight_number}: airport coordinates are unavailable.`,
+          );
+        }
+        flight.distance_miles = distanceMiles;
+        if (typeof (flight as any).save === 'function') await (flight as any).save();
+      }
+      totalMiles += distanceMiles;
     }
 
     const user = await this.usersService.findById(booking.user_id.toString());

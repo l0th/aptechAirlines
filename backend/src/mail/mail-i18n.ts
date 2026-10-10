@@ -46,6 +46,12 @@ export function formatAmount(_lang: MailLang, amount: number): string {
   return Number(amount || 0).toLocaleString('vi-VN');
 }
 
+/** Convert canonical API/local-wall timestamps to day-first text in outbound mail. */
+export function formatMailDateTime(value: string | undefined | null): string {
+  if (!value) return '';
+  return String(value).replace(/^(\d{4})-(\d{2})-(\d{2})(?=[ T]|$)/, '$3/$2/$1');
+}
+
 /** Cabin class label. English keeps the original code (ECONOMY, BUSINESS...). */
 export function cabinLabel(lang: MailLang, cabin?: string): string {
   if (!cabin) return '';

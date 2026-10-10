@@ -33,6 +33,7 @@ import { LanguageService } from '../core/language.service';
 export class SkyMilesComponent{
   auth=inject(AuthService);
   readonly language=inject(LanguageService);
+  constructor(){if(this.auth.authenticated())this.auth.refresh()}
   tiers=[
     {name:'MEMBER',range:'0 – 19.999 miles',discount:0,copy:'Bắt đầu tích lũy trên mọi vé đã xác nhận.'},
     {name:'SILVER',range:'20.000 – 49.999 miles',discount:3,copy:'Mở mức giảm SkyMiles 3% trong pricing.'},

@@ -8,6 +8,7 @@ import { AuthService } from '../core/auth.service';
 import { BookingStateService } from '../core/booking-state.service';
 import { PaypalService } from '../core/paypal.service';
 import { LanguageService } from '../core/language.service';
+import { formatDateTimeDayFirst } from '../core/date-format.util';
 
 @Component({
   standalone:true,
@@ -193,7 +194,7 @@ export class ReviewComponent{
   bookingTypeLabel(value?:string){return value?this.language.bookingTypeLabel(value):this.language.pick('Hành trình','Itinerary')}
   passengerTypeLabel(value?:string){return value?this.language.passengerTypeLabel(value):this.language.pick('Hành khách','Passenger')}
   legLabel(t:string){return this.language.itineraryLegLabel(t)}
-  dateTime(v?:string){if(!v)return'—';const d=new Date(v);return isNaN(d.getTime())?v:new Intl.DateTimeFormat(this.language.language()==='vi'?'vi-VN':'en-US',{dateStyle:'short',timeStyle:'short'}).format(d)}
+  dateTime(v?:string){return formatDateTimeDayFirst(v)}
   seatTextFor(flightId:string){const req=this.state.seatRequests().filter((r:any)=>r.flight_id===flightId).sort((a:any,b:any)=>Number(a.passenger_index)-Number(b.passenger_index));if(!req.length)return this.language.pick('Tự động','Automatic');return req.map((r:any)=>`${this.language.pick('HK','Passenger ')}${Number(r.passenger_index)+1}: ${r.selection_type==='CHOOSE'?r.seat_code:this.language.pick('Tự động','Automatic')}`).join(' · ')}
   money(v:number){return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
 

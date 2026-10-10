@@ -1,5 +1,5 @@
 import { renderLayout, highlightBox, infoBox } from './mail-layout';
-import { MailLang, cabinLabel, flightStatusLabel, formatAmount, pick } from './mail-i18n';
+import { MailLang, cabinLabel, flightStatusLabel, formatAmount, formatMailDateTime, pick } from './mail-i18n';
 
 export type { MailLang } from './mail-i18n';
 
@@ -164,9 +164,9 @@ function renderItineraryBullets(lang: MailLang, legs: ItineraryLegData[], showAf
           : '';
       const cabin = leg.cabinClass ? ` (${escapeHtml(cabinLabel(lang, leg.cabinClass))})` : '';
       const arr = leg.arrivalTimeFormatted
-        ? ` → ${pick(lang, 'Đến', 'Arrival')}: ${escapeHtml(leg.arrivalTimeFormatted)}`
+        ? ` → ${pick(lang, 'Đến', 'Arrival')}: ${escapeHtml(formatMailDateTime(leg.arrivalTimeFormatted))}`
         : '';
-      return `<li style="margin-bottom: 4px;">${pick(lang, 'Chuyến bay', 'Flight')} <strong>${escapeHtml(leg.flightNumber)}</strong>: ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}, ${pick(lang, 'Khởi hành', 'Departure')}: ${escapeHtml(leg.departureTimeFormatted)}${arr}${cabin}${affectedBadge}</li>`;
+      return `<li style="margin-bottom: 4px;">${pick(lang, 'Chuyến bay', 'Flight')} <strong>${escapeHtml(leg.flightNumber)}</strong>: ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}, ${pick(lang, 'Khởi hành', 'Departure')}: ${escapeHtml(formatMailDateTime(leg.departureTimeFormatted))}${arr}${cabin}${affectedBadge}</li>`;
     })
     .join('');
 }
@@ -177,7 +177,7 @@ function renderSingleFlight(
   data: { flightNumber?: string; origin?: string; destination?: string; departureTimeFormatted?: string },
 ): string {
   return `<p><strong>${pick(lang, 'Chuyến bay', 'Flight')}:</strong> ${escapeHtml(data.flightNumber)} (${escapeHtml(data.origin || '')} → ${escapeHtml(data.destination || '')})<br/>
-       ${data.departureTimeFormatted ? `<strong>${pick(lang, 'Giờ khởi hành dự kiến', 'Scheduled Departure')}:</strong> ${escapeHtml(data.departureTimeFormatted)}<br/>` : ''}</p>`;
+       ${data.departureTimeFormatted ? `<strong>${pick(lang, 'Giờ khởi hành dự kiến', 'Scheduled Departure')}:</strong> ${escapeHtml(formatMailDateTime(data.departureTimeFormatted))}<br/>` : ''}</p>`;
 }
 
 /**
@@ -429,7 +429,7 @@ export function renderExpiredHoldCancellationEmail(data: ExpiredHoldEmailData): 
   const safePnr = escapeHtml(data.bookingReference);
   const safeBlk = escapeHtml(data.blockingNumber || '-');
   const safeCan = escapeHtml(data.cancellationNumber);
-  const safeDeadline = escapeHtml(data.holdDeadlineFormatted);
+  const safeDeadline = escapeHtml(formatMailDateTime(data.holdDeadlineFormatted));
 
   const subject = t(
     `Aptech Airlines - Hết hạn giữ chỗ, đặt chỗ ${data.bookingReference} đã bị hủy`,
@@ -571,16 +571,16 @@ export function renderFlightDisruptionEmail(data: FlightDisruptionEmailData): Re
         <tbody>
           <tr>
             <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: bold;">${t('Khởi hành', 'Departure')} (${safeOrigin})</td>
-            <td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(data.originalDepartureFormatted)}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(formatMailDateTime(data.originalDepartureFormatted))}</td>
             <td style="padding: 8px; border: 1px solid #e2e8f0; color: #b45309; font-weight: bold;">
-              ${escapeHtml(data.newDepartureFormatted || data.originalDepartureFormatted)}
+              ${escapeHtml(formatMailDateTime(data.newDepartureFormatted || data.originalDepartureFormatted))}
             </td>
           </tr>
           <tr>
             <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: bold;">${t('Hạ cánh', 'Arrival')} (${safeDest})</td>
-            <td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(data.originalArrivalFormatted)}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(formatMailDateTime(data.originalArrivalFormatted))}</td>
             <td style="padding: 8px; border: 1px solid #e2e8f0; color: #b45309; font-weight: bold;">
-              ${escapeHtml(data.newArrivalFormatted || data.originalArrivalFormatted)}
+              ${escapeHtml(formatMailDateTime(data.newArrivalFormatted || data.originalArrivalFormatted))}
             </td>
           </tr>
         </tbody>
@@ -639,7 +639,7 @@ function renderLegList(lang: MailLang, legs: ItineraryLegData[]): string {
       (leg) => `
       <div style="padding:12px 0;border-bottom:1px solid #e2e8f0">
         <strong>${escapeHtml(leg.flightNumber)}</strong> · ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}<br/>
-        <span style="color:#64748b">${pick(lang, 'Khởi hành', 'Departure')}: ${escapeHtml(leg.departureTimeFormatted)}${leg.cabinClass ? ` · ${escapeHtml(cabinLabel(lang, leg.cabinClass))}` : ''}</span>
+        <span style="color:#64748b">${pick(lang, 'Khởi hành', 'Departure')}: ${escapeHtml(formatMailDateTime(leg.departureTimeFormatted))}${leg.cabinClass ? ` · ${escapeHtml(cabinLabel(lang, leg.cabinClass))}` : ''}</span>
       </div>`,
     )
     .join('');
@@ -660,7 +660,7 @@ export function renderHoldCreatedEmail(data: HoldCreatedEmailData): RenderedEmai
   const t = (vi: string, en: string) => pick(lang, vi, en);
   const itinerary = data.legs.map((leg) =>
     `<li>${t('Chuyến bay', 'Flight')} ${escapeHtml(leg.flightNumber)}: ${escapeHtml(leg.origin || '')} → ` +
-    `${escapeHtml(leg.destination || '')}, ${t('khởi hành', 'departing')} ${escapeHtml(leg.departureTimeFormatted)}</li>`,
+    `${escapeHtml(leg.destination || '')}, ${t('khởi hành', 'departing')} ${escapeHtml(formatMailDateTime(leg.departureTimeFormatted))}</li>`,
   ).join('');
   const payLink = data.paymentUrl && /^https?:\/\//i.test(data.paymentUrl)
     ? `<p><a href="${escapeHtml(data.paymentUrl)}" style="display:inline-block;padding:12px 20px;background:#0a2540;color:#ffffff;text-decoration:none;border-radius:8px">${t('Xem đặt chỗ và thanh toán PayPal', 'View booking and pay with PayPal')}</a></p>`
@@ -677,7 +677,7 @@ export function renderHoldCreatedEmail(data: HoldCreatedEmailData): RenderedEmai
         <p>${t('Chỗ của bạn đã được giữ thành công và đang chờ thanh toán. Vui lòng thanh toán trước hạn bên dưới.', 'Your seats have been held successfully and are awaiting payment. Please pay before the deadline below.')}</p>
         ${highlightBox(`<div><strong>PNR:</strong> ${escapeHtml(data.bookingReference)}</div>
           <div><strong>${t('Mã giữ chỗ', 'Hold number')}:</strong> ${escapeHtml(data.blockingNumber || '-')}</div>
-          <div><strong>${t('Hạn thanh toán', 'Payment deadline')}:</strong> ${escapeHtml(data.deadlineFormatted)}</div>`)}
+          <div><strong>${t('Hạn thanh toán', 'Payment deadline')}:</strong> ${escapeHtml(formatMailDateTime(data.deadlineFormatted))}</div>`)}
         <p><strong>${t('Hành trình', 'Itinerary')}:</strong></p><ul>${itinerary}</ul>
         ${payLink}
         <p>${t('Đặt chỗ sẽ tự động hủy nếu quá hạn thanh toán.', 'Your hold will be cancelled automatically if the payment deadline passes.')}</p>`,
@@ -693,7 +693,7 @@ export function renderBlockedTicketReminder(data: BlockedReminderEmailData): Ren
     .map((leg) =>
       leg.origin
         ? `<li>${t('Chuyến bay', 'Flight')} ${escapeHtml(leg.flightNumber)}: ${escapeHtml(leg.origin)} → ${escapeHtml(leg.destination)}, ` +
-          `${t('khởi hành', 'departing')} ${escapeHtml(leg.departureTimeFormatted)} (${escapeHtml(cabinLabel(lang, leg.cabinClass))})</li>`
+          `${t('khởi hành', 'departing')} ${escapeHtml(formatMailDateTime(leg.departureTimeFormatted))} (${escapeHtml(cabinLabel(lang, leg.cabinClass))})</li>`
         : `<li>${t('Chuyến bay', 'Flight')} ${escapeHtml(leg.flightNumber)} (${escapeHtml(cabinLabel(lang, leg.cabinClass))})</li>`,
     )
     .join('');
@@ -707,13 +707,13 @@ export function renderBlockedTicketReminder(data: BlockedReminderEmailData): Ren
     body: `
           <p>${t('Xin chào', 'Hello')} ${escapeHtml(data.passengerName)},</p>
           <p>${t(
-            `Bạn đang có một vé <strong>giữ chỗ chưa thanh toán</strong>. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(data.earliestDepartureFormatted)}</strong>.`,
-            `You have an <strong>unpaid held booking</strong>. Your first flight is scheduled to depart on <strong>${escapeHtml(data.earliestDepartureFormatted)}</strong>.`,
+            `Bạn đang có một vé <strong>giữ chỗ chưa thanh toán</strong>. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(formatMailDateTime(data.earliestDepartureFormatted))}</strong>.`,
+            `You have an <strong>unpaid held booking</strong>. Your first flight is scheduled to depart on <strong>${escapeHtml(formatMailDateTime(data.earliestDepartureFormatted))}</strong>.`,
           )}</p>
           ${highlightBox(`
             <div><strong>PNR:</strong> ${escapeHtml(data.bookingReference)}</div>
             <div><strong>${t('Mã giữ chỗ', 'Blocking Number')}:</strong> ${escapeHtml(data.blockingNumber || '-')}</div>
-            <div><strong>${t('Hạn thanh toán', 'Payment deadline')}:</strong> ${escapeHtml(data.deadlineFormatted)}<br/><span style="color:#64748b;font-size:12px">${t('Hạn xác nhận &amp; thanh toán', 'Confirm &amp; pay before this time')}</span></div>`)}
+            <div><strong>${t('Hạn thanh toán', 'Payment deadline')}:</strong> ${escapeHtml(formatMailDateTime(data.deadlineFormatted))}<br/><span style="color:#64748b;font-size:12px">${t('Hạn xác nhận &amp; thanh toán', 'Confirm &amp; pay before this time')}</span></div>`)}
           <p><strong>${t('Hành trình', 'Itinerary')}:</strong></p><ul>${lines}</ul>
           <p>${t(
             'Vui lòng xác nhận vé trước hạn. Nếu quá hạn, hệ thống sẽ tự động hủy giữ chỗ và hoàn ghế về kho.',
@@ -762,8 +762,8 @@ export function renderUpcomingTripReminder(data: UpcomingTripEmailData): Rendere
     body: `
           <p>${t('Xin chào', 'Hello')} ${escapeHtml(data.passengerName)},</p>
           <p>${t(
-            `Đây là email nhắc lịch cho hành trình đã xác nhận. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(data.departureTimeFormatted)}</strong>.`,
-            `This is a reminder for your confirmed trip. Your first flight is scheduled to depart on <strong>${escapeHtml(data.departureTimeFormatted)}</strong>.`,
+            `Đây là email nhắc lịch cho hành trình đã xác nhận. Chuyến bay đầu tiên dự kiến khởi hành vào <strong>${escapeHtml(formatMailDateTime(data.departureTimeFormatted))}</strong>.`,
+            `This is a reminder for your confirmed trip. Your first flight is scheduled to depart on <strong>${escapeHtml(formatMailDateTime(data.departureTimeFormatted))}</strong>.`,
           )}</p>
           ${highlightBox(`
             <div><strong>PNR:</strong> ${escapeHtml(data.bookingReference)}</div>

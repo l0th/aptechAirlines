@@ -6,6 +6,7 @@ import { ApiService } from '../core/api.service';
 import { BookingLeg, BookingStateService } from '../core/booking-state.service';
 import { IconComponent } from '../shared/icon.component';
 import { LanguageService } from '../core/language.service';
+import { formatCalendarDate } from '../core/date-format.util';
 
 @Component({
   standalone:true,
@@ -17,7 +18,7 @@ import { LanguageService } from '../core/language.service';
         <div class="summary-title">
           <div class="eyebrow gold">KẾT QUẢ CHUYẾN BAY</div>
           <h1 translate="no">{{q['origin']}} <span>→</span> {{q['destination']}}</h1>
-          <p><span translate="no">{{outboundDateLabel}}{{q['return_date'] ? ' → '+q['return_date'] : ''}} · {{passengers}} {{language.pick('hành khách', 'passengers')}}</span> · So sánh mọi hạng vé</p>
+          <p><span translate="no">{{outboundDateLabel}}{{returnDateLabel ? ' → '+returnDateLabel : ''}} · {{passengers}} {{language.pick('hành khách', 'passengers')}}</span> · So sánh mọi hạng vé</p>
         </div>
       </div>
     </section>
@@ -51,7 +52,7 @@ import { LanguageService } from '../core/language.service';
         @if(isRoundTrip){
           <section class="direction return-block" [class.dimmed]="!selectedOutbound">
             <div class="section-head">
-              <div><div class="eyebrow">{{language.pick('CHIỀU VỀ','RETURN')}} · {{q['return_date']}}</div><h2 translate="no">{{q['destination']}} → {{q['origin']}}</h2></div>
+              <div><div class="eyebrow">{{language.pick('CHIỀU VỀ','RETURN')}} · {{returnDateLabel}}</div><h2 translate="no">{{q['destination']}} → {{q['origin']}}</h2></div>
               @if(selectedInbound){<span class="pill pill-success">Đã chọn chiều về</span>}
             </div>
             @if(!selectedOutbound){<div class="notice">Chọn chuyến đi trước, sau đó chọn chuyến về.</div>}
@@ -148,7 +149,8 @@ export class ResultsComponent{
   get returnConnections(){return this.data?.return_connecting_routes||[]}
   get isRoundTrip(){return !!this.q['return_date']}
   get passengers(){return Number(this.q['adults']||1)+Number(this.q['children']||0)+Number(this.q['seniors']||0)}
-  get outboundDateLabel(){return this.q['departure_date_end']?`${this.q['departure_date']} – ${this.q['departure_date_end']}`:this.q['departure_date']}
+  get outboundDateLabel(){const start=formatCalendarDate(this.q['departure_date']);return this.q['departure_date_end']?`${start} – ${formatCalendarDate(this.q['departure_date_end'])}`:start}
+  get returnDateLabel(){return this.q['return_date']?formatCalendarDate(this.q['return_date']):''}
   get unresolvedLocations(){const x:string[]=[];if(this.data?.origin_scope?.kind==='none')x.push(this.language.pick('nơi đi','origin'));if(this.data?.dest_scope?.kind==='none')x.push(this.language.pick('nơi đến','destination'));return x}
   get locationNotices(){const x:string[]=[];const o=this.locationNotice(this.data?.origin_info,this.data?.origin_scope,'Nơi đi','Origin');const d=this.locationNotice(this.data?.dest_info,this.data?.dest_scope,'Nơi đến','Destination');if(o)x.push(o);if(d)x.push(d);return x}
 
@@ -247,7 +249,7 @@ export class ResultsComponent{
   duration(m:number){m=Number(m||0);return`${Math.floor(m/60)}h ${m%60}m`}
   layover(r:any){const x=r.layover_minutes;return Array.isArray(x)?x.reduce((a:number,b:number)=>a+b,0):Number(x||0)}
   clock(v:string){const m=(v||'').match(/(?:T|\s)(\d{2}:\d{2})/);return m?.[1]||'--:--'}
-  dateLabel(f:any){const direct=f?.departure_date;if(direct)return direct;const v=f?.scheduled_departure_local||f?.scheduled_departure||f?.departure||'';const m=String(v).match(/^(\d{4}-\d{2}-\d{2})/);return m?.[1]||this.q['departure_date']||'—'}
+  dateLabel(f:any){const direct=f?.departure_date;if(direct)return formatCalendarDate(direct);const v=f?.scheduled_departure_local||f?.scheduled_departure||f?.departure||this.q['departure_date'];return formatCalendarDate(v)}
   money(v:number){return new Intl.NumberFormat(this.language.language()==='vi'?'vi-VN':'en-US',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
   private groupDirect(rows:any[]){
     const groups=new Map<string,any>();
