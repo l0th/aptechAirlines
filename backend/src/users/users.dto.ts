@@ -1,5 +1,6 @@
-import { IsEmail, IsEmpty, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsEmail, IsEmpty, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import { UserRole } from './users.schema';
+import { IsCitizenIdBirthYearConsistent, IsValidDateOfBirth } from '../bookings/bookings.dto';
 import {
   PHONE_NUMBER_MESSAGE,
   PHONE_NUMBER_REGEX,
@@ -87,6 +88,21 @@ export class UpdateUserDto {
   @IsInt()
   @Min(0)
   age?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  id_card_or_passport?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  nationality?: string;
+
+  @IsOptional()
+  @IsValidDateOfBirth()
+  @IsCitizenIdBirthYearConsistent()
+  date_of_birth?: string;
 
   @IsEmpty({ message: 'Saving credit cards is no longer supported. Use PayPal checkout.' })
   preferred_credit_card?: string;

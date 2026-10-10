@@ -4,6 +4,9 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { UserRole } from './users.schema';
 import { AuthService } from '../auth/auth.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UpdateUserDto } from './users.dto';
 
 function makeUser(over: any = {}) {
   const u: any = {
@@ -95,5 +98,34 @@ describe('Staff management rules', () => {
     const users: any = { findByUsername: jest.fn().mockResolvedValue(makeUser({ password_hash: hash, is_active: false })) };
     const auth = new AuthService(users, {} as any);
     await expect(auth.validateUser('clerk1', 'pw123456')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('persists the optional primary-traveler profile for faster future bookings', async () => {
+    const user = makeUser({
+      id_card_or_passport: '',
+      nationality: '',
+      date_of_birth: '',
+    });
+    jest.spyOn(service, 'findById').mockResolvedValue(user);
+
+    const updated: any = await service.update('u1', {
+      id_card_or_passport: '079095000123',
+      nationality: 'Vietnam',
+      date_of_birth: '1995-05-20',
+    } as any);
+
+    expect(updated.id_card_or_passport).toBe('079095000123');
+    expect(updated.nationality).toBe('Vietnam');
+    expect(updated.date_of_birth).toBe('1995-05-20');
+    expect(user.save).toHaveBeenCalled();
+  });
+
+  it('rejects a saved date of birth whose year conflicts with a Vietnamese CCCD', async () => {
+    const dto = plainToInstance(UpdateUserDto, {
+      id_card_or_passport: '079095000123',
+      date_of_birth: '1996-05-20',
+    });
+    const errors = await validate(dto);
+    expect(errors.some(error => error.property === 'date_of_birth')).toBe(true);
   });
 });

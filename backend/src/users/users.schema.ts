@@ -39,6 +39,17 @@ export class User {
   @Prop({ default: 0 })
   age: number;
 
+  // Optional primary-traveler profile. This is only saved when the customer
+  // explicitly opts in from the passenger form or updates their profile.
+  @Prop({ default: '', trim: true })
+  id_card_or_passport: string;
+
+  @Prop({ default: 'Vietnam', trim: true })
+  nationality: string;
+
+  @Prop({ default: '' })
+  date_of_birth: string;
+
   @Prop({ default: '' })
   preferred_credit_card: string;
 

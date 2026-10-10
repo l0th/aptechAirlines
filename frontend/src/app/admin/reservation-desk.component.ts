@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
+import { passengerTypeForBirthDate } from '../core/passenger-profile.util';
 
 type Step = 1 | 2 | 3 | 4;
 interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string; price: number; seats: number; legs: any[]; }
@@ -132,7 +133,7 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
                 <label class="field"><span>Họ *</span><input class="control" [(ngModel)]="p.last_name"></label>
                 <label class="field"><span>Tên *</span><input class="control" [(ngModel)]="p.first_name"></label>
                 <label class="field"><span>CCCD / Hộ chiếu</span><input class="control" [(ngModel)]="p.id_card_or_passport"></label>
-                <label class="field"><span>Ngày sinh</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" [max]="today"></label>
+                <label class="field"><span>Ngày sinh *</span><input class="control" type="date" [(ngModel)]="p.date_of_birth" [max]="today"></label>
               </div>
             </div>
           }
@@ -402,9 +403,15 @@ export class ReservationDeskComponent {
     const types = [...Array(this.adults).fill('ADULT'), ...Array(this.children).fill('CHILD'), ...Array(this.seniors).fill('SENIOR')];
     const same = this.passengers.length === types.length && this.passengers.every((p, i) => p.passenger_type === types[i]);
     if (!same) {
-      this.passengers = types.map(t => ({ first_name: '', last_name: '', passenger_type: t, id_card_or_passport: '', date_of_birth: '' }));
+      this.passengers = types.map(t => ({ first_name: '', last_name: '', passenger_type: t, id_card_or_passport: '', nationality: 'Vietnam', date_of_birth: '' }));
       const first = this.passengers.findIndex(p => p.passenger_type !== 'CHILD');
-      if (first >= 0) Object.assign(this.passengers[first], { first_name: this.customer?.first_name || '', last_name: this.customer?.last_name || '' });
+      if (first >= 0) Object.assign(this.passengers[first], {
+        first_name: this.customer?.first_name || '',
+        last_name: this.customer?.last_name || '',
+        id_card_or_passport: this.customer?.id_card_or_passport || '',
+        nationality: this.customer?.nationality || 'Vietnam',
+        date_of_birth: String(this.customer?.date_of_birth || '').slice(0, 10),
+      });
     }
     const flightIds = new Set(this.legs.map(l => l.flight_id));
     this.seatRequests = this.seatRequests.filter(r => flightIds.has(r.flight_id) && r.passenger_index < this.passengers.length);
@@ -431,10 +438,20 @@ export class ReservationDeskComponent {
   toCheckout() {
     this.error = '';
     if (this.passengers.some(p => !String(p.first_name).trim() || !String(p.last_name).trim())) { this.error = this.language.pick('Nhập họ và tên cho tất cả hành khách.','Enter first and last names for every passenger.'); return; }
+    if (this.passengers.some(p => !p.date_of_birth)) { this.error = this.language.pick('Nhập ngày sinh cho tất cả hành khách để xác nhận đúng loại vé.','Enter the date of birth of every passenger to verify the correct fare category.'); return; }
+    const invalidAgeIndex = this.passengers.findIndex(p => passengerTypeForBirthDate(p.date_of_birth, this.departureDate) !== p.passenger_type);
+    if (invalidAgeIndex >= 0) {
+      const passenger = this.passengers[invalidAgeIndex];
+      const actualType = passengerTypeForBirthDate(passenger.date_of_birth, this.departureDate);
+      if (actualType === 'INFANT') this.error = this.language.pick(`Hành khách ${invalidAgeIndex + 1} chưa đủ 2 tuổi vào ngày khởi hành; luồng hiện tại chưa hỗ trợ vé em bé.`,`Passenger ${invalidAgeIndex + 1} will be under 2 on departure; infant fares are not supported yet.`);
+      else this.error = this.language.pick(`Hành khách ${invalidAgeIndex + 1} không đúng nhóm tuổi ${this.paxLabel(passenger.passenger_type)} đã chọn.`,`Passenger ${invalidAgeIndex + 1} does not match the selected ${this.paxLabel(passenger.passenger_type)} age category.`);
+      return;
+    }
     this.step = 4; this.loadQuote();
   }
 
   // ---------- step 4 ----------
+  get departureDate() { const first = this.outbound?.legs?.[0] || this.legs[0]; return String(first?.departure_date || first?.scheduled_departure_local || first?.scheduled_departure || this.departure || '').slice(0, 10); }
   get earliestDeparture() { const t = this.legs.map(l => new Date(l.scheduled_departure || '').getTime()).filter(Number.isFinite); return t.length ? new Date(Math.min(...t)).toISOString() : ''; }
   get daysToDeparture() { const e = this.earliestDeparture; return e ? Math.floor((new Date(e).getTime() - Date.now()) / 86_400_000) : 0; }
   get canBlock() { const e = this.earliestDeparture; return !!e && (new Date(e).getTime() - Date.now()) / 86_400_000 > 14; }

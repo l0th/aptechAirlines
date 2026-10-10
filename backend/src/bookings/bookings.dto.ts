@@ -73,6 +73,38 @@ export function IsValidDateOfBirth(validationOptions?: ValidationOptions) {
   };
 }
 
+export function vietnameseCitizenIdBirthYear(value: unknown): number | null {
+  const digits = String(value ?? '').replace(/\s+/g, '');
+  if (!/^\d{12}$/.test(digits)) return null;
+  const centuryGenderCode = Number(digits[3]);
+  const twoDigitYear = Number(digits.slice(4, 6));
+  return 1900 + Math.floor(centuryGenderCode / 2) * 100 + twoDigitYear;
+}
+
+export function IsCitizenIdBirthYearConsistent(validationOptions?: ValidationOptions) {
+  return function (object: Object, propertyName: string) {
+    registerDecorator({
+      name: 'isCitizenIdBirthYearConsistent',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: any, args: ValidationArguments) {
+          if (!value) return true;
+          const encodedYear = vietnameseCitizenIdBirthYear((args.object as any)?.id_card_or_passport);
+          if (encodedYear === null) return true;
+          const enteredYear = Number(String(value).slice(0, 4));
+          return Number.isInteger(enteredYear) && enteredYear === encodedYear;
+        },
+        defaultMessage(args: ValidationArguments) {
+          const encodedYear = vietnameseCitizenIdBirthYear((args.object as any)?.id_card_or_passport);
+          return `date_of_birth year must match the Vietnamese Citizen ID birth year (${encodedYear})`;
+        },
+      },
+    });
+  };
+}
+
 export class PassengerInputDto {
   @IsString()
   @IsNotEmpty()
@@ -95,6 +127,7 @@ export class PassengerInputDto {
 
   @IsOptional()
   @IsValidDateOfBirth()
+  @IsCitizenIdBirthYearConsistent()
   date_of_birth?: string;
 
   @IsOptional()

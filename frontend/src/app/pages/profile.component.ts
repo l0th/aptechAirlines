@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { ApiService } from '../core/api.service';
 import { LanguageService } from '../core/language.service';
+import { hasCitizenIdBirthYearMismatch, vietnameseCitizenIdBirthYear } from '../core/passenger-profile.util';
 
 @Component({
   standalone:true,
@@ -42,6 +43,9 @@ import { LanguageService } from '../core/language.service';
             <div class="field"><span>{{language.pick('Điện thoại','Phone number')}}</span><input class="control" [(ngModel)]="model.phone_number"></div>
             <div class="field"><span>{{language.pick('Giới tính','Gender')}}</span><select class="control" [(ngModel)]="model.sex"><option value="MALE">{{language.pick('Nam','Male')}}</option><option value="FEMALE">{{language.pick('Nữ','Female')}}</option><option value="OTHER">{{language.pick('Khác','Other')}}</option></select></div>
             <div class="field"><span>{{language.pick('Tuổi','Age')}}</span><input class="control" type="number" min="0" [(ngModel)]="model.age"></div>
+            <div class="field"><span>CCCD / Passport</span><input class="control" [(ngModel)]="model.id_card_or_passport" autocomplete="off"></div>
+            <div class="field"><span>{{language.pick('Quốc tịch','Nationality')}}</span><input class="control" [(ngModel)]="model.nationality" autocomplete="country-name"></div>
+            <div class="field"><span>{{language.pick('Ngày sinh','Date of birth')}}</span><input class="control" type="date" [(ngModel)]="model.date_of_birth" [max]="today"></div>
           </div>
           <div class="field"><span>{{language.pick('Địa chỉ','Address')}}</span><input class="control" [(ngModel)]="model.address"></div>
           <div class="checkout-note"><strong>{{language.pick('Không cần khai báo thẻ ngân hàng.','No saved bank card required.')}}</strong><span>{{language.pick('Khi mua vé hoặc trả chênh lệch đổi chuyến, hệ thống mở PayPal Checkout để bạn thanh toán.','Use PayPal Checkout to pay for bookings or reschedule fare differences.')}}</span></div>
@@ -61,12 +65,16 @@ export class ProfileComponent{
   private __toast=inject(ToastService);
   readonly language=inject(LanguageService);
   auth=inject(AuthService);api=inject(ApiService);model:any={};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;this.__toast.notifySuccess(v)};private __error='';get error(){return this.__error}set error(v:string){this.__error=v;this.__toast.notifyError(v)};
-  constructor(){this.model={...(this.auth.user()||{})}}
+  today=this.localDate(new Date());
+  constructor(){this.model={...(this.auth.user()||{}),date_of_birth:String(this.auth.user()?.date_of_birth||'').slice(0,10),nationality:this.auth.user()?.nationality||'Vietnam'}}
   get initials(){return`${this.auth.user()?.first_name?.[0]||''}${this.auth.user()?.last_name?.[0]||''}`.toUpperCase()}
+  get cccdYear(){return vietnameseCitizenIdBirthYear(this.model.id_card_or_passport)}
   save(){
     const id=this.auth.user()?._id||this.auth.user()?.id;if(!id)return;
     this.message='';this.error='';
-    const body:any={first_name:this.model.first_name,last_name:this.model.last_name,email:this.model.email,phone_number:this.model.phone_number,address:this.model.address,sex:this.model.sex,age:Number(this.model.age||0)};
+    if(hasCitizenIdBirthYearMismatch(this.model.id_card_or_passport,this.model.date_of_birth)){this.error=this.language.pick(`Năm sinh trong CCCD là ${this.cccdYear}, không khớp với ngày sinh đã chọn.`,`The Citizen ID encodes birth year ${this.cccdYear}, which does not match the selected date of birth.`);return}
+    const body:any={first_name:this.model.first_name,last_name:this.model.last_name,email:this.model.email,phone_number:this.model.phone_number,address:this.model.address,sex:this.model.sex,age:Number(this.model.age||0),id_card_or_passport:String(this.model.id_card_or_passport||'').trim(),nationality:String(this.model.nationality||'').trim(),date_of_birth:this.model.date_of_birth||''};
     this.api.updateUser(id,body).subscribe({next:()=>{this.message=this.language.pick('Đã cập nhật hồ sơ.','Profile updated successfully.');this.auth.refresh()},error:e=>this.error=this.language.translateNotice(Array.isArray(e?.error?.message)?e.error.message.join(' · '):(e?.error?.message||this.language.pick('Không cập nhật được hồ sơ.','Unable to update profile.')))})
   }
+  private localDate(date:Date){const y=date.getFullYear();const m=String(date.getMonth()+1).padStart(2,'0');const d=String(date.getDate()).padStart(2,'0');return`${y}-${m}-${d}`}
 }

@@ -6,6 +6,7 @@ describe('FlightsAdminService - safe dated-flight CRUD', () => {
   let seatAllocationService: any;
   let bridge: any;
   let service: FlightsAdminService;
+  let flightModel: any;
 
   const makeFlight = (overrides: any = {}) => {
     const flight: any = {
@@ -45,6 +46,7 @@ describe('FlightsAdminService - safe dated-flight CRUD', () => {
   };
 
   beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-10T08:00:00.000Z'));
     seatAllocationService = {
       hasCustomerSeatAssignments: jest.fn().mockResolvedValue(false),
     };
@@ -55,14 +57,60 @@ describe('FlightsAdminService - safe dated-flight CRUD', () => {
       findById: jest.fn(),
       cancelBookingsForFlight: jest.fn(),
     };
+    flightModel = jest.fn().mockImplementation((data: any) => ({
+      ...data,
+      save: jest.fn().mockImplementation(async function (this: any) { return this; }),
+    }));
     service = new FlightsAdminService({
-      flightModel: {} as any,
+      flightModel: flightModel as any,
       bookingModel: {} as any,
       airportsService: airportsService as any,
       referenceService: {} as any,
       usersService: {} as any,
       seatAllocationService,
     }, bridge);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('rejects creating a manual flight whose departure is already in the past', async () => {
+    await expect(service.create({
+      flight_number: 'AP100',
+      origin_iata: 'SGN',
+      dest_iata: 'SIN',
+      departure_date: '2026-10-10',
+      scheduled_departure: '2026-10-10T07:59:00.000Z',
+      scheduled_arrival: '2026-10-10T09:59:00.000Z',
+      duration_minutes: 120,
+      distance_miles: 676,
+      aircraft: { model_code: 'A20N', model_name: 'Airbus A320neo', total_capacity: 180 },
+      inventories: [{
+        cabin_class: CabinClass.ECONOMY,
+        allocated_seats: 168,
+        available_seats: 168,
+        base_price: 1000000,
+        bucket_code: 'E',
+        is_smoking: false,
+      }],
+    } as any)).rejects.toThrow(/sau thời gian hiện tại|after the current time/i);
+
+    expect(flightModel).not.toHaveBeenCalled();
+  });
+
+  it('rejects moving an existing flight to a departure time in the past', async () => {
+    const flight = makeFlight();
+    bridge.findById.mockResolvedValue(flight);
+
+    await expect(service.update(String(flight._id), {
+      departure_date: '2026-10-10',
+      scheduled_departure: '2026-10-10T07:59:00.000Z',
+      scheduled_arrival: '2026-10-10T09:59:00.000Z',
+      duration_minutes: 120,
+    } as any)).rejects.toThrow(/sau thời gian hiện tại|after the current time/i);
+
+    expect(flight.save).not.toHaveBeenCalled();
   });
 
   it('preserves sold seats when inventory is edited without resending aircraft', async () => {

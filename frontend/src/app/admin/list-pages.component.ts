@@ -51,9 +51,9 @@ import { PaginationComponent } from '../shared/pagination.component';
           <div class="form-grid">
             <div class="field"><span>{{t('Số hiệu chuyến bay','Flight number')}}</span><input class="control" [(ngModel)]="editor.flight_number" [disabled]="editor.commercial"></div>
             @if(editorMode==='create'){<div class="field"><span>{{t('IATA nơi đi','Origin IATA')}}</span><input class="control" [(ngModel)]="editor.origin_iata"></div><div class="field"><span>{{t('IATA nơi đến','Destination IATA')}}</span><input class="control" [(ngModel)]="editor.dest_iata"></div>}
-            <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><input class="control" type="date" [(ngModel)]="editor.departure_date"></div>
+            <div class="field"><span>{{t('Ngày khởi hành','Departure date')}}</span><input class="control" type="date" [(ngModel)]="editor.departure_date" [min]="flightMinDate" [max]="flightMaxDate"></div>
             <div class="field"><span>{{t('Máy bay','Aircraft')}}</span><select class="control" [(ngModel)]="editor.aircraft_code" (ngModelChange)="flightAircraftChanged()"><option value="">{{t('Chọn máy bay','Choose aircraft')}}</option>@for(a of layouts;track a.aircraft_type){<option [value]="a.aircraft_type">{{a.aircraft_type}} · {{a.model_name}} · {{a.total_capacity}} {{t('ghế','seats')}}</option>}</select></div>
-            <div class="field"><span>{{t('Giờ cất cánh','Departure time')}} ({{originIata||t('nơi đi','origin')}} · {{tzOf(originIata)}})</span><input class="control" type="datetime-local" [(ngModel)]="editor.dep_local" (ngModelChange)="syncDepartureDate()"></div>
+            <div class="field"><span>{{t('Giờ cất cánh','Departure time')}} ({{originIata||t('nơi đi','origin')}} · {{tzOf(originIata)}})</span><input class="control" type="time" [(ngModel)]="editor.dep_time" [min]="minimumDepartureTime"></div>
             <div class="field"><span>{{t('Thời gian bay (phút)','Flight duration (minutes)')}}</span><input class="control" type="number" min="1" [(ngModel)]="editor.duration_input"></div>
             <div class="field full info">
               @if(previewTimes; as p){
@@ -170,10 +170,12 @@ export class AdminListComponent implements OnInit{
   router=inject(Router);
   toast=inject(ToastService);
   rows:any[]=[];layouts:any[]=[];selected:any=null;editor:any=null;statusEditor:any=null;editorMode:'create'|'edit'='create';private __error='';get error(){return this.__error}set error(v:string){this.__error=v;if(v)this.__toast.notifyError(v)};private __message='';get message(){return this.__message}set message(v:string){this.__message=v;if(v)this.__toast.notifySuccess(v)};query='';busy=false;page=1;pageSize=20;
+  flightMinDate='';flightMaxDate='';private serverClockOffsetMs=0;
 
   ngOnInit(){
     this.load();
     if(this.kind==='flights'){
+      this.refreshFlightClock();
       this.api.commercialAircraftLayouts().subscribe({next:r=>this.layouts=Array.isArray(r)?r:[],error:e=>this.error=this.msg(e,this.t('Không tải được sơ đồ máy bay.','Could not load aircraft layouts.'))});
       this.api.airports().subscribe({next:(r:any)=>{const list=Array.isArray(r)?r:(r?.items||r?.data||[]);for(const a of list)if(a?.iata_code)this.tzMap[a.iata_code]=a.time_zone||'UTC'}});
     }
@@ -188,9 +190,17 @@ export class AdminListComponent implements OnInit{
   localToUtc(local:string,tz:string){if(!local)return null;const naive=new Date(local+':00Z');if(isNaN(naive.getTime()))return null;let utc=new Date(naive.getTime()-this.tzOffset(naive,tz)*60000);utc=new Date(naive.getTime()-this.tzOffset(utc,tz)*60000);return utc}
   localInput(d:Date,tz:string){if(isNaN(d.getTime()))return'';return new Date(d.getTime()+this.tzOffset(d,tz)*60000).toISOString().slice(0,16)}
   fmtLocal(d:Date,tz:string){return this.localInput(d,tz).replace('T',' ')}
-  computeTimes(){const e=this.editor;if(!e)return null;const tz=this.tzOf(e.origin_iata);const dep=this.localToUtc(e.dep_local,tz);const duration=Math.round(Number(e.duration_input||0));if(!dep||duration<1)return null;return{dep,arr:new Date(dep.getTime()+duration*60000),duration}}
+  serverNow(){return new Date(Date.now()+this.serverClockOffsetMs)}
+  refreshFlightClock(){
+    this.api.bookingWindow().subscribe({
+      next:r=>{const serverTime=new Date(r?.server_time);this.serverClockOffsetMs=isNaN(serverTime.getTime())?0:serverTime.getTime()-Date.now();this.flightMinDate=String(r?.current_date||r?.min_date||'');this.flightMaxDate=String(r?.max_date||'')},
+      error:()=>{const now=new Date();this.serverClockOffsetMs=0;this.flightMinDate=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`},
+    });
+  }
+  get departureLocalInput(){const e=this.editor;return e?.departure_date&&e?.dep_time?`${e.departure_date}T${e.dep_time}`:''}
+  get minimumDepartureTime(){if(!this.editor?.departure_date)return'';const now=this.serverNow();const local=this.localInput(now,this.tzOf(this.originIata));return this.editor.departure_date===local.slice(0,10)?local.slice(11,16):''}
+  computeTimes(){const e=this.editor;if(!e)return null;const tz=this.tzOf(e.origin_iata);const dep=this.localToUtc(this.departureLocalInput,tz);const duration=Math.round(Number(e.duration_input||0));if(!dep||duration<1)return null;return{dep,arr:new Date(dep.getTime()+duration*60000),duration}}
   get previewTimes(){const p=this.computeTimes();if(!p)return null;return{depLocal:this.fmtLocal(p.dep,this.tzOf(this.originIata)),arrLocal:this.fmtLocal(p.arr,this.tzOf(this.destIata)),depUtc:p.dep.toISOString().slice(0,16).replace('T',' '),arrUtc:p.arr.toISOString().slice(0,16).replace('T',' ')}}
-  syncDepartureDate(){if(this.editor?.dep_local)this.editor.departure_date=String(this.editor.dep_local).slice(0,10)}
   /** Existing flights that can connect to/from the one being edited (45–720 min layover, same rule as backend search). */
   get connectionHints(){
     const p=this.computeTimes();const o=this.originIata,d=this.destIata;if(!p||!o||!d)return[];
@@ -223,7 +233,8 @@ export class AdminListComponent implements OnInit{
     if(this.kind==='users')this.editor={username:'',password:'User@2026',first_name:'',last_name:'',email:'',phone_number:'',address:'',role:'CUSTOMER'};
     else if(this.kind==='airports')this.editor={iata_code:'',icao_code:'',airport_name:'',city_name:'',country_code:'VN',time_zone:'Asia/Ho_Chi_Minh',lat:null,lng:null,is_serviced_directly:true};
     else if(this.kind==='flights'){
-      this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',dep_local:'',duration_input:120,distance_miles:0,aircraft_code:'A20N',commercial:false,inventory_rows:[]};
+      this.refreshFlightClock();
+      this.editor={flight_number:'',origin_iata:'',dest_iata:'',departure_date:'',dep_time:'',duration_input:120,distance_miles:0,aircraft_code:'A20N',commercial:false,inventory_rows:[]};
       this.flightAircraftChanged(true);
     }
   }
@@ -232,10 +243,13 @@ export class AdminListComponent implements OnInit{
     if(this.kind==='users')this.editor={...x,originalRole:x.role};
     else if(this.kind==='airports')this.editor={...x};
     else if(this.kind==='flights'){
+      this.refreshFlightClock();
+      const localDeparture=this.localInput(new Date(x.scheduled_departure),this.tzOf(x.origin_iata));
       this.editor={
         ...x,
         commercial:x.data_source==='AIRLABS_COMMERCIALIZED',
-        dep_local:this.localInput(new Date(x.scheduled_departure),this.tzOf(x.origin_iata)),
+        departure_date:localDeparture.slice(0,10),
+        dep_time:localDeparture.slice(11,16),
         duration_input:Math.max(1,Math.round((new Date(x.scheduled_arrival).getTime()-new Date(x.scheduled_departure).getTime())/60000)),
         aircraft_code:x.aircraft?.model_code||'',
         inventory_rows:(x.inventories||[]).map((inv:any)=>({
@@ -279,6 +293,8 @@ export class AdminListComponent implements OnInit{
     if(!p){this.error=this.t('Nhập nơi đi/đến, giờ cất cánh (giờ địa phương) và thời gian bay hợp lệ.','Enter valid origin, destination, local departure and flight duration.');return}
     const dep=p.dep,arr=p.arr;
     if(!e.departure_date){this.error=this.t('Ngày khởi hành là bắt buộc.','Departure date is required.');return}
+    if(this.flightMinDate&&e.departure_date<this.flightMinDate){this.error=this.t(`Ngày khởi hành không được trước ngày hiện tại (${this.flightMinDate}).`,`Departure date cannot be before the current date (${this.flightMinDate}).`);return}
+    if(dep.getTime()<=this.serverNow().getTime()){this.error=this.t('Giờ khởi hành phải sau thời gian hiện tại.','Departure time must be after the current time.');return}
     const duration=p.duration;
     if(!e.aircraft_code?.trim()){this.error=this.t('Chọn máy bay cho chuyến bay.','Choose an aircraft for this flight.');return}
     const layout=this.selectedFlightLayout;

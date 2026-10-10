@@ -19,6 +19,7 @@ import {
   SagaState,
 } from '../seat-allocation/booking-seat-saga-operation.schema';
 import { BookingsCoreBridge, BookingsCoreDependencies, BookingsCorePart } from './bookings-core.part';
+import { findPassengerAgeCategoryMismatch } from './passenger-age.util';
 
 export class BookingsCreateService extends BookingsCorePart {
   private readonly logger = new Logger(BookingsCreateService.name);
@@ -84,6 +85,19 @@ export class BookingsCreateService extends BookingsCorePart {
       this.bridge.validateBookingWindow(inboundLegs.map((leg) => leg.flight), 'Return itinerary');
     } else {
       this.bridge.validateBookingWindow(selectedLegs.map((leg) => leg.flight), 'Flight');
+    }
+
+    const firstDepartureLeg = [...selectedLegs].sort(
+      (a, b) => new Date(a.flight.scheduled_departure).getTime() - new Date(b.flight.scheduled_departure).getTime(),
+    )[0];
+    const ageMismatch = findPassengerAgeCategoryMismatch(dto.passengers, firstDepartureLeg.flight.departure_date);
+    if (ageMismatch) {
+      if (ageMismatch.actual === 'INFANT') {
+        throw new BadRequestException(`Passenger ${ageMismatch.index + 1} is under 2 on the departure date; infant fares are not supported.`);
+      }
+      throw new BadRequestException(
+        `Passenger ${ageMismatch.index + 1} is ${ageMismatch.actual} on the departure date, not ${ageMismatch.selected}.`,
+      );
     }
 
     const now = new Date();

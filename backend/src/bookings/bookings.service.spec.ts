@@ -2681,6 +2681,24 @@ describe('BookingsService', () => {
       expect(errors.length).toBe(0);
     });
 
+    it('Vietnamese CCCD birth year must match the entered DOB year', async () => {
+      const matching = plainToInstance(PassengerInputDto, {
+        ...basePassenger,
+        id_card_or_passport: '079095000123',
+        date_of_birth: '1995-05-20',
+      });
+      expect(await validate(matching)).toHaveLength(0);
+
+      const mismatching = plainToInstance(PassengerInputDto, {
+        ...basePassenger,
+        id_card_or_passport: '079095000123',
+        date_of_birth: '1996-05-20',
+      });
+      const errors = await validate(mismatching);
+      expect(errors.find((e) => e.property === 'date_of_birth')?.constraints)
+        .toHaveProperty('isCitizenIdBirthYearConsistent');
+    });
+
     it('malformed format -> rejected', async () => {
       const dto1 = plainToInstance(PassengerInputDto, { ...basePassenger, date_of_birth: 'not-a-date' });
       const errors1 = await validate(dto1);

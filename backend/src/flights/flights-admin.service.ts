@@ -160,6 +160,17 @@ export class FlightsAdminService extends FlightsServicePart {
     return { date: localWallTimeToUtc(datePart, hhmm, timeZone), isWallTime: true };
   }
 
+  private assertFutureDeparture(departure: Date): void {
+    if (!(departure instanceof Date) || Number.isNaN(departure.getTime())) {
+      throw new BadRequestException('Giờ khởi hành không hợp lệ. (Invalid departure time)');
+    }
+    if (departure.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        'Giờ khởi hành phải sau thời gian hiện tại. (Departure time must be after the current time)',
+      );
+    }
+  }
+
   async create(createFlightDto: CreateFlightDto): Promise<FlightDocument> {
     // Validate IATAs
     const originAirport = await this.airportsService.findByIata(createFlightDto.origin_iata);
@@ -180,6 +191,8 @@ export class FlightsAdminService extends FlightsServicePart {
       const parsedArr = this.parseAdminTime(arrStr, destAirport.time_zone);
       arr = parsedArr.date;
     }
+
+    this.assertFutureDeparture(dep);
 
     let duration = createFlightDto.duration_minutes;
     const actualDiff = Math.round((arr.getTime() - dep.getTime()) / 60000);
@@ -234,6 +247,10 @@ export class FlightsAdminService extends FlightsServicePart {
     if (arrStr) {
       const parsedArr = this.parseAdminTime(arrStr, destAirport.time_zone);
       flight.scheduled_arrival = parsedArr.date;
+    }
+
+    if (depStr) {
+      this.assertFutureDeparture(flight.scheduled_departure);
     }
 
     if (updateFlightDto.duration_minutes !== undefined) flight.duration_minutes = updateFlightDto.duration_minutes;

@@ -145,6 +145,15 @@ export class UsersService {
     if (updateUserDto.phone_number !== undefined) user.phone_number = updateUserDto.phone_number;
     if (updateUserDto.sex !== undefined) user.sex = updateUserDto.sex;
     if (updateUserDto.age !== undefined) user.age = updateUserDto.age;
+    if (updateUserDto.id_card_or_passport !== undefined) {
+      user.id_card_or_passport = updateUserDto.id_card_or_passport.trim();
+    }
+    if (updateUserDto.nationality !== undefined) {
+      user.nationality = updateUserDto.nationality.trim();
+    }
+    if (updateUserDto.date_of_birth !== undefined) {
+      user.date_of_birth = updateUserDto.date_of_birth;
+    }
     if (updateUserDto.sky_miles !== undefined) user.sky_miles = updateUserDto.sky_miles;
     if (updateUserDto.role && user.role !== UserRole.SUPER_ADMIN) user.role = updateUserDto.role;
 

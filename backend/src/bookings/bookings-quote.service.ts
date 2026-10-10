@@ -18,6 +18,7 @@ import {
   BookingsQuoteDependencies,
   BookingsQuotePart,
 } from './bookings-quote.part';
+import { findPassengerAgeCategoryMismatch } from './passenger-age.util';
 
 export class BookingsQuoteService extends BookingsQuotePart {
   constructor(deps: BookingsQuoteDependencies, bridge: BookingsQuoteBridge) {
@@ -91,6 +92,19 @@ export class BookingsQuoteService extends BookingsQuotePart {
       this.bridge.validateBookingWindow(inboundLegs.map((leg) => leg.flight), 'Return itinerary');
     } else {
       this.bridge.validateBookingWindow(selectedLegs.map((leg) => leg.flight), 'Flight');
+    }
+
+    const firstDepartureLeg = [...selectedLegs].sort(
+      (a, b) => new Date(a.flight.scheduled_departure).getTime() - new Date(b.flight.scheduled_departure).getTime(),
+    )[0];
+    const ageMismatch = findPassengerAgeCategoryMismatch(dto.passengers, firstDepartureLeg.flight.departure_date);
+    if (ageMismatch) {
+      if (ageMismatch.actual === 'INFANT') {
+        throw new BadRequestException(`Passenger ${ageMismatch.index + 1} is under 2 on the departure date; infant fares are not supported.`);
+      }
+      throw new BadRequestException(
+        `Passenger ${ageMismatch.index + 1} is ${ageMismatch.actual} on the departure date, not ${ageMismatch.selected}.`,
+      );
     }
 
     const earliestDeparture = selectedLegs
