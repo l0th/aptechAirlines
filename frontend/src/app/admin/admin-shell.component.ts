@@ -2,7 +2,6 @@ import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { LanguageService } from '../core/language.service';
-import { UiLanguageDirective } from '../shared/ui-language.directive';
 
 interface NavItem {
   path: string;
@@ -44,9 +43,9 @@ const NAV: NavGroup[] = [
 
 @Component({
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, UiLanguageDirective],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet],
   template: `
-    <div class="admin-shell" appUiLanguage>
+    <div class="admin-shell">
       <aside class="admin-nav">
         <div class="admin-brand">APTECH AIRLINES</div>
         <div class="admin-language" role="group" [attr.aria-label]="t('Chuyển đổi ngôn ngữ', 'Language selector')">

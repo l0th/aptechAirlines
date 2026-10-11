@@ -20,3 +20,10 @@ for (const [file, englishCopy] of cases) {
   });
 }
 
+test('admin sidebar recomputes translated labels after the language toggle changes', async () => {
+  const source = await readFile(new URL('../src/app/admin/admin-shell.component.ts', import.meta.url), 'utf8');
+  assert.match(source, /t\(g\.vi\s*,\s*g\.en\)/, 'Sidebar group labels must use the shared language helper');
+  assert.match(source, /t\(i\.vi\s*,\s*i\.en\)/, 'Sidebar item labels must use the shared language helper');
+  assert.doesNotMatch(source, /UiLanguageDirective|appUiLanguage/, 'The legacy DOM translator must not overwrite helper-rendered sidebar labels');
+});
+

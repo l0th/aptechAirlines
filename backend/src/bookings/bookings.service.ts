@@ -62,7 +62,7 @@ import {
   BookingsPayPalBridge,
   BookingsPayPalDependencies,
 } from './bookings-paypal.part';
-import { BookingsCreateService } from './bookings-create.service';
+import { BookingCreationContext, BookingsCreateService } from './bookings-create.service';
 import { BookingsConfirmService } from './bookings-confirm.service';
 import {
   BookingsCoreBridge,
@@ -362,8 +362,9 @@ export class BookingsService {
   async createBooking(
     dto: CreateBookingDto,
     externalPaymentProof?: ExternalPaymentProof,
+    context: BookingCreationContext = {},
   ): Promise<BookingDocument> {
-    return this.createService.createBooking(dto, externalPaymentProof);
+    return this.createService.createBooking(dto, externalPaymentProof, context);
   }
 
   /**

@@ -193,7 +193,7 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
       const [toEmail, body] = mailService.sendBlockedTicketReminder.mock.calls[0];
       expect(toEmail).toBe('passenger@example.com');
       // Verifies airport-local timezone is resolved and formatted deterministically (UTC 01:00 -> ICT 08:00)
-      expect(body).toContain('2026-10-28 08:00');
+      expect(body).toContain('28/10/2026 08:00');
       expect(body).toContain('(Asia/Ho_Chi_Minh)');
       expect(body.indexOf('<section lang="vi"')).toBeLessThan(body.indexOf('<section lang="en"'));
       expect(body).toContain('<section lang="en"');
@@ -267,12 +267,12 @@ describe('BookingsScheduler - Hold Reminder Reliability (Gap 2)', () => {
       const [toEmail, body] = mailService.sendBlockedTicketReminder.mock.calls[0];
       expect(toEmail).toBe('multileg@example.com');
       // Origin timezone of earliest physical flight (HAN -> Asia/Ho_Chi_Minh, UTC 01:00 -> 08:00)
-      expect(body).toContain('2026-10-28 08:00');
+      expect(body).toContain('28/10/2026 08:00');
       expect(body).toContain('(Asia/Ho_Chi_Minh)');
       // Hold deadline formatted in earliest flight's origin timezone (UTC 03:00 + 7 = 10:00)
       // Customer has no language preference -> Vietnamese email ("Hạn thanh toán" = payment deadline)
-      expect(body).toContain('<strong>Hạn thanh toán:</strong> 2026-10-25 10:00 (Asia/Ho_Chi_Minh)');
-      expect(body).not.toContain('<strong>Hạn thanh toán:</strong> 2026-10-25 12:00 (Asia/Tokyo)');
+      expect(body).toContain('<strong>Hạn thanh toán:</strong> 25/10/2026 10:00 (Asia/Ho_Chi_Minh)');
+      expect(body).not.toContain('<strong>Hạn thanh toán:</strong> 25/10/2026 12:00 (Asia/Tokyo)');
     } finally {
       jest.useRealTimers();
     }

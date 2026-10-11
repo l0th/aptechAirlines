@@ -8,6 +8,7 @@ import { LanguageService } from '../core/language.service';
 import { passengerTypeForBirthDate } from '../core/passenger-profile.util';
 import { formatDateTimeDayFirst, localCalendarDate } from '../core/date-format.util';
 import { DayFirstDateInputComponent } from '../shared/day-first-date-input.component';
+import { IconComponent } from '../shared/icon.component';
 
 type Step = 1 | 2 | 3 | 4;
 interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string; price: number; seats: number; legs: any[]; }
@@ -15,12 +16,12 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
 /**
  * Staff (CLERK/ADMIN) "đặt vé hộ khách" wizard:
  * 1. tìm / tạo nhanh khách  2. tìm chuyến (thẳng + nối chuyến)
- * 3. hành khách + ghế       4. giữ chỗ (>14 ngày), khách tự thanh toán PayPal.
+ * 3. hành khách + ghế       4. giữ chỗ 30 phút, khách tự thanh toán PayPal.
  * Booking luôn được tạo với user_id = khách đã chọn (backend kiểm tra role CUSTOMER).
  */
 @Component({
   standalone: true,
-  imports: [FormsModule, DayFirstDateInputComponent],
+  imports: [FormsModule, DayFirstDateInputComponent, IconComponent],
   template: `
     <div class="eyebrow">CLERK / ADMIN</div>
     <h1 class="title">{{t('Quầy đặt vé hộ khách','Ticket desk')}}</h1>
@@ -139,30 +140,66 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               </div>
             </div>
           }
-          <h4>{{t('Chọn ghế (tùy chọn – bỏ trống sẽ tự động xếp)','Seat selection (optional — leave blank for automatic assignment)')}}</h4>
-          <div class="trip-tabs">
-            @for(l of legs;track l.flight_id){<button type="button" [class.on]="seatLeg?.flight_id===l.flight_id" (click)="openSeatMap(l)">{{l.flight_number}} {{l.origin_iata}}→{{l.dest_iata}}</button>}
+          <div class="seat-section-head">
+            <div><span class="eyebrow">{{t('SƠ ĐỒ CHỖ NGỒI','SEAT MAP')}}</span><h4>{{t('Chọn ghế cho từng hành khách','Choose a seat for each passenger')}}</h4><small>{{t('Không bắt buộc chọn ghế; hành khách chưa chọn sẽ được hệ thống tự động xếp.','Seat selection is optional; unselected passengers will be assigned automatically.')}}</small></div>
+          </div>
+          <div class="desk-leg-tabs">
+            @for(l of legs;track l.flight_id;let i=$index){<button type="button" [class.on]="seatLeg?.flight_id===l.flight_id" [class.done]="seatCoveredForLeg(l.flight_id)" (click)="openSeatMap(l)"><span>{{i+1}}</span><b>{{l.flight_number}}</b><small>{{l.origin_iata}} → {{l.dest_iata}}</small></button>}
           </div>
           @if(seatLeg){
-            <div class="trip-tabs">
-              @for(p of passengers;track $index){<button type="button" [class.on]="seatPax===$index" (click)="seatPax=$index">{{language.pick('HK','Passenger')}} {{$index+1}}: {{seatFor($index,seatLeg.flight_id)||language.pick('Tự động','Automatic')}}</button>}
-            </div>
+            <section class="desk-seat-toolbar">
+              <div><div class="eyebrow">{{t('CHẶNG','LEG')}} {{legNumber(seatLeg)}} / {{legs.length}}</div><strong>{{seatLeg.flight_number}} · {{seatLeg.origin_iata}} → {{seatLeg.dest_iata}}</strong>@if(seatMapData){<small>{{seatMapData.aircraft_model||seatMapData.aircraft_type||t('Máy bay','Aircraft')}} · {{seatMapData.total_capacity||0}} {{t('ghế','seats')}}</small>}</div>
+              <div class="desk-pass-tabs">
+                @for(p of passengers;track $index){<button type="button" [class.on]="seatPax===$index" [class.done]="!!seatFor($index,seatLeg.flight_id)" (click)="seatPax=$index"><span>{{$index+1}}</span><b>{{p.first_name||t('Hành khách','Passenger')}} {{p.last_name}}</b><small>{{seatFor($index,seatLeg.flight_id)||t('Tự động xếp','Auto-assign')}}</small></button>}
+              </div>
+            </section>
             @if(seatLoading){<div class="empty muted">{{t('Đang tải sơ đồ ghế…','Loading seat map…')}}</div>}
             @else if(seatMapData){
-              <div class="seatmap">
-                @for(row of seatMapData.rows||[];track $index){
-                  <div class="seat-row">
-                    @for(s of row.seats||[];track s.seat_code){
-                      <button type="button" class="seat" [title]="s.seat_code+' · '+money(fee(s))"
-                        [class.taken]="s.is_occupied||takenByOther(s.seat_code)" [class.mine]="seatFor(seatPax,seatLeg.flight_id)===s.seat_code"
-                        [class.other-cabin]="s.cabin_class&&s.cabin_class!==seatLeg.cabin_class"
-                        [disabled]="s.is_occupied||s.is_blocked||takenByOther(s.seat_code)||(s.cabin_class&&s.cabin_class!==seatLeg.cabin_class)"
-                        (click)="pickSeat(s)">{{s.seat_code}}</button>
+              <section class="desk-map-guide">
+                <div><span>{{t('CÁCH ĐỌC SƠ ĐỒ','HOW TO READ THE MAP')}}</span><strong>{{t('Mũi máy bay → các hàng ghế → đuôi máy bay','Aircraft nose → seat rows → aircraft tail')}}</strong></div>
+                <div class="desk-guide-example"><b>18A</b><small><strong>18</strong> {{t('= hàng ghế','= seat row')}} · <strong>A</strong> {{t('= vị trí ghế','= seat position')}}</small></div>
+                <div class="desk-guide-example"><i></i><small>{{t('Khoảng trống nét đứt = lối đi','Dashed gap = aisle')}}</small></div>
+              </section>
+              <div class="desk-seat-legend">
+                <span><i class="available"></i>{{t('Còn trống','Available')}}</span><span><i class="selected"></i>{{t('Đang chọn','Selected')}}</span><span><i class="occupied"></i>{{t('Đã bán / giữ','Sold / held')}}</span><span><i class="other"></i>{{t('Hành khách khác đã chọn','Selected by another passenger')}}</span><span><i class="wrong-cabin"></i>{{t('Khác hạng vé','Different cabin')}}</span><span><i class="exit-row"></i>{{t('Hàng thoát hiểm','Exit row')}}</span>
+              </div>
+              <div class="desk-aircraft-shell">
+                <div class="desk-aircraft">
+                  <div class="desk-nose">{{t('MŨI','NOSE')}}</div>
+                  <div class="desk-rows">
+                    @for(row of seatMapData.rows||[];track row.row_number||$index){
+                      <div class="desk-seat-row">
+                        <b><span>{{t('Hàng','Row')}}</span>{{row.row_number||seatRowFromRow(row)}}</b>
+                        <div class="desk-seat-groups">
+                          @for(group of seatGroups(row);track $index;let last=$last){
+                            <div class="desk-seat-group">
+                              @for(s of group;track s.seat_code){
+                                <button type="button"
+                                  [class.selected]="seatFor(seatPax,seatLeg.flight_id)===s.seat_code"
+                                  [class.occupied]="s.is_occupied||s.is_blocked"
+                                  [class.other]="takenByOther(s.seat_code)"
+                                  [class.wrong-cabin]="s.cabin_class&&s.cabin_class!==seatLeg.cabin_class"
+                                  [class.exit]="s.is_exit_row"
+                                  [disabled]="s.is_occupied||s.is_blocked||takenByOther(s.seat_code)||(s.cabin_class&&s.cabin_class!==seatLeg.cabin_class)"
+                                  [attr.aria-label]="seatAria(s)" [attr.title]="seatTooltip(s)" (click)="pickSeat(s)">
+                                  @if(seatFor(seatPax,seatLeg.flight_id)===s.seat_code){<span class="desk-seat-check"><app-icon name="check" [size]="12"/></span>}
+                                  <span class="desk-seat-code">{{s.seat_code}}</span><small>{{seatFeeShort(s)}}</small>
+                                </button>
+                              }
+                            </div>
+                            @if(!last){<div class="desk-aisle" aria-hidden="true"></div>}
+                          }
+                        </div>
+                      </div>
                     }
                   </div>
-                }
+                  <div class="desk-tail">{{t('ĐUÔI','TAIL')}}</div>
+                </div>
               </div>
-              <button class="btn btn-outline" (click)="clearSeat()">{{language.pick('Bỏ chọn ghế hành khách','Clear seat for passenger')}} {{seatPax+1}}</button>
+              <section class="desk-seat-actions">
+                <div><strong>{{currentPassengerName}}</strong>@if(currentStaffSeat){<div class="desk-selected-seat"><b>{{currentStaffSeat.seat_code}}</b><span><strong>{{seatPositionLabel(currentStaffSeat)}} · {{label(currentStaffSeat.cabin_class)}}</strong><small>{{t('Hàng','Row')}} {{seatRowNumber(currentStaffSeat)}} · {{seatFeatureLabel(currentStaffSeat)}} · {{t('Phụ phí','Seat fee')}} {{money(fee(currentStaffSeat))}}</small></span></div>}@else{<small>{{t('Chưa chọn ghế — hệ thống sẽ tự động xếp.','No seat selected — the system will assign one automatically.')}}</small>}</div>
+                <button class="btn btn-outline" (click)="clearSeat()" [disabled]="!currentStaffSeat">{{t('Tự động xếp ghế','Auto-assign seat')}}</button>
+              </section>
             }
           }
           <div class="nav-row">
@@ -182,13 +219,13 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               <div class="fare-line total"><span>{{t('Tổng','Total')}}</span><b>{{money(quote.total_amount??quote.total??0)}}</b></div>
             }
             <p class="muted">{{language.pick('Khởi hành sớm nhất','Earliest departure')}}: <b>{{dt(earliestDeparture)}}</b> ({{language.pick('còn','in')}} {{daysToDeparture}} {{language.pick('ngày','days')}}).</p>
-             <div class="mode" [class.disabled]="!canBlock">
-               <strong translate="no">{{language.pick('Giữ chỗ (miễn phí)', 'Free booking hold')}}</strong>
-               <small translate="no">{{canBlock?language.pick('Khách nhận mã BLK- và hướng dẫn thanh toán PayPal qua email.', 'The customer receives a BLK- code and PayPal checkout instructions by email.'):language.pick('Không thể giữ chỗ khi khởi hành trong vòng 14 ngày. Khách cần tự đặt và thanh toán PayPal.', 'Holds are unavailable within 14 days of departure. The customer must book and pay using PayPal.')}}</small>
+             <div class="mode">
+               <strong translate="no">{{language.pick('Giữ chỗ 30 phút (miễn phí)', 'Free 30-minute booking hold')}}</strong>
+               <small translate="no">{{language.pick('Hệ thống gửi mã BLK- và link thanh toán PayPal qua email. Khách cần thanh toán trong vòng 30 phút.', 'The system emails the BLK- code and PayPal payment link. The customer must pay within 30 minutes.')}}</small>
              </div>
             <div class="nav-row">
               <button class="btn btn-outline" (click)="step=3">{{t('Quay lại','Back')}}</button>
-               <button class="btn btn-primary" (click)="submit()" [disabled]="busy||quoting||!canBlock" translate="no">{{busy?language.pick('Đang xử lý…', 'Processing…'):language.pick('Giữ chỗ cho khách', 'Hold for customer')}}</button>
+               <button class="btn btn-primary" (click)="submit()" [disabled]="busy||quoting" translate="no">{{busy?language.pick('Đang xử lý…', 'Processing…'):language.pick('Giữ chỗ cho khách', 'Hold for customer')}}</button>
             </div>
           }@else{
             <div class="result print-area">
@@ -198,7 +235,11 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
               <p>{{language.pick('Khách','Customer')}}: <b translate="no">{{customer?.first_name}} {{customer?.last_name}}</b> (<span translate="no">{{customer?.email}}</span>)</p>
               <p>{{language.pick('Hành trình','Itinerary')}}: <span translate="no">{{legsText(result)}}</span></p>
               <p>{{language.pick('Tổng tiền','Total')}}: <b>{{money(result.total_amount)}}</b></p>
-               @if(result.status==='BLOCKED'){<p class="muted" translate="no">{{language.pick('Khách dùng mã giữ chỗ để tra cứu và thanh toán bằng PayPal. Vui lòng kiểm tra email hướng dẫn.', 'The customer can track this hold and pay via PayPal. Please check the instruction email.')}}</p>}
+               @if(result.status==='BLOCKED'){
+                 <p class="muted" translate="no">{{result.hold_email?.status==='SENT'
+                   ? language.pick('Đã gửi email có mã giữ chỗ và link PayPal cho khách. Giữ chỗ tự hết hạn sau 30 phút nếu chưa thanh toán.', 'An email containing the hold code and PayPal link was sent to the customer. The hold expires after 30 minutes if unpaid.')
+                   : language.pick('Đã tạo giữ chỗ 30 phút. Email thanh toán đang được hệ thống gửi lại tự động.', 'The 30-minute hold was created. The payment email is queued for automatic retry.')}}</p>
+               }
             </div>
             <div class="nav-row no-print">
               <button class="btn btn-outline" (click)="print()">{{t('In mã đặt chỗ','Print booking code')}}</button>
@@ -254,13 +295,20 @@ interface DeskOption { kind: 'DIRECT' | 'CONNECTING'; key: string; cabin: string
     .create-grid,.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px;margin:12px 0}.wide{grid-column:1/-1}
     .trip-tabs{display:flex;gap:7px;margin:10px 0;flex-wrap:wrap}.trip-tabs button{border:1px solid #dce4ea;background:#fff;color:#647587;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:800}.trip-tabs button.on{background:#071b2e;border-color:#071b2e;color:#fff}
     tr.sel td{background:#fffaf0}.pax{border:1px solid #e0e7ed;border-radius:14px;padding:12px;margin-bottom:10px}
-    .seatmap{display:grid;gap:4px;max-height:380px;overflow:auto;padding:8px;background:#f7f9fb;border-radius:12px;margin-bottom:10px}.seat-row{display:flex;gap:4px}.seat{width:38px;height:30px;font-size:10px;border:1px solid #c9d5df;border-radius:6px;background:#fff}.seat.taken{background:#e3e7eb;color:#9aa6b2}.seat.mine{background:#071b2e;color:#f2c85f}.seat.other-cabin{opacity:.35}
+    .seat-section-head{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-top:22px}.seat-section-head h4{margin:5px 0 3px;color:#0a2540}.seat-section-head small{color:#687b8c;line-height:1.5}
+    .desk-leg-tabs{display:flex;gap:9px;overflow-x:auto;padding:4px 2px 12px;margin:12px 0}.desk-leg-tabs button{min-width:170px;border:1px solid #d9e2e9;background:#fff;border-radius:16px;padding:10px 12px;text-align:left;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;color:#667588}.desk-leg-tabs button>span{grid-row:1/3;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#edf2f6;font-weight:900}.desk-leg-tabs b{color:#071b2e}.desk-leg-tabs small{font-size:11px}.desk-leg-tabs button.on{border-color:#d6b35a;box-shadow:0 0 0 3px rgba(214,179,90,.12)}.desk-leg-tabs button.done>span{background:#e9f7f1;color:#16845b}
+    .desk-seat-toolbar{padding:16px 18px;border:1px solid #dfe7ed;border-radius:16px;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:18px}.desk-seat-toolbar strong{display:block;color:#071b2e;margin-top:4px}.desk-seat-toolbar>div>small{display:block;color:#748596;margin-top:5px}.desk-pass-tabs{display:flex;gap:8px;overflow-x:auto;max-width:64%;padding:3px}.desk-pass-tabs button{min-width:145px;border:1px solid #d9e2e9;background:white;border-radius:14px;padding:8px 11px;display:grid;grid-template-columns:auto 1fr;gap:1px 7px;text-align:left;color:#667588}.desk-pass-tabs button>span{grid-row:1/3;width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#edf2f6;font-weight:900}.desk-pass-tabs button b{color:#17344d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.desk-pass-tabs button small{font-size:9px}.desk-pass-tabs button.on{background:#071b2e;color:#fff;border-color:#071b2e}.desk-pass-tabs button.on b{color:#fff}.desk-pass-tabs button.done:not(.on){border-color:#a9d9c5;background:#f1fbf6}.desk-pass-tabs button.done:not(.on)>span{background:#dff3e9;color:#16845b}
+    .desk-map-guide{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:18px;align-items:center;padding:14px 18px;margin-top:12px;background:#fbfcfd;border:1px solid #e3e9ee;border-radius:14px}.desk-map-guide>div{display:grid;gap:3px}.desk-map-guide>div:first-child>span{font-size:9px;letter-spacing:.12em;font-weight:900;color:#a67613}.desk-map-guide strong{color:#17344d}.desk-guide-example{grid-template-columns:auto 1fr!important;align-items:center;column-gap:10px}.desk-guide-example>b{font-size:18px;color:#0a2540;background:#fff3c5;border-radius:9px;padding:7px 9px}.desk-guide-example small{color:#647789}.desk-guide-example i{width:36px;border-top:2px dashed #aab8c4}
+    .desk-seat-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:#617185;margin:15px 0}.desk-seat-legend span{display:flex;align-items:center;gap:7px}.desk-seat-legend i{width:14px;height:14px;border-radius:4px;background:#e8f4ef;border:1px solid #75c3a5}.desk-seat-legend i.selected{background:#f1c75c;border-color:#d19d1d}.desk-seat-legend i.occupied{background:#cbd5df;border-color:#a8b5c1}.desk-seat-legend i.other{background:#e9eef4;border-color:#7490a7}.desk-seat-legend i.wrong-cabin{background:#f3f4f5;border-color:#d7dde2}.desk-seat-legend i.exit-row{background:#edf8f3;border:2px solid #69a7cf}
+    .desk-aircraft-shell{max-width:100%;overflow:hidden}.desk-aircraft{display:flex;align-items:stretch;overflow-x:auto;background:#fff;border:2px solid #ced8e1;border-radius:110px 24px 24px 110px;padding:20px;min-height:290px;max-width:100%;scroll-behavior:smooth}.desk-nose,.desk-tail{display:grid;place-items:center;color:#8b99a8;font-size:10px;font-weight:900;letter-spacing:.12em;padding:10px;position:sticky;background:#fff;z-index:3}.desk-nose{left:0}.desk-tail{right:0}.desk-rows{display:flex;gap:8px;align-items:flex-start}.desk-seat-row{min-width:50px;text-align:center}.desk-seat-row>b{display:grid;gap:1px;font-size:12px;color:#51677a}.desk-seat-row>b span{font-size:7px;text-transform:uppercase;letter-spacing:.08em;color:#98a5b1;font-weight:800}.desk-seat-groups{display:flex;flex-direction:column;align-items:center;margin-top:8px}.desk-seat-group{display:flex;flex-direction:column;gap:6px}.desk-aisle{height:22px;min-height:22px;width:100%;position:relative}.desk-aisle:after{content:'';position:absolute;left:5px;right:5px;top:50%;border-top:1px dashed #c7d2dc}.desk-seat-group button{position:relative;width:42px;height:50px;border-radius:9px;border:1px solid #9ccdb8;background:#edf8f3;color:#176b4e;display:grid;place-items:center;padding:3px}.desk-seat-group button small{font-size:7px;color:#657487}.desk-seat-code{font-weight:900;font-size:11px;letter-spacing:-.02em}.desk-seat-check{position:absolute;right:-5px;top:-5px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;background:#071b2e;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(7,27,46,.25)}.desk-seat-group button.selected{background:#f1c75c;border-color:#be8e17;color:#533b00;box-shadow:0 0 0 3px rgba(241,199,92,.25)}.desk-seat-group button.occupied{background:#d8dee5;border-color:#bdc7d0;color:#8b98a4}.desk-seat-group button.other{background:#e9eef4;border-color:#7490a7;color:#52687c}.desk-seat-group button.wrong-cabin{background:#f3f4f5;border-color:#d7dde2;color:#a4adb5;opacity:.72}.desk-seat-group button.exit{outline:2px solid #69a7cf}.desk-seat-group button:focus-visible{outline:3px solid #071b2e;outline-offset:2px}
+    .desk-seat-actions{margin-top:14px;padding:16px 18px;border:1px solid #dfe7ed;border-radius:16px;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:18px}.desk-seat-actions>div{display:grid;gap:6px;min-width:0}.desk-seat-actions>div>strong{color:#0a2540}.desk-seat-actions>div>small{color:#68778a}.desk-selected-seat{display:flex;align-items:center;gap:13px}.desk-selected-seat>b{min-width:58px;height:58px;border-radius:14px;background:#fff0b5;border:1px solid #e1ba4a;color:#533b00;display:grid;place-items:center;font-size:19px}.desk-selected-seat span{display:grid;gap:3px}.desk-selected-seat span>strong{color:#17344d}.desk-selected-seat small{color:#687b8c}
     .fare-line{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #e0e7ed}.fare-line.total{font-size:16px}
     .mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.mode{border:1px solid #dce4ea;border-radius:14px;padding:12px;display:grid;gap:4px;cursor:pointer}.mode.on{border-color:#d6b35a;background:#fffaf0}.mode.disabled{opacity:.5;cursor:not-allowed}
     .result{border:2px dashed #d6b35a;border-radius:18px;padding:20px;text-align:center}.code{font-size:30px;font-weight:900;letter-spacing:2px;color:#071b2e;margin:10px 0}
     .bk{border-top:1px solid #eef2f5;padding:10px 0;display:grid;gap:4px}.bk small{color:#718093}.danger{color:#b42318}.panel-head{display:flex;justify-content:space-between;align-items:center}
     .notice{color:#05603a;background:#ecfdf3;padding:8px 12px;border-radius:10px}.empty{padding:20px;text-align:center}.btn:disabled{opacity:.45;cursor:not-allowed}
-    @media(max-width:960px){.desk-grid{grid-template-columns:1fr}}
+    @media(max-width:960px){.desk-grid{grid-template-columns:1fr}.desk-map-guide{grid-template-columns:1fr 1fr}.desk-map-guide>div:first-child{grid-column:1/-1}}
+    @media(max-width:700px){.desk-seat-toolbar,.desk-seat-actions{align-items:flex-start;flex-direction:column}.desk-pass-tabs{max-width:100%;width:100%}.desk-map-guide{grid-template-columns:1fr}.desk-map-guide>div:first-child{grid-column:auto}}
     @media print{.no-print,.stepper,.side,.eyebrow,.title,.subtitle{display:none!important}}
   `],
 })
@@ -431,6 +479,37 @@ export class ReservationDeskComponent {
   }
   seatFor(pax: number, flightId: string) { return this.seatRequests.find(r => r.passenger_index === pax && r.flight_id === flightId)?.seat_code || ''; }
   takenByOther(code: string) { return this.seatRequests.some(r => r.flight_id === this.seatLeg?.flight_id && r.seat_code === code && r.passenger_index !== this.seatPax); }
+  seatCoveredForLeg(flightId: string) { return this.passengers.length > 0 && this.passengers.every((_: any, i: number) => !!this.seatFor(i, flightId)); }
+  legNumber(leg: any) { const index = this.legs.findIndex(l => l.flight_id === leg?.flight_id); return index >= 0 ? index + 1 : 1; }
+  get currentPassengerName() { const p = this.passengers[this.seatPax]; return p ? `${p.first_name || this.t('Hành khách', 'Passenger')} ${p.last_name || this.seatPax + 1}`.trim() : ''; }
+  get currentStaffSeat() {
+    const code = this.seatFor(this.seatPax, this.seatLeg?.flight_id);
+    if (!code) return null;
+    for (const row of this.seatMapData?.rows || []) {
+      const seat = (row?.seats || []).find((s: any) => s.seat_code === code);
+      if (seat) return seat;
+    }
+    return null;
+  }
+  seatGroups(row: any) { return Array.isArray(row?.column_groups) && row.column_groups.length ? row.column_groups : [row?.seats || []]; }
+  seatRowFromRow(row: any) { return this.seatRowNumber(row?.seats?.[0]); }
+  seatRowNumber(s: any) { return Number(s?.row ?? s?.row_number ?? (String(s?.seat_code || '').match(/^\d+/)?.[0] || 0)); }
+  seatPositionLabel(s: any) {
+    const position = String(s?.position || '').toUpperCase();
+    return position === 'WINDOW' ? this.t('Cửa sổ', 'Window') : position === 'AISLE' ? this.t('Lối đi', 'Aisle') : position === 'MIDDLE' ? this.t('Ghế giữa', 'Middle seat') : this.t('Vị trí tiêu chuẩn', 'Standard position');
+  }
+  seatFeatureLabel(s: any) {
+    const tags: string[] = [];
+    if (s?.is_exit_row) tags.push(this.t('Hàng thoát hiểm', 'Exit row'));
+    if (s?.is_extra_legroom) tags.push(this.t('Chỗ để chân rộng', 'Extra legroom'));
+    return tags.length ? tags.join(' · ') : this.t('Ghế tiêu chuẩn', 'Standard seat');
+  }
+  seatFeeShort(s: any) { const value = this.fee(s); return value ? `+${Math.round(value / 1000)}k` : '0'; }
+  seatAria(s: any) {
+    const state = s?.cabin_class && s.cabin_class !== this.seatLeg?.cabin_class ? this.t('khác hạng vé', 'different cabin') : s?.is_occupied || s?.is_blocked ? this.t('đã bán hoặc giữ', 'sold or held') : this.takenByOther(s?.seat_code) ? this.t('hành khách khác đã chọn', 'selected by another passenger') : this.seatFor(this.seatPax, this.seatLeg?.flight_id) === s?.seat_code ? this.t('đang chọn', 'selected') : this.t('còn trống', 'available');
+    return `${this.t('Ghế', 'Seat')} ${s?.seat_code}, ${this.seatPositionLabel(s)}, ${state}, ${this.t('phí', 'fee')} ${this.money(this.fee(s))}`;
+  }
+  seatTooltip(s: any) { return `${this.t('Ghế', 'Seat')} ${s?.seat_code} · ${this.t('Hàng', 'Row')} ${this.seatRowNumber(s)} · ${this.seatPositionLabel(s)} · ${this.label(s?.cabin_class)} · ${this.seatFeatureLabel(s)} · ${this.money(this.fee(s))}`; }
   pickSeat(s: any) {
     this.clearSeat();
     this.seatRequests.push({ passenger_index: this.seatPax, flight_id: this.seatLeg.flight_id, selection_type: 'CHOOSE', seat_code: s.seat_code });
@@ -457,7 +536,6 @@ export class ReservationDeskComponent {
   get departureDate() { const first = this.outbound?.legs?.[0] || this.legs[0]; return String(first?.departure_date || first?.scheduled_departure_local || first?.scheduled_departure || this.departure || '').slice(0, 10); }
   get earliestDeparture() { const t = this.legs.map(l => new Date(l.scheduled_departure || '').getTime()).filter(Number.isFinite); return t.length ? new Date(Math.min(...t)).toISOString() : ''; }
   get daysToDeparture() { const e = this.earliestDeparture; return e ? Math.floor((new Date(e).getTime() - Date.now()) / 86_400_000) : 0; }
-  get canBlock() { const e = this.earliestDeparture; return !!e && (new Date(e).getTime() - Date.now()) / 86_400_000 > 14; }
   private payload() {
     const passengers = this.passengers.map(p => { const x: any = { ...p }; for (const k of ['id_card_or_passport', 'date_of_birth']) if (!x[k]) delete x[k]; return x; });
     return { user_id: this.customer._id, booking_type: this.bookingType, is_block: true, passengers,
@@ -473,7 +551,6 @@ export class ReservationDeskComponent {
   }
   async submit() {
     this.error = '';
-    if (!this.canBlock) { this.error = this.language.pick('Chỉ được giữ chỗ khi ngày khởi hành còn hơn 14 ngày. Khách cần tự đặt và thanh toán PayPal.', 'Holds require departure more than 14 days away. The customer must book and pay via PayPal.'); return; }
     this.busy = true;
     try {
       this.result = await firstValueFrom(this.api.createBooking(this.payload()));

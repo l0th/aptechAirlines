@@ -66,7 +66,6 @@ export class BookingsScheduler {
   async handleScheduledJobs(): Promise<void> {
     await this.sendPendingReminders();
     await this.sendUpcomingTripReminders();
-    await this.autoCancelExpiredBlocks();
     await this.reconcileStaleSagaOperations();
     await this.recoverUnconfirmedSeatAllocations();
   }
@@ -271,6 +270,7 @@ export class BookingsScheduler {
    * Releases seats exactly like cancelTicket (via BookingsService) and
    * stamps a cancellation number. Returns the number of cancellations.
    */
+  @Cron('* * * * *')
   async autoCancelExpiredBlocks(): Promise<number> {
     const now = new Date();
 

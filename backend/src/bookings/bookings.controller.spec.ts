@@ -25,9 +25,11 @@ describe('BookingsController – staff booking on behalf of customer', () => {
   });
 
   it('creates booking with the selected customer as user_id (not the clerk)', async () => {
-    await controller.create(clerkReq, { user_id: customerId } as any);
+    await controller.create(clerkReq, { user_id: customerId, is_block: true } as any);
     expect(bookingsService.createBooking).toHaveBeenCalledWith(
       expect.objectContaining({ user_id: customerId }),
+      undefined,
+      { staffAssistedHold: true },
     );
   });
 
@@ -45,7 +47,11 @@ describe('BookingsController – staff booking on behalf of customer', () => {
 
   it('forces customer bookings to their own id', async () => {
     await controller.create({ user: { sub: customerId, role: UserRole.CUSTOMER } }, { user_id: 'other' } as any);
-    expect(bookingsService.createBooking).toHaveBeenCalledWith(expect.objectContaining({ user_id: customerId }));
+    expect(bookingsService.createBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: customerId }),
+      undefined,
+      { staffAssistedHold: false },
+    );
   });
 
   it('quote for staff uses the selected customer', async () => {

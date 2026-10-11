@@ -12,8 +12,11 @@ test('staff booking screens contain no saved-card fields or fake card confirmati
   }
 });
 
-test('staff checkout only creates eligible holds, never a fake immediate purchase', () => {
-  assert.equal(/if\s*\(!this\.canBlock\)\s*\{/.test(reservationDesk), true, 'Staff hold must check the 14-day rule');
+test('staff checkout creates a 30-minute payment hold without reusing the customer 14-day rule', () => {
+  assert.equal(/if\s*\(!this\.canBlock\)\s*\{/.test(reservationDesk), false, 'Staff-assisted holds must not use the customer 14-day rule');
+  assert.equal(/\[disabled\]="busy\s*\|\|\s*quoting\s*\|\|\s*!canBlock"/.test(reservationDesk), false, 'A near-term flight must not disable the staff hold button');
+  assert.equal(/30\s*phút/i.test(reservationDesk), true, 'The staff UI must explain the 30-minute payment window');
+  assert.equal(/email/i.test(reservationDesk), true, 'The staff UI must explain that the payment link is emailed to the customer');
   assert.equal(/is_block:\s*true/.test(reservationDesk), true, 'Staff creation must be hold-only');
   assert.equal(/mode:\s*'block'\s*\|\s*'buy'/.test(reservationDesk), false, 'Staff must not offer immediate purchase');
 });

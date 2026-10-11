@@ -70,13 +70,14 @@ export class BookingsController {
     @Body() createBookingDto: CreateBookingDto,
   ) {
     this.rejectSavedCardPayment(createBookingDto.payment_method);
+    const staffAssistedHold = STAFF_ROLES.includes(req.user.role) && createBookingDto.is_block === true;
     // Customers can only create bookings for themselves
     if (req.user.role === UserRole.CUSTOMER) {
       createBookingDto.user_id = req.user.sub;
     } else {
       createBookingDto.user_id = await this.resolveStaffTargetCustomer(req, createBookingDto.user_id);
     }
-    return this.bookingsService.createBooking(createBookingDto);
+    return this.bookingsService.createBooking(createBookingDto, undefined, { staffAssistedHold });
   }
 
   @Post('quote')

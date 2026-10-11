@@ -70,16 +70,36 @@ describe('BookingsService', () => {
   let usersService: any;
   let policiesService: any;
   let mailService: any;
+  let lastSavedBooking: any;
 
   beforeEach(async () => {
+    lastSavedBooking = null;
     bookingModel = function(data: any) {
       return {
         ...data,
-        save: jest.fn().mockResolvedValue({ ...data, _id: 'new-booking-id' }),
+        save: jest.fn().mockImplementation(async () => {
+          lastSavedBooking = { ...data, _id: 'new-booking-id' };
+          return lastSavedBooking;
+        }),
       };
     };
     bookingModel.findOne = jest.fn().mockReturnThis();
-    bookingModel.updateOne = jest.fn().mockResolvedValue({ acknowledged: true });
+    bookingModel.findOneAndUpdate = jest.fn().mockImplementation(() => ({
+      populate: () => ({
+        exec: async () => lastSavedBooking ? {
+          ...lastSavedBooking,
+          user_id: { email: 'owner@example.com', first_name: 'Customer', last_name: 'Owner' },
+          hold_email: { ...lastSavedBooking.hold_email, attempt_count: 1 },
+        } : null,
+      }),
+    }));
+    bookingModel.exists = jest.fn().mockResolvedValue(true);
+    bookingModel.updateOne = jest.fn().mockImplementation(() => {
+      const result = { acknowledged: true, modifiedCount: 1 };
+      const query: any = Promise.resolve(result);
+      query.exec = jest.fn().mockResolvedValue(result);
+      return query;
+    });
     bookingModel.exec = jest.fn();
 
     flightsService = {
@@ -167,6 +187,21 @@ describe('BookingsService', () => {
       mockFlight.scheduled_departure = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000); // 10 days ahead
       baseDto.is_block = true;
       await expect(service.createBooking(baseDto)).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows a staff-assisted near-term hold for 30 minutes while keeping the customer hold policy unchanged', async () => {
+      mockFlight.scheduled_departure = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      baseDto.is_block = true;
+      const beforeCreate = Date.now();
+
+      const result = await service.createBooking(baseDto, undefined, { staffAssistedHold: true });
+
+      expect(result.status).toBe(BookingStatus.BLOCKED);
+      expect(result.blocking_number).toBeDefined();
+      expect(new Date(result.time_limit_deadline).getTime()).toBeGreaterThanOrEqual(beforeCreate + 29 * 60 * 1000);
+      expect(new Date(result.time_limit_deadline).getTime()).toBeLessThanOrEqual(Date.now() + 31 * 60 * 1000);
+      expect(result.hold_email).toEqual(expect.objectContaining({ status: 'SENT' }));
+      expect(result.is_reminder_sent).toBe(true);
     });
 
     it('exact 14-day hold boundary policy: 13.99d -> DENIED, 14.00d -> DENIED, 14.01d -> ALLOWED, 14.50d -> ALLOWED, 15.00d -> ALLOWED', async () => {

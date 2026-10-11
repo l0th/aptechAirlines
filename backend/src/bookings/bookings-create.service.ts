@@ -21,13 +21,21 @@ import {
 import { BookingsCoreBridge, BookingsCoreDependencies, BookingsCorePart } from './bookings-core.part';
 import { findPassengerAgeCategoryMismatch } from './passenger-age.util';
 
+export interface BookingCreationContext {
+  staffAssistedHold?: boolean;
+}
+
 export class BookingsCreateService extends BookingsCorePart {
   private readonly logger = new Logger(BookingsCreateService.name);
 
   constructor(deps: BookingsCoreDependencies, bridge: BookingsCoreBridge) {
     super(deps, bridge);
   }
-  async createBooking(dto: CreateBookingDto, externalPaymentProof?: ExternalPaymentProof): Promise<BookingDocument> {
+  async createBooking(
+    dto: CreateBookingDto,
+    externalPaymentProof?: ExternalPaymentProof,
+    context: BookingCreationContext = {},
+  ): Promise<BookingDocument> {
     const user = await this.usersService.findById(dto.user_id);
 
     const passengerCount = dto.passengers.length;
@@ -225,12 +233,26 @@ export class BookingsCreateService extends BookingsCorePart {
     }
     const totalPayable = totalFare + preflightSeatFees;
 
-    // Requirement 3.4.2: If <= 2 weeks, CANNOT block, MUST buy!
+    const staffAssistedHold = dto.is_block && context.staffAssistedHold === true;
+    let holdDeadline: Date | undefined;
+
+    // Customer self-service holds retain the 14-day policy. A hold created by
+    // authenticated staff has a short checkout window so the customer can pay.
     if (dto.is_block) {
-      if (daysUntilDeparture <= 14) {
+      if (staffAssistedHold) {
+        const staffHoldDurationMs = 30 * 60 * 1000;
+        if (earliestDeparture!.getTime() - now.getTime() <= staffHoldDurationMs) {
+          throw new BadRequestException(
+            'Staff-assisted holds require departure more than 30 minutes away.',
+          );
+        }
+        holdDeadline = new Date(now.getTime() + staffHoldDurationMs);
+      } else if (daysUntilDeparture <= 14) {
         throw new BadRequestException(
           'Departure is within 2 weeks (14 days). Ticket blocking is not permitted. You must buy the ticket directly.',
         );
+      } else {
+        holdDeadline = new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000);
       }
     }
 
@@ -432,8 +454,8 @@ export class BookingsCreateService extends BookingsCorePart {
             );
           }
           const heldUntil = dto.is_block
-            ? new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000)
-            : new Date(Date.now() + 30 * 60 * 1000);
+            ? holdDeadline!
+            : new Date(now.getTime() + 30 * 60 * 1000);
 
           const allocResults = await this.seatAllocationService.allocateSeats({
             flight_id: flight._id,
@@ -531,7 +553,7 @@ export class BookingsCreateService extends BookingsCorePart {
       if (dto.is_block) {
         status = BookingStatus.BLOCKED;
         blockingNumber = this.bridge.generateCode('BLK');
-        deadline = new Date(earliestDeparture!.getTime() - 14 * 24 * 60 * 60 * 1000);
+        deadline = holdDeadline;
       } else {
         confirmationNumber = this.bridge.generateCode('CNF');
         if (dto.payment_method === PaymentMethod.PAYPAL) {
@@ -585,6 +607,9 @@ export class BookingsCreateService extends BookingsCorePart {
           attempt_count: 0,
           next_retry_at: new Date(),
         } } : {}),
+        // The initial 30-minute payment email is the only reminder needed for
+        // staff-assisted holds; do not also send the three-week reminder job.
+        is_reminder_sent: staffAssistedHold,
         total_amount: totalAmount,
         total_fare: totalFare,
         total_seat_fees: totalSeatFees,
@@ -669,8 +694,12 @@ export class BookingsCreateService extends BookingsCorePart {
           const sent = await deliverHoldCreatedEmail(
             this.bookingModel, this.flightsService, this.mailService, savedBooking._id,
           );
+          if (savedBooking.hold_email) {
+            savedBooking.hold_email.status = sent ? HoldEmailStatus.SENT : HoldEmailStatus.FAILED;
+          }
           if (!sent) this.logger.warn(`Hold-created email queued for retry: ${savedBooking.pnr_code}.`);
         } catch (mailError) {
+          if (savedBooking.hold_email) savedBooking.hold_email.status = HoldEmailStatus.FAILED;
           this.logger.warn(`Hold-created email could not be prepared/sent for ${savedBooking.pnr_code}: ${mailError}`);
         }
       }

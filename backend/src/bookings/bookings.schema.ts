@@ -241,7 +241,7 @@ export class Booking {
   @Prop({ unique: true, sparse: true })
   cancellation_number?: string;
 
-  // 2 weeks before departure deadline for blocked tickets
+  // Customer holds expire 14 days before departure; staff-assisted holds expire after 30 minutes.
   @Prop()
   time_limit_deadline?: Date;
 
