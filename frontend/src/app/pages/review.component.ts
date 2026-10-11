@@ -15,26 +15,26 @@ import { formatDateTimeDayFirst } from '../core/date-format.util';
   imports:[FormsModule],
   template:`
   <div class="container page">
-    <div class="eyebrow">BƯỚC 4 / 4</div>
-    <h1 class="title">Kiểm tra & thanh toán</h1>
-    <p class="subtitle">Xác nhận hành trình, hành khách, ghế và phương thức thanh toán trước khi hoàn tất đặt vé.</p>
+    <div class="eyebrow">{{t('BƯỚC 4 / 4','STEP 4 / 4')}}</div>
+    <h1 class="title">{{t('Kiểm tra & thanh toán','Review & payment')}}</h1>
+    <p class="subtitle">{{t('Xác nhận hành trình, hành khách, ghế và phương thức thanh toán trước khi hoàn tất đặt vé.','Confirm your itinerary, passengers, seats and payment method before completing the booking.')}}</p>
 
     @if(isStaffBooking){
       <div class="staff-banner">
-        <span>ĐẶT VÉ TẠI QUẦY</span>
+        <span>{{t('ĐẶT VÉ TẠI QUẦY','STAFF BOOKING')}}</span>
         <div translate="no"><strong>{{staffCustomer.first_name}} {{staffCustomer.last_name}}</strong><small>@{{staffCustomer.username}} · {{staffCustomer.email}}</small></div>
       </div>
     }@else if(auth.staff()){
       <div class="staff-banner warning">
-        <span>NHÂN VIÊN</span>
-        <div><strong>Chưa chọn khách hàng</strong><small>Vào Quầy đặt vé và chọn KHÁCH HÀNG trước khi tạo đặt chỗ.</small></div>
-        <button class="btn btn-dark" (click)="router.navigate(['/admin/reservation-desk'])">Quầy đặt vé</button>
+        <span>{{t('NHÂN VIÊN','STAFF')}}</span>
+        <div><strong>{{t('Chưa chọn khách hàng','No customer selected')}}</strong><small>{{t('Vào Quầy đặt vé và chọn KHÁCH HÀNG trước khi tạo đặt chỗ.','Open the Reservation Desk and select a CUSTOMER before creating a booking.')}}</small></div>
+        <button class="btn btn-dark" (click)="router.navigate(['/admin/reservation-desk'])">{{t('Quầy đặt vé','Reservation desk')}}</button>
       </div>
     }
 
     <div class="review-grid">
       <section class="card main">
-        <h2>Hành trình</h2>
+        <h2>{{t('Hành trình','Itinerary')}}</h2>
         <div class="route-title"><strong translate="no">{{routeText}}</strong><span class="pill pill-gold" translate="no">{{bookingTypeLabel(state.selection()?.booking_type)}}</span></div>
         <div class="legs">
           @for(l of state.selectedLegs();track l.flight_id;let i=$index){
@@ -47,7 +47,7 @@ import { formatDateTimeDayFirst } from '../core/date-format.util';
           }
         </div>
 
-        <h2>Hành khách</h2>
+        <h2>{{t('Hành khách','Passengers')}}</h2>
         @for(p of state.passengers();track $index;let i=$index){
           <div class="person">
             <div translate="no"><span>{{i+1}}. {{p.first_name}} {{p.last_name}}</span><small>{{passengerTypeLabel(p.passenger_type)}} · {{p.nationality}}</small></div>
@@ -55,7 +55,7 @@ import { formatDateTimeDayFirst } from '../core/date-format.util';
           </div>
         }
 
-        <h2>Chỗ ngồi</h2>
+        <h2>{{t('Chỗ ngồi','Seats')}}</h2>
         <div class="seat-list">
           @for(l of state.selectedLegs();track l.flight_id){
             <div><strong translate="no">{{l.flight_number}}</strong><span translate="no">{{seatTextFor(l.flight_id)}}</span></div>
@@ -64,46 +64,46 @@ import { formatDateTimeDayFirst } from '../core/date-format.util';
       </section>
 
       <aside class="card side">
-        <h2>Tổng quan giá</h2>
+        <h2>{{t('Tổng quan giá','Price summary')}}</h2>
         @if(isStaffBooking){
-          <div class="estimate-note">Báo giá được tính trực tiếp theo hồ sơ khách hàng đang được phục vụ, gồm SkyMiles, giá động và phụ phí ghế.</div>
+          <div class="estimate-note">{{t('Báo giá được tính trực tiếp theo hồ sơ khách hàng đang được phục vụ, gồm SkyMiles, giá động và phụ phí ghế.','The quote uses the selected customer profile, including SkyMiles, dynamic pricing and seat fees.')}}</div>
         }
         @if(!auth.authenticated()){
-          <div class="login-note">Đăng nhập để lấy báo giá theo SkyMiles và hoàn tất giao dịch.</div>
+          <div class="login-note">{{t('Đăng nhập để lấy báo giá theo SkyMiles và hoàn tất giao dịch.','Log in to receive your SkyMiles quote and complete the transaction.')}}</div>
         }@else if(loadingQuote){
-          <p class="muted">Đang cập nhật giá vé…</p>
+          <p class="muted">{{t('Đang cập nhật giá vé…','Updating fare…')}}</p>
         }@else if(quote){
-          <div class="price-line"><span>Giá vé</span><strong>{{money(quote.total_fare)}}</strong></div>
-          <div class="price-line"><span>Phụ phí ghế</span><strong>{{money(quote.total_seat_fees)}}</strong></div>
+          <div class="price-line"><span>{{t('Giá vé','Fare')}}</span><strong>{{money(quote.total_fare)}}</strong></div>
+          <div class="price-line"><span>{{t('Phụ phí ghế','Seat fees')}}</span><strong>{{money(quote.total_seat_fees)}}</strong></div>
           @if(quote.early_bird_percent){
-            <div class="discount"><span>Điều chỉnh theo ngày bay</span><b>{{quote.early_bird_percent>0?'+':''}}{{quote.early_bird_percent}}%</b></div>
+            <div class="discount"><span>{{t('Điều chỉnh theo ngày bay','Booking-time adjustment')}}</span><b>{{quote.early_bird_percent>0?'+':''}}{{quote.early_bird_percent}}%</b></div>
           }
           @if(quote.load_adjustment_percent){
-            <div class="discount"><span>{{quote.load_adjustment_label}} · tải {{quote.load_factor_percent}}%</span><b>{{quote.load_adjustment_percent>0?'+':''}}{{quote.load_adjustment_percent}}%</b></div>
+            <div class="discount"><span>{{quote.load_adjustment_label}} · {{t('tải','load')}} {{quote.load_factor_percent}}%</span><b>{{quote.load_adjustment_percent>0?'+':''}}{{quote.load_adjustment_percent}}%</b></div>
           }
           @if(quote.ff_discount_percent){
             <div class="discount"><span>SkyMiles {{quote.ff_tier}}</span><b>-{{quote.ff_discount_percent}}%</b></div>
           }
-          @if(quote.pricing_profile_name){<small class="presentment">Pricing profile: {{quote.pricing_profile_name}}</small>}
-          <div class="total"><span>Tổng</span><strong>{{money(quote.total_amount)}}</strong></div>
+          @if(quote.pricing_profile_name){<small class="presentment">{{t('Hồ sơ giá','Pricing profile')}}: {{quote.pricing_profile_name}}</small>}
+          <div class="total"><span>{{t('Tổng','Total')}}</span><strong>{{money(quote.total_amount)}}</strong></div>
           @if(quote.presentment?.amount){
-            <small class="presentment">Thanh toán PayPal: {{quote.presentment.amount}} {{quote.presentment.currency}}</small>
+            <small class="presentment">{{t('Thanh toán PayPal','PayPal payment')}}: {{quote.presentment.amount}} {{quote.presentment.currency}}</small>
           }
         }
 
         <div class="choice">
-          <label [class.disabled]="isStaffBooking"><input type="radio" name="mode" value="buy" [(ngModel)]="mode" [disabled]="isStaffBooking"> Mua vé ngay</label>
-          <label [class.disabled]="!canBlock"><input type="radio" name="mode" value="block" [(ngModel)]="mode" [disabled]="!canBlock"> Giữ chỗ</label>
+          <label [class.disabled]="isStaffBooking"><input type="radio" name="mode" value="buy" [(ngModel)]="mode" [disabled]="isStaffBooking"> {{t('Mua vé ngay','Buy now')}}</label>
+          <label [class.disabled]="!canBlock"><input type="radio" name="mode" value="block" [(ngModel)]="mode" [disabled]="!canBlock"> {{t('Giữ chỗ','Hold booking')}}</label>
         </div>
         @if(!canBlock){<p class="hold-note">{{language.pick('Giữ chỗ chỉ áp dụng khi chuyến khởi hành sớm nhất còn hơn 14 ngày.','Holding is only available when departure is more than 14 days away.')}}</p>}
         @if(isStaffBooking&&!canBlock){<p class="hold-note">{{language.pick('Chưa thể gửi yêu cầu thanh toán PayPal cho chuyến trong 14 ngày qua quầy. Khách cần đăng nhập và tự đặt vé bằng PayPal.','Staff cannot issue a pay-later request within 14 days of departure. The customer must sign in and book with PayPal.')}}</p>}
 
-        <button class="btn btn-outline full" (click)="router.navigate(['/booking/seats'])" [disabled]="busy">Quay lại chọn ghế</button>
+        <button class="btn btn-outline full" (click)="router.navigate(['/booking/seats'])" [disabled]="busy">{{t('Quay lại chọn ghế','Back to seat selection')}}</button>
 
         @if(!auth.authenticated()){
-          <button class="btn btn-dark full" (click)="login()">Đăng nhập để tiếp tục</button>
+          <button class="btn btn-dark full" (click)="login()">{{t('Đăng nhập để tiếp tục','Log in to continue')}}</button>
         }@else if(auth.staff()&&!isStaffBooking){
-          <button class="btn btn-dark full" (click)="router.navigate(['/admin/reservation-desk'])">Chọn khách hàng</button>
+          <button class="btn btn-dark full" (click)="router.navigate(['/admin/reservation-desk'])">{{t('Chọn khách hàng','Select customer')}}</button>
         }@else{
           @if(mode==='buy'){
             @if(isStaffBooking){
@@ -135,6 +135,7 @@ export class ReviewComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   readonly language=inject(LanguageService);
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   state=inject(BookingStateService);
   api=inject(ApiService);
   auth=inject(AuthService);

@@ -24,18 +24,18 @@ interface MailTemplateRow {
   standalone: true,
   imports: [FormsModule, DatePipe],
   template: `
-    <div class="eyebrow">TRUNG TÂM EMAIL</div>
+    <div class="eyebrow">{{t('TRUNG TÂM EMAIL','EMAIL CENTER')}}</div>
     <div class="section-head">
       <div>
-        <h1 class="title">Quản lý email</h1>
-        <p class="subtitle">Xem trước mẫu email, theo dõi lịch sử gửi và chạy thủ công các tác vụ tự động.</p>
+        <h1 class="title">{{t('Quản lý email','Email center')}}</h1>
+        <p class="subtitle">{{t('Xem trước mẫu email, theo dõi lịch sử gửi và chạy thủ công các tác vụ tự động.','Preview email templates, review send history and manually run automated jobs.')}}</p>
       </div>
     </div>
 
     <div class="ec-tabs" role="tablist">
-      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='templates'" [class.btn-outline]="tab!=='templates'" (click)="setTab('templates')">Mẫu email</button>
-      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='logs'" [class.btn-outline]="tab!=='logs'" (click)="setTab('logs')">Lịch sử gửi</button>
-      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='jobs'" [class.btn-outline]="tab!=='jobs'" (click)="setTab('jobs')">Tác vụ tự động (demo)</button>
+      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='templates'" [class.btn-outline]="tab!=='templates'" (click)="setTab('templates')">{{t('Mẫu email','Templates')}}</button>
+      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='logs'" [class.btn-outline]="tab!=='logs'" (click)="setTab('logs')">{{t('Lịch sử gửi','Send history')}}</button>
+      <button type="button" role="tab" class="btn" [class.btn-primary]="tab==='jobs'" [class.btn-outline]="tab!=='jobs'" (click)="setTab('jobs')">{{t('Tác vụ tự động (demo)','Automated jobs (demo)')}}</button>
     </div>
 
     
@@ -47,37 +47,37 @@ interface MailTemplateRow {
             <article class="ec-item" [class.active]="selected?.key===t.key" (click)="select(t)">
               <div class="ec-item-head">
                 <strong translate="no">{{tName(t)}}</strong>
-                <label class="ec-switch" (click)="$event.stopPropagation()" [title]="t.enabled ? 'Đang bật' : 'Đang tắt'">
+                <label class="ec-switch" (click)="$event.stopPropagation()" [title]="t.enabled ? this.t('Đang bật','Enabled') : this.t('Đang tắt','Disabled')">
                   <input type="checkbox" [checked]="t.enabled" (change)="toggle(t, $any($event.target).checked)" />
-                  <span class="pill" [class.pill-gold]="t.enabled">{{t.enabled ? 'Bật' : 'Tắt'}}</span>
+                  <span class="pill" [class.pill-gold]="t.enabled">{{t.enabled ? this.t('Bật','On') : this.t('Tắt','Off')}}</span>
                 </label>
               </div>
               <p class="ec-desc" translate="no">{{tDesc(t)}}</p>
-              <p class="ec-when"><b>Khi nào gửi:</b> <span translate="no">{{tTrigger(t)}}</span></p>
+              <p class="ec-when"><b>{{this.t('Khi nào gửi:','When sent:')}}</b> <span translate="no">{{tTrigger(t)}}</span></p>
             </article>
           } @empty {
-            <p class="empty-row">{{loadingTemplates ? 'Đang tải…' : 'Không có mẫu email.'}}</p>
+            <p class="empty-row">{{loadingTemplates ? t('Đang tải…','Loading…') : t('Không có mẫu email.','No email templates.')}}</p>
           }
         </section>
 
         <section class="card ec-preview">
           @if(selected){
-            <div class="eyebrow">{{language.pick('XEM TRƯỚC','PREVIEW')}} · <span translate="no">{{selected.key}}</span></div>
-            <p class="ec-hint">Email song ngữ: Tiếng Việt phía trên, English phía dưới (trong cùng một email).</p>
-            <p class="ec-subject"><b>Tiêu đề:</b> <span translate="no">{{preview?.subject || '…'}}</span></p>
+            <div class="eyebrow">{{t('XEM TRƯỚC','PREVIEW')}} · <span translate="no">{{selected.key}}</span></div>
+            <p class="ec-hint">{{t('Email song ngữ: Tiếng Việt phía trên, English phía dưới (trong cùng một email).','Bilingual email: Vietnamese first, English below in the same email.')}}</p>
+            <p class="ec-subject"><b>{{t('Tiêu đề:','Subject:')}}</b> <span translate="no">{{preview?.subject || '…'}}</span></p>
             <form class="ec-test" (ngSubmit)="sendTest()">
               <label class="field">
-                <span>Gửi thử tới email</span>
+                <span>{{t('Gửi thử tới email','Send test to')}}</span>
                 <input class="control" type="email" name="testTo" [(ngModel)]="testTo" placeholder="ban@example.com" required />
               </label>
-              <button class="btn btn-primary" type="submit" [disabled]="sending || !testTo">{{sending ? 'Đang gửi…' : 'Gửi thử'}}</button>
+              <button class="btn btn-primary" type="submit" [disabled]="sending || !testTo">{{sending ? t('Đang gửi…','Sending…') : t('Gửi thử','Send test')}}</button>
             </form>
-            @if(!selected.enabled){<p class="ec-note">Mẫu đang tắt: hệ thống sẽ không tự động gửi, nhưng vẫn có thể gửi thử.</p>}
+            @if(!selected.enabled){<p class="ec-note">{{t('Mẫu đang tắt: hệ thống sẽ không tự động gửi, nhưng vẫn có thể gửi thử.','This template is disabled: it will not be sent automatically, but test sends remain available.')}}</p>}
             @if(previewHtml){
-              <iframe class="ec-frame" title="Xem trước email" sandbox="" [attr.srcdoc]="previewHtml"></iframe>
+              <iframe class="ec-frame" [title]="t('Xem trước email','Email preview')" sandbox="" [attr.srcdoc]="previewHtml"></iframe>
             }
           } @else {
-            <p class="empty-row">Chọn một mẫu email để xem trước.</p>
+            <p class="empty-row">{{t('Chọn một mẫu email để xem trước.','Select an email template to preview.')}}</p>
           }
         </section>
       </div>
@@ -85,31 +85,31 @@ interface MailTemplateRow {
 
     @if(tab==='logs'){
       <section class="card ec-filters">
-        <label class="field"><span>Mẫu</span>
+        <label class="field"><span>{{t('Mẫu','Template')}}</span>
           <select class="control" [(ngModel)]="logFilter.template" (change)="reloadLogs()">
-            <option value="">Tất cả</option>
+            <option value="">{{t('Tất cả','All')}}</option>
             @for(t of templates;track t.key){<option [value]="t.key" translate="no">{{tName(t)}}</option>}
-            <option value="CUSTOM">Khác (CUSTOM)</option>
+            <option value="CUSTOM">{{t('Khác','Other')}} (CUSTOM)</option>
           </select>
         </label>
-        <label class="field"><span>Trạng thái</span>
+        <label class="field"><span>{{t('Trạng thái','Status')}}</span>
           <select class="control" [(ngModel)]="logFilter.status" (change)="reloadLogs()">
-            <option value="">Tất cả</option>
-            <option value="SENT">Đã gửi (SENT)</option>
+            <option value="">{{t('Tất cả','All')}}</option>
+            <option value="SENT">{{t('Đã gửi','Sent')}} (SENT)</option>
             <option value="DEV_FALLBACK">Dev (DEV_FALLBACK)</option>
-            <option value="FAILED">Thất bại (FAILED)</option>
+            <option value="FAILED">{{t('Thất bại','Failed')}} (FAILED)</option>
           </select>
         </label>
-        <label class="field ec-grow"><span>Tìm email / PNR</span>
-          <input class="control" [(ngModel)]="logFilter.q" (keyup.enter)="reloadLogs()" placeholder="vd: khach@example.com hoặc PNR8X2KQ" />
+        <label class="field ec-grow"><span>{{t('Tìm email / PNR','Search email / PNR')}}</span>
+          <input class="control" [(ngModel)]="logFilter.q" (keyup.enter)="reloadLogs()" [placeholder]="t('vd: khach@example.com hoặc PNR8X2KQ','e.g. customer@example.com or PNR8X2KQ')" />
         </label>
-        <button class="btn btn-outline" type="button" (click)="reloadLogs()">Lọc</button>
+        <button class="btn btn-outline" type="button" (click)="reloadLogs()">{{t('Lọc','Filter')}}</button>
       </section>
 
       <section class="card table-card">
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>Thời gian</th><th>Mẫu</th><th>Người nhận</th><th>Tiêu đề</th><th>PNR</th><th>Trạng thái</th></tr></thead>
+            <thead><tr><th>{{t('Thời gian','Time')}}</th><th>{{t('Mẫu','Template')}}</th><th>{{t('Người nhận','Recipient')}}</th><th>{{t('Tiêu đề','Subject')}}</th><th>PNR</th><th>{{t('Trạng thái','Status')}}</th></tr></thead>
             <tbody>
               @for(l of logs;track l._id){
                 <tr>
@@ -124,47 +124,47 @@ interface MailTemplateRow {
                   </td>
                 </tr>
               } @empty {
-                <tr><td colspan="6" class="empty-row">{{loadingLogs ? 'Đang tải…' : 'Chưa có email nào được ghi nhận.'}}</td></tr>
+                <tr><td colspan="6" class="empty-row">{{loadingLogs ? t('Đang tải…','Loading…') : t('Chưa có email nào được ghi nhận.','No email has been recorded yet.')}}</td></tr>
               }
             </tbody>
           </table>
         </div>
       </section>
       <div class="ec-pager">
-        <span>{{language.pick('Tổng','Total')}} {{logTotal}} email · {{language.pick('Trang','Page')}} {{logPage}}/{{logPages}}</span>
-        <button class="btn btn-outline compact" type="button" [disabled]="logPage<=1" (click)="goLogPage(logPage-1)">‹ Trước</button>
-        <button class="btn btn-outline compact" type="button" [disabled]="logPage>=logPages" (click)="goLogPage(logPage+1)">Sau ›</button>
+        <span>{{t('Tổng','Total')}} {{logTotal}} email · {{t('Trang','Page')}} {{logPage}}/{{logPages}}</span>
+        <button class="btn btn-outline compact" type="button" [disabled]="logPage<=1" (click)="goLogPage(logPage-1)">‹ {{t('Trước','Previous')}}</button>
+        <button class="btn btn-outline compact" type="button" [disabled]="logPage>=logPages" (click)="goLogPage(logPage+1)">{{t('Sau','Next')}} ›</button>
       </div>
     }
 
     @if(tab==='jobs'){
       <section class="card ec-jobs">
-        <p class="subtitle">Các tác vụ dưới đây vốn được cron chạy tự động. Dùng nút để chạy ngay khi demo — kết quả trả về sẽ hiển thị bên dưới, email đã gửi xuất hiện trong tab “Lịch sử gửi”.</p>
+        <p class="subtitle">{{t('Các tác vụ dưới đây vốn được cron chạy tự động. Dùng nút để chạy ngay khi demo — kết quả trả về sẽ hiển thị bên dưới, email đã gửi xuất hiện trong tab “Lịch sử gửi”.','These jobs normally run automatically by cron. Use the buttons to run them during a demo; results appear below and sent emails appear under Send history.')}}</p>
         <div class="ec-job">
           <div>
-            <strong>Gửi nhắc giữ chỗ ngay</strong>
-            <p>Cron <b>mỗi giờ</b>. Gửi email nhắc thanh toán cho vé <b>BLOCKED</b> chưa được nhắc, có chuyến khởi hành trong vòng <b>21 ngày</b> tới (yêu cầu nhắc trước 3 tuần) và chưa quá hạn giữ chỗ.</p>
+            <strong>{{t('Gửi nhắc giữ chỗ ngay','Send hold reminders now')}}</strong>
+            <p>{{t('Cron mỗi giờ. Gửi email nhắc thanh toán cho vé BLOCKED chưa được nhắc, có chuyến khởi hành trong vòng 21 ngày tới và chưa quá hạn giữ chỗ.','Hourly cron. Sends payment reminders for unreminded BLOCKED bookings departing within 21 days that have not expired.')}}</p>
           </div>
-          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-reminders')">Gửi nhắc giữ chỗ ngay</button>
+          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-reminders')">{{t('Gửi nhắc giữ chỗ ngay','Send hold reminders now')}}</button>
         </div>
         <div class="ec-job">
           <div>
-            <strong>Gửi nhắc chuyến sắp bay</strong>
-            <p>Cron <b>mỗi giờ</b>. Gửi email nhắc lịch cho vé <b>CONFIRMED/RESCHEDULED</b> có chặng khởi hành trong vòng <b>3 ngày</b>; mỗi hành trình chỉ nhắc một lần (đổi lịch sẽ nhắc lại).</p>
+            <strong>{{t('Gửi nhắc chuyến sắp bay','Send upcoming-trip reminders')}}</strong>
+            <p>{{t('Cron mỗi giờ. Gửi email nhắc lịch cho vé CONFIRMED/RESCHEDULED có chặng khởi hành trong vòng 3 ngày; mỗi hành trình chỉ nhắc một lần.','Hourly cron. Sends trip reminders for CONFIRMED/RESCHEDULED bookings with a leg departing within 3 days; each itinerary is reminded once.')}}</p>
           </div>
-          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-travel-reminders')">Gửi nhắc chuyến sắp bay</button>
+          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-travel-reminders')">{{t('Gửi nhắc chuyến sắp bay','Send upcoming-trip reminders')}}</button>
         </div>
         <div class="ec-job">
           <div>
-            <strong>Chạy hủy giữ chỗ hết hạn ngay</strong>
-            <p>Cron <b>mỗi giờ</b>. Hạn giữ chỗ là <b>14 ngày trước giờ khởi hành</b>; vé BLOCKED quá hạn sẽ bị tự động hủy, hoàn ghế về kho và gửi email “Giữ chỗ hết hạn”. (Đối soát ghế/saga chạy <b>mỗi 10 phút</b>.)</p>
+            <strong>{{t('Chạy hủy giữ chỗ hết hạn ngay','Cancel expired holds now')}}</strong>
+            <p>{{t('Cron mỗi giờ. Vé BLOCKED quá hạn giữ chỗ 14 ngày trước giờ khởi hành sẽ tự động bị hủy, hoàn ghế về kho và gửi email hết hạn.','Hourly cron. BLOCKED bookings that pass the 14-day pre-departure hold deadline are cancelled, their seats released and an expiry email sent.')}}</p>
           </div>
-          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-expiry')">Chạy hủy giữ chỗ hết hạn ngay</button>
+          <button class="btn btn-primary" type="button" [disabled]="running" (click)="run('run-expiry')">{{t('Chạy hủy giữ chỗ hết hạn ngay','Cancel expired holds now')}}</button>
         </div>
         @if(jobResult){
           <div class="ec-result">
-            <div class="eyebrow">{{language.pick('KẾT QUẢ','RESULT')}} · {{jobResult.label}} · {{jobResult.at | date:'HH:mm:ss'}}</div>
-            <p>{{jobResult.message}}</p>
+            <div class="eyebrow">{{t('KẾT QUẢ','RESULT')}} · {{t(jobResult.labelVi,jobResult.labelEn)}} · {{jobResult.at | date:'HH:mm:ss'}}</div>
+            <p>{{t(jobResult.messageVi,jobResult.messageEn)}}</p>
           </div>
         }
       </section>
@@ -228,7 +228,7 @@ export class EmailCenterComponent implements OnInit {
   logTotal = 0;
 
   running = false;
-  jobResult: { label: string; message: string; at: Date } | null = null;
+  jobResult: { labelVi: string; labelEn: string; messageVi: string; messageEn: string; at: Date } | null = null;
 
   ngOnInit() {
     this.loadTemplates();
@@ -337,6 +337,10 @@ export class EmailCenterComponent implements OnInit {
     return this.language.language() === 'en';
   }
 
+  t(vi: string, en: string) {
+    return this.language.pick(vi, en);
+  }
+
   tName(t: MailTemplateRow) {
     return (this.isEn && t.nameEn) || t.name;
   }
@@ -396,8 +400,10 @@ export class EmailCenterComponent implements OnInit {
       next: (res) => {
         this.running = false;
         this.jobResult = {
-          label: this.language.pick(labelsVi[job], labelsEn[job]),
-          message: this.language.pick(res?.messageVi || res?.message || JSON.stringify(res), res?.messageEn || res?.message || JSON.stringify(res)),
+          labelVi: labelsVi[job],
+          labelEn: labelsEn[job],
+          messageVi: res?.messageVi || res?.message || JSON.stringify(res),
+          messageEn: res?.messageEn || res?.message || JSON.stringify(res),
           at: new Date(),
         };
       },

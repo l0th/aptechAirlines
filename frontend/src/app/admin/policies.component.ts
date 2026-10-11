@@ -9,15 +9,15 @@ import { LanguageService } from '../core/language.service';
   standalone:true,
   imports:[FormsModule,PaginationComponent],
   template:`
-    <div class="eyebrow">QUY TẮC HOÀN TIỀN</div>
+    <div class="eyebrow">{{t('QUY TẮC HOÀN TIỀN','REFUND RULES')}}</div>
     <div class="section-head">
       <div>
-        <h1 class="title">Chính sách hủy vé</h1>
-        <p class="subtitle">Thiết lập mức hoàn tiền theo số ngày còn lại trước giờ khởi hành.</p>
+        <h1 class="title">{{t('Chính sách hủy vé','Refund policies')}}</h1>
+        <p class="subtitle">{{t('Thiết lập mức hoàn tiền theo số ngày còn lại trước giờ khởi hành.','Set the refund rate based on the number of days before departure.')}}</p>
       </div>
       <div class="head-actions">
-        <button class="btn btn-outline" (click)="load()">Làm mới</button>
-        <button class="btn btn-primary" (click)="createNew()">Tạo chính sách</button>
+        <button class="btn btn-outline" (click)="load()">{{t('Làm mới','Refresh')}}</button>
+        <button class="btn btn-primary" (click)="createNew()">{{t('Tạo chính sách','Create policy')}}</button>
       </div>
     </div>
 
@@ -29,10 +29,10 @@ import { LanguageService } from '../core/language.service';
         <table class="table policy-table">
           <thead>
             <tr>
-              <th>Khoảng ngày trước bay</th>
-              <th>Từ ngày</th>
-              <th>Đến ngày</th>
-              <th>Hoàn tiền</th>
+              <th>{{t('Khoảng ngày trước bay','Days before departure')}}</th>
+              <th>{{t('Từ ngày','Minimum days')}}</th>
+              <th>{{t('Đến ngày','Maximum days')}}</th>
+              <th>{{t('Hoàn tiền','Refund rate')}}</th>
               <th></th>
             </tr>
           </thead>
@@ -43,10 +43,10 @@ import { LanguageService } from '../core/language.service';
                 <td>{{p.min_days_before}}</td>
                 <td>{{p.max_days_before ?? '∞'}}</td>
                 <td><span class="pill pill-gold">{{p.refund_percentage}}%</span></td>
-                <td class="row-action"><button class="btn btn-outline compact" (click)="openDetail(p)">Chi tiết</button></td>
+                <td class="row-action"><button class="btn btn-outline compact" (click)="openDetail(p)">{{t('Chi tiết','Details')}}</button></td>
               </tr>
             } @empty {
-              <tr><td colspan="5" class="empty-row">Chưa có chính sách hủy vé.</td></tr>
+              <tr><td colspan="5" class="empty-row">{{t('Chưa có chính sách hủy vé.','No cancellation policies yet.')}}</td></tr>
             }
           </tbody>
         </table>
@@ -57,31 +57,31 @@ import { LanguageService } from '../core/language.service';
     @if(detailOpen){
       <div class="modal" (click)="closeDetail()">
         <section class="card detail-card" (click)="$event.stopPropagation()">
-          <button class="close" type="button" aria-label="Đóng" (click)="closeDetail()">×</button>
-          <div class="eyebrow">{{editing ? 'CHI TIẾT CHÍNH SÁCH' : 'CHÍNH SÁCH MỚI'}}</div>
-          <h2>{{editing ? rangeLabel(editing) : 'Tạo chính sách hủy vé'}}</h2>
-          <p class="modal-subtitle">Chỉ cần nhập khoảng ngày và tỷ lệ hoàn tiền.</p>
+          <button class="close" type="button" [attr.aria-label]="t('Đóng','Close')" (click)="closeDetail()">×</button>
+          <div class="eyebrow">{{editing ? t('CHI TIẾT CHÍNH SÁCH','POLICY DETAILS') : t('CHÍNH SÁCH MỚI','NEW POLICY')}}</div>
+          <h2>{{editing ? rangeLabel(editing) : t('Tạo chính sách hủy vé','Create cancellation policy')}}</h2>
+          <p class="modal-subtitle">{{t('Chỉ cần nhập khoảng ngày và tỷ lệ hoàn tiền.','Enter the day range and refund rate.')}}</p>
 
           <div class="form-grid">
             <label class="field">
-              <span>Từ ngày</span>
+              <span>{{t('Từ ngày','Minimum days')}}</span>
               <input class="control" type="number" min="0" step="1" [(ngModel)]="form.min_days_before">
             </label>
             <label class="field">
-              <span>Đến ngày</span>
-              <input class="control" type="number" min="0" step="1" [(ngModel)]="form.max_days_before" placeholder="Bỏ trống = ∞">
+              <span>{{t('Đến ngày','Maximum days')}}</span>
+              <input class="control" type="number" min="0" step="1" [(ngModel)]="form.max_days_before" [placeholder]="t('Bỏ trống = ∞','Leave blank = ∞')">
             </label>
             <label class="field full">
-              <span>Hoàn tiền %</span>
+              <span>{{t('Hoàn tiền %','Refund rate %')}}</span>
               <input class="control" type="number" min="0" max="100" step="1" [(ngModel)]="form.refund_percentage">
             </label>
           </div>
 
           <div class="modal-actions">
-            @if(editing){<button class="btn btn-outline danger" type="button" (click)="requestRemove(editing)" [disabled]="busy">Xóa chính sách</button>}
+            @if(editing){<button class="btn btn-outline danger" type="button" (click)="requestRemove(editing)" [disabled]="busy">{{t('Xóa chính sách','Delete policy')}}</button>}
             <span class="action-spacer"></span>
-            <button class="btn btn-outline" type="button" (click)="closeDetail()" [disabled]="busy">Đóng</button>
-            <button class="btn btn-primary" type="button" (click)="save()" [disabled]="busy">{{busy ? 'Đang lưu...' : (editing ? 'Lưu thay đổi' : 'Tạo chính sách')}}</button>
+            <button class="btn btn-outline" type="button" (click)="closeDetail()" [disabled]="busy">{{t('Đóng','Close')}}</button>
+            <button class="btn btn-primary" type="button" (click)="save()" [disabled]="busy">{{busy ? t('Đang lưu...','Saving...') : (editing ? t('Lưu thay đổi','Save changes') : t('Tạo chính sách','Create policy'))}}</button>
           </div>
         </section>
       </div>

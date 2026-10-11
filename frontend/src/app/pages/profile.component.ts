@@ -45,7 +45,7 @@ import { localCalendarDate } from '../core/date-format.util';
             <div class="field"><span>{{language.pick('Điện thoại','Phone number')}}</span><input class="control" [(ngModel)]="model.phone_number"></div>
             <div class="field"><span>{{language.pick('Giới tính','Gender')}}</span><select class="control" [(ngModel)]="model.sex"><option value="MALE">{{language.pick('Nam','Male')}}</option><option value="FEMALE">{{language.pick('Nữ','Female')}}</option><option value="OTHER">{{language.pick('Khác','Other')}}</option></select></div>
             <div class="field"><span>{{language.pick('Tuổi','Age')}}</span><input class="control" type="number" min="0" [(ngModel)]="model.age"></div>
-            <div class="field"><span>CCCD / Passport</span><input class="control" [(ngModel)]="model.id_card_or_passport" autocomplete="off"></div>
+            <div class="field"><span>{{language.pick('CCCD / Hộ chiếu','National ID / Passport')}}</span><input class="control" [(ngModel)]="model.id_card_or_passport" autocomplete="off"></div>
             <div class="field"><span>{{language.pick('Quốc tịch','Nationality')}}</span><input class="control" [(ngModel)]="model.nationality" autocomplete="country-name"></div>
             <div class="field"><span>{{language.pick('Ngày sinh','Date of birth')}}</span><app-date-input [(ngModel)]="model.date_of_birth" [max]="today"/></div>
           </div>

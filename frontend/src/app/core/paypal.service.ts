@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from './api.service';
+import { LanguageService } from './language.service';
 
 declare global {
   interface Window { paypal?: any; }
@@ -9,6 +10,7 @@ declare global {
 @Injectable({providedIn:'root'})
 export class PaypalService {
   private api=inject(ApiService);
+  private language=inject(LanguageService);
   private sdkPromise?:Promise<any>;
   private prepared?:{sdk:any;paypalEligible:boolean};
 
@@ -19,8 +21,8 @@ export class PaypalService {
       : 'https://www.paypal.com/web-sdk/v6/core';
     return new Promise((resolve,reject)=>{
       const existing=document.querySelector(`script[src="${src}"]`) as HTMLScriptElement|null;
-      if(existing){existing.addEventListener('load',()=>resolve(),{once:true});existing.addEventListener('error',()=>reject(new Error('Không tải được PayPal Web SDK.')),{once:true});return;}
-      const script=document.createElement('script');script.src=src;script.async=true;script.onload=()=>resolve();script.onerror=()=>reject(new Error('Không tải được PayPal Web SDK.'));document.head.appendChild(script);
+      if(existing){existing.addEventListener('load',()=>resolve(),{once:true});existing.addEventListener('error',()=>reject(new Error(this.language.pick('Không tải được PayPal Web SDK.','Could not load the PayPal Web SDK.'))),{once:true});return;}
+      const script=document.createElement('script');script.src=src;script.async=true;script.onload=()=>resolve();script.onerror=()=>reject(new Error(this.language.pick('Không tải được PayPal Web SDK.','Could not load the PayPal Web SDK.')));document.head.appendChild(script);
     });
   }
 
@@ -28,9 +30,9 @@ export class PaypalService {
     if(this.sdkPromise)return this.sdkPromise;
     this.sdkPromise=(async()=>{
       const cfg=await firstValueFrom(this.api.paypalConfig());
-      if(!cfg?.enabled||!cfg?.client_id)throw new Error('PayPal Sandbox chưa được bật hoặc thiếu client id.');
+      if(!cfg?.enabled||!cfg?.client_id)throw new Error(this.language.pick('PayPal Sandbox chưa được bật hoặc thiếu client id.','PayPal Sandbox is disabled or the client ID is missing.'));
       await this.loadScript(cfg.environment||'sandbox');
-      if(!window.paypal?.createInstance)throw new Error('PayPal Web SDK không khởi tạo được.');
+      if(!window.paypal?.createInstance)throw new Error(this.language.pick('PayPal Web SDK không khởi tạo được.','Could not initialize the PayPal Web SDK.'));
       return window.paypal.createInstance({clientId:cfg.client_id,components:['paypal-payments'],pageType:'checkout',locale:'en-US'});
     })().catch(e=>{this.sdkPromise=undefined;throw e});
     return this.sdkPromise;
@@ -47,11 +49,11 @@ export class PaypalService {
   async pay(createOrder:()=>Promise<{orderId:string}>,approve:(orderId:string)=>Promise<void>){
     if(!this.prepared)await this.prepare();
     const sdk=this.prepared!.sdk;
-    if(!this.prepared!.paypalEligible)throw new Error('PayPal không khả dụng cho phiên này.');
+    if(!this.prepared!.paypalEligible)throw new Error(this.language.pick('PayPal không khả dụng cho phiên này.','PayPal is unavailable for this session.'));
     let callbackError:any=null;
     const session=sdk.createPayPalOneTimePaymentSession({
       onApprove:async(data:any)=>{try{await approve(data.orderId)}catch(e){callbackError=e}},
-      onCancel:()=>{callbackError=new Error('Bạn đã hủy thanh toán PayPal.')},
+      onCancel:()=>{callbackError=new Error(this.language.pick('Bạn đã hủy thanh toán PayPal.','You canceled the PayPal payment.'))},
       onError:(e:any)=>{callbackError=e},
     });
     // PayPal Web SDK v6 validates the order argument with the page's global

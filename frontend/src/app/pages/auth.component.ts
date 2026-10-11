@@ -15,70 +15,70 @@ import { safeReturnPath } from '../core/guards';
     <div class="auth-bg">
       <div class="card auth-card">
         <div class="tabs">
-          <button [class.on]="mode==='login'" (click)="switchMode('login')">Đăng nhập</button>
-          <button [class.on]="mode==='register'" (click)="switchMode('register')">Đăng ký</button>
+          <button [class.on]="mode==='login'" (click)="switchMode('login')">{{pick('Đăng nhập','Log in')}}</button>
+          <button [class.on]="mode==='register'" (click)="switchMode('register')">{{pick('Đăng ký','Register')}}</button>
         </div>
 
         @if(mode==='login'){
-          <h1>Chào mừng trở lại</h1>
-          <p class="muted">Đăng nhập để giữ chỗ, mua vé và quản lý hành trình.</p>
+          <h1>{{pick('Chào mừng trở lại','Welcome back')}}</h1>
+          <p class="muted">{{pick('Đăng nhập để giữ chỗ, mua vé và quản lý hành trình.','Log in to hold bookings, buy tickets and manage your trips.')}}</p>
           <div class="field">
-            <span>Tên đăng nhập</span>
+            <span>{{pick('Tên đăng nhập','Username')}}</span>
             <input class="control" [(ngModel)]="login.username" autocomplete="username" (keyup.enter)="submit()">
           </div>
           <div class="field">
-            <span>Mật khẩu</span>
+            <span>{{pick('Mật khẩu','Password')}}</span>
             <div class="password-control">
               <input class="control" [type]="showLoginPassword?'text':'password'" [(ngModel)]="login.password" autocomplete="current-password" (keyup.enter)="submit()">
-              <button type="button" class="password-toggle" (click)="showLoginPassword=!showLoginPassword" [attr.aria-label]="showLoginPassword?'Ẩn mật khẩu':'Hiện mật khẩu'">
+              <button type="button" class="password-toggle" (click)="showLoginPassword=!showLoginPassword" [attr.aria-label]="showLoginPassword?pick('Ẩn mật khẩu','Hide password'):pick('Hiện mật khẩu','Show password')">
                 <app-icon [name]="showLoginPassword?'eye-off':'eye'" [size]="18"/>
               </button>
             </div>
           </div>
-          <button type="button" class="forgot-link" (click)="openForgot()">Quên mật khẩu?</button>
+          <button type="button" class="forgot-link" (click)="openForgot()">{{pick('Quên mật khẩu?','Forgot password?')}}</button>
         }@else if(mode==='register'){
-          <h1>Tạo tài khoản</h1>
-          <p class="muted">Giao dịch giữ chỗ, mua, đổi và hủy vé dành cho người dùng đã đăng ký.</p>
+          <h1>{{pick('Tạo tài khoản','Create account')}}</h1>
+          <p class="muted">{{pick('Giao dịch giữ chỗ, mua, đổi và hủy vé dành cho người dùng đã đăng ký.','Register to hold, purchase, reschedule and cancel tickets.')}}</p>
           <div class="grid grid-2">
-            <div class="field"><span>Tên đăng nhập</span><input class="control" [(ngModel)]="reg.username" autocomplete="username"></div>
+            <div class="field"><span>{{pick('Tên đăng nhập','Username')}}</span><input class="control" [(ngModel)]="reg.username" autocomplete="username"></div>
             <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="reg.email" autocomplete="email"></div>
-            <div class="field"><span>Họ</span><input class="control" [(ngModel)]="reg.first_name" autocomplete="family-name"></div>
-            <div class="field"><span>Tên</span><input class="control" [(ngModel)]="reg.last_name" autocomplete="given-name"></div>
-            <div class="field"><span>Số điện thoại</span><input class="control" [(ngModel)]="reg.phone_number" autocomplete="tel" placeholder="+84 912 345 678"></div>
+            <div class="field"><span>{{pick('Họ','Last name')}}</span><input class="control" [(ngModel)]="reg.first_name" autocomplete="family-name"></div>
+            <div class="field"><span>{{pick('Tên','First name')}}</span><input class="control" [(ngModel)]="reg.last_name" autocomplete="given-name"></div>
+            <div class="field"><span>{{pick('Số điện thoại','Phone number')}}</span><input class="control" [(ngModel)]="reg.phone_number" autocomplete="tel" placeholder="+84 912 345 678"></div>
             <div class="field">
-              <span>Giới tính</span>
+              <span>{{pick('Giới tính','Gender')}}</span>
               <select class="control" [(ngModel)]="reg.sex">
                 <option value="MALE">{{lang.pick('Nam','Male')}}</option>
                 <option value="FEMALE">{{lang.pick('Nữ','Female')}}</option>
                 <option value="OTHER">{{lang.pick('Khác','Other')}}</option>
               </select>
             </div>
-            <div class="field"><span>Tuổi</span><input class="control" type="number" min="0" step="1" [(ngModel)]="reg.age"></div>
+            <div class="field"><span>{{pick('Tuổi','Age')}}</span><input class="control" type="number" min="0" step="1" [(ngModel)]="reg.age"></div>
           </div>
-          <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="reg.address" autocomplete="street-address"></div>
-          <div class="field"><span>Mật khẩu</span><div class="password-control"><input class="control" [type]="showRegisterPassword?'text':'password'" minlength="6" [(ngModel)]="reg.password" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showRegisterPassword=!showRegisterPassword" [attr.aria-label]="showRegisterPassword?'Ẩn mật khẩu':'Hiện mật khẩu'"><app-icon [name]="showRegisterPassword?'eye-off':'eye'" [size]="18"/></button></div><small>Tối thiểu 6 ký tự.</small></div>
+          <div class="field"><span>{{pick('Địa chỉ','Address')}}</span><input class="control" [(ngModel)]="reg.address" autocomplete="street-address"></div>
+          <div class="field"><span>{{pick('Mật khẩu','Password')}}</span><div class="password-control"><input class="control" [type]="showRegisterPassword?'text':'password'" minlength="6" [(ngModel)]="reg.password" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showRegisterPassword=!showRegisterPassword" [attr.aria-label]="showRegisterPassword?pick('Ẩn mật khẩu','Hide password'):pick('Hiện mật khẩu','Show password')"><app-icon [name]="showRegisterPassword?'eye-off':'eye'" [size]="18"/></button></div><small>{{pick('Tối thiểu 6 ký tự.','At least 6 characters.')}}</small></div>
         }@else if(mode==='forgot'){
-          <h1>Quên mật khẩu</h1>
-          <p class="muted">Nhập email đã đăng ký. Hệ thống sẽ gửi mã xác nhận 6 số có hiệu lực trong 10 phút.</p>
+          <h1>{{pick('Quên mật khẩu','Forgot password')}}</h1>
+          <p class="muted">{{pick('Nhập email đã đăng ký. Hệ thống sẽ gửi mã xác nhận 6 số có hiệu lực trong 10 phút.','Enter your registered email. We will send a six-digit verification code valid for 10 minutes.')}}</p>
           <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="forgotEmail" autocomplete="email" (keyup.enter)="requestResetCode()"></div>
-          <button class="btn btn-primary submit" (click)="requestResetCode()" [disabled]="busy">{{busy?'Đang gửi…':'Gửi mã xác nhận'}}</button>
-          <button type="button" class="back-link" (click)="switchMode('login')">Quay lại đăng nhập</button>
+          <button class="btn btn-primary submit" (click)="requestResetCode()" [disabled]="busy">{{busy?pick('Đang gửi…','Sending…'):pick('Gửi mã xác nhận','Send verification code')}}</button>
+          <button type="button" class="back-link" (click)="switchMode('login')">{{pick('Quay lại đăng nhập','Back to login')}}</button>
         }@else{
-          <h1>Đặt lại mật khẩu</h1>
-          <p class="muted">Nhập mã 6 số đã gửi về email và đặt mật khẩu mới.</p>
+          <h1>{{pick('Đặt lại mật khẩu','Reset password')}}</h1>
+          <p class="muted">{{pick('Nhập mã 6 số đã gửi về email và đặt mật khẩu mới.','Enter the six-digit code sent to your email and choose a new password.')}}</p>
           <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="reset.email" autocomplete="email"></div>
-          <div class="field"><span>Mã xác nhận</span><input class="control code-input" inputmode="numeric" maxlength="6" [(ngModel)]="reset.code" autocomplete="one-time-code" placeholder="000000"></div>
-          <div class="field"><span>Mật khẩu mới</span><div class="password-control"><input class="control" [type]="showResetPassword?'text':'password'" minlength="6" [(ngModel)]="reset.password" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showResetPassword=!showResetPassword" [attr.aria-label]="showResetPassword?'Ẩn mật khẩu':'Hiện mật khẩu'"><app-icon [name]="showResetPassword?'eye-off':'eye'" [size]="18"/></button></div></div>
-          <div class="field"><span>Nhập lại mật khẩu mới</span><div class="password-control"><input class="control" [type]="showResetConfirm?'text':'password'" minlength="6" [(ngModel)]="reset.confirm" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showResetConfirm=!showResetConfirm" [attr.aria-label]="showResetConfirm?'Ẩn mật khẩu':'Hiện mật khẩu'"><app-icon [name]="showResetConfirm?'eye-off':'eye'" [size]="18"/></button></div></div>
-          <button class="btn btn-primary submit" (click)="submitResetPassword()" [disabled]="busy">{{busy?'Đang đổi…':'Đổi mật khẩu'}}</button>
-          <div class="reset-links"><button type="button" class="back-link" (click)="requestResetCode()">Gửi lại mã</button><button type="button" class="back-link" (click)="switchMode('login')">Quay lại đăng nhập</button></div>
+          <div class="field"><span>{{pick('Mã xác nhận','Verification code')}}</span><input class="control code-input" inputmode="numeric" maxlength="6" [(ngModel)]="reset.code" autocomplete="one-time-code" placeholder="000000"></div>
+          <div class="field"><span>{{pick('Mật khẩu mới','New password')}}</span><div class="password-control"><input class="control" [type]="showResetPassword?'text':'password'" minlength="6" [(ngModel)]="reset.password" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showResetPassword=!showResetPassword" [attr.aria-label]="showResetPassword?pick('Ẩn mật khẩu','Hide password'):pick('Hiện mật khẩu','Show password')"><app-icon [name]="showResetPassword?'eye-off':'eye'" [size]="18"/></button></div></div>
+          <div class="field"><span>{{pick('Nhập lại mật khẩu mới','Confirm new password')}}</span><div class="password-control"><input class="control" [type]="showResetConfirm?'text':'password'" minlength="6" [(ngModel)]="reset.confirm" autocomplete="new-password"><button type="button" class="password-toggle" (click)="showResetConfirm=!showResetConfirm" [attr.aria-label]="showResetConfirm?pick('Ẩn mật khẩu','Hide password'):pick('Hiện mật khẩu','Show password')"><app-icon [name]="showResetConfirm?'eye-off':'eye'" [size]="18"/></button></div></div>
+          <button class="btn btn-primary submit" (click)="submitResetPassword()" [disabled]="busy">{{busy?pick('Đang đổi…','Updating…'):pick('Đổi mật khẩu','Change password')}}</button>
+          <div class="reset-links"><button type="button" class="back-link" (click)="requestResetCode()">{{pick('Gửi lại mã','Resend code')}}</button><button type="button" class="back-link" (click)="switchMode('login')">{{pick('Quay lại đăng nhập','Back to login')}}</button></div>
         }
 
         
         
         @if(mode==='login'||mode==='register'){
           <button class="btn btn-primary submit" (click)="submit()" [disabled]="busy">
-            {{busy?'Đang xử lý…':mode==='login'?'Đăng nhập':'Tạo tài khoản'}}
+            {{busy?pick('Đang xử lý…','Processing…'):mode==='login'?pick('Đăng nhập','Log in'):pick('Tạo tài khoản','Create account')}}
           </button>
         }
       </div>
@@ -259,5 +259,9 @@ export class AuthComponent {
 
   private t(message: string) {
     return this.lang.translate(message);
+  }
+
+  pick(vi: string, en: string) {
+    return this.lang.pick(vi, en);
   }
 }

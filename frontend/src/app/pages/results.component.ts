@@ -14,25 +14,25 @@ import { formatCalendarDate } from '../core/date-format.util';
   template:`
     <section class="results-head">
       <div class="container result-bar">
-        <button class="btn back" (click)="router.navigate(['/'])">← Sửa tìm kiếm</button>
+        <button class="btn back" (click)="router.navigate(['/'])">{{t('← Sửa tìm kiếm','← Edit search')}}</button>
         <div class="summary-title">
-          <div class="eyebrow gold">KẾT QUẢ CHUYẾN BAY</div>
+          <div class="eyebrow gold">{{t('KẾT QUẢ CHUYẾN BAY','FLIGHT RESULTS')}}</div>
           <h1 translate="no">{{q['origin']}} <span>→</span> {{q['destination']}}</h1>
-          <p><span translate="no">{{outboundDateLabel}}{{returnDateLabel ? ' → '+returnDateLabel : ''}} · {{passengers}} {{language.pick('hành khách', 'passengers')}}</span> · So sánh mọi hạng vé</p>
+          <p><span translate="no">{{outboundDateLabel}}{{returnDateLabel ? ' → '+returnDateLabel : ''}} · {{passengers}} {{t('hành khách', 'passengers')}}</span> · {{t('So sánh mọi hạng vé','Compare all cabins')}}</p>
         </div>
       </div>
     </section>
 
     <main class="container page">
       @if(loading){
-        <div class="card empty"><h2>Đang tìm chuyến phù hợp…</h2><p class="muted">Kiểm tra chuyến thẳng, nối chuyến, giá và số ghế.</p></div>
+        <div class="card empty"><h2>{{t('Đang tìm chuyến phù hợp…','Searching for eligible flights…')}}</h2><p class="muted">{{t('Kiểm tra chuyến thẳng, nối chuyến, giá và số ghế.','Checking direct and connecting flights, fares and seat availability.')}}</p></div>
       }@else if(error){
-        <div class="card empty"><h2>Không tải được kết quả</h2><p class="error">{{error}}</p></div>
+        <div class="card empty"><h2>{{t('Không tải được kết quả','Unable to load results')}}</h2><p class="error">{{error}}</p></div>
       }@else{
         @if(unresolvedLocations.length){
           <div class="card location-alert location-error">
             <app-icon name="search" [size]="20"/>
-            <div><strong>{{language.pick('Chưa nhận diện được','Could not identify')}} {{unresolvedLocations.join(language.pick(' và ',' and '))}}</strong><p>Hãy quay lại và chọn thành phố hoặc sân bay từ danh sách gợi ý để tìm chính xác hơn.</p></div>
+            <div><strong>{{t('Chưa nhận diện được','Could not identify')}} {{unresolvedLocations.join(t(' và ',' and '))}}</strong><p>{{t('Hãy quay lại và chọn thành phố hoặc sân bay từ danh sách gợi ý để tìm chính xác hơn.','Go back and select a city or airport from the suggestions for an accurate search.')}}</p></div>
           </div>
         }
         @for(message of locationNotices;track message){
@@ -44,7 +44,7 @@ import { formatCalendarDate } from '../core/date-format.util';
         <section class="direction">
           <div class="section-head">
             <div><div class="eyebrow">{{language.pick('CHIỀU ĐI','OUTBOUND')}} · {{outboundDateLabel}}</div><h2 translate="no">{{q['origin']}} → {{q['destination']}}</h2></div>
-            @if(selectedOutbound){<span class="pill pill-success">Đã chọn chiều đi</span>}
+            @if(selectedOutbound){<span class="pill pill-success">{{t('Đã chọn chiều đi','Outbound selected')}}</span>}
           </div>
           <ng-container *ngTemplateOutlet="flightGroup; context:{direct:direct, connections:connections, direction:'OUTBOUND'}"/>
         </section>
@@ -53,16 +53,16 @@ import { formatCalendarDate } from '../core/date-format.util';
           <section class="direction return-block" [class.dimmed]="!selectedOutbound">
             <div class="section-head">
               <div><div class="eyebrow">{{language.pick('CHIỀU VỀ','RETURN')}} · {{returnDateLabel}}</div><h2 translate="no">{{q['destination']}} → {{q['origin']}}</h2></div>
-              @if(selectedInbound){<span class="pill pill-success">Đã chọn chiều về</span>}
+              @if(selectedInbound){<span class="pill pill-success">{{t('Đã chọn chiều về','Return selected')}}</span>}
             </div>
-            @if(!selectedOutbound){<div class="notice">Chọn chuyến đi trước, sau đó chọn chuyến về.</div>}
+            @if(!selectedOutbound){<div class="notice">{{t('Chọn chuyến đi trước, sau đó chọn chuyến về.','Select the outbound flight before choosing the return flight.')}}</div>}
             <ng-container *ngTemplateOutlet="flightGroup; context:{direct:returnDirect, connections:returnConnections, direction:'INBOUND'}"/>
           </section>
         }
 
         @if(policies.length){
           <section class="card policies">
-            <div><div class="eyebrow">CHÍNH SÁCH HỦY VÉ</div><h3>Hoàn tiền theo thời điểm hủy</h3><p>Áp dụng theo số ngày còn lại trước chuyến khởi hành sớm nhất.</p></div>
+            <div><div class="eyebrow">{{t('CHÍNH SÁCH HỦY VÉ','CANCELLATION POLICY')}}</div><h3>{{t('Hoàn tiền theo thời điểm hủy','Refund based on cancellation time')}}</h3><p>{{t('Áp dụng theo số ngày còn lại trước chuyến khởi hành sớm nhất.','Calculated from the number of days before the earliest departure.')}}</p></div>
             <div class="policy-list">
               @for(p of policies;track p._id){<span><b>{{p.refund_percentage}}%</b><small>{{p.min_days_before}} – {{p.max_days_before??'∞'}} {{language.pick('ngày','days')}}</small></span>}
             </div>
@@ -71,22 +71,22 @@ import { formatCalendarDate } from '../core/date-format.util';
 
         @if(isRoundTrip && selectedOutbound && selectedInbound){
           <div class="continue card">
-            <div><strong>Đã chọn đủ hành trình khứ hồi</strong><span translate="no">{{selectionText(selectedOutbound)}} · {{selectionText(selectedInbound)}}</span></div>
-            <button class="btn btn-primary" (click)="continueRoundTrip()">Tiếp tục nhập hành khách</button>
+            <div><strong>{{t('Đã chọn đủ hành trình khứ hồi','Round trip selected')}}</strong><span translate="no">{{selectionText(selectedOutbound)}} · {{selectionText(selectedInbound)}}</span></div>
+            <button class="btn btn-primary" (click)="continueRoundTrip()">{{t('Tiếp tục nhập hành khách','Continue to passengers')}}</button>
           </div>
         }
 
         <ng-template #flightGroup let-direct="direct" let-connections="connections" let-direction="direction">
           @if(direct.length){
-            <div class="group-title">Chuyến bay thẳng</div>
+            <div class="group-title">{{t('Chuyến bay thẳng','Direct flights')}}</div>
             @for(f of direct;track directKey(f)){
               <article class="card flight" [class.chosen]="isDirectChosen(f,direction)">
                 <div class="code"><small>APTECH AIRLINES · {{dateLabel(f)}}</small><strong translate="no">{{f.flight_number}}</strong>@if(f.early_bird_label){<span class="pill pill-gold">{{f.early_bird_label}}</span>}@if(f.load_adjustment_percent){<span class="pill pill-success">{{f.load_adjustment_label}} {{f.load_adjustment_percent>0?'+':''}}{{f.load_adjustment_percent}}%</span>}@if(f.pricing_profile_name){<small translate="no">{{f.pricing_profile_name}}</small>}</div>
                 <div class="time"><strong>{{clock(f.scheduled_departure_local||f.scheduled_departure)}}</strong><span>{{f.origin_iata}}</span></div>
-                <div class="line"><span>{{duration(f.duration_minutes)}}</span><i></i><small>Bay thẳng</small></div>
+                <div class="line"><span>{{duration(f.duration_minutes)}}</span><i></i><small>{{t('Bay thẳng','Direct')}}</small></div>
                 <div class="time right"><strong>{{clock(f.scheduled_arrival_local||f.scheduled_arrival)}}</strong><span>{{f.dest_iata}}</span></div>
                 <div class="fare-options">
-                  <span class="fare-heading">Chọn hạng vé</span>
+                  <span class="fare-heading">{{t('Chọn hạng vé','Select cabin')}}</span>
                   @for(v of f.variants;track v.inventory_id){
                     <div class="fare-option" [class.on]="isDirectCabinChosen(f,v,direction)">
                       <div><b translate="no">{{label(v.cabin_class)}}</b><small translate="no">{{language.pick('Còn', 'Available:')}} {{v.available_seats}} {{language.pick('ghế', 'seats')}}</small></div>
@@ -100,7 +100,7 @@ import { formatCalendarDate } from '../core/date-format.util';
           }
 
           @if(connections.length){
-            <div class="group-title connect-title">Chuyến bay nối</div>
+            <div class="group-title connect-title">{{t('Chuyến bay nối','Connecting flights')}}</div>
             @for(r of connections;track routeKey(r,$index)){
               <article class="card connection" [class.chosen]="isConnectionChosen(r,direction)">
                 <div class="conn-head"><div><span class="pill pill-gold">{{r.legs?.length||2}} {{language.pick('chặng','legs')}} · {{dateLabel(r.legs?.[0])}}</span><h3 translate="no">{{r.legs?.[0]?.origin_iata}} → {{r.transit_airport||'Transit'}} → {{r.legs?.[r.legs.length-1]?.dest_iata}}</h3></div><b>{{duration(r.total_duration_minutes)}}</b></div>
@@ -122,7 +122,7 @@ import { formatCalendarDate } from '../core/date-format.util';
           }
 
           @if(!direct.length&&!connections.length){
-            <div class="card empty"><h2>Không tìm thấy chuyến bay phù hợp</h2><p class="muted">Hiện chưa có chuyến bay phù hợp với ngày và hành trình bạn đã chọn. Vui lòng thử ngày khác hoặc sân bay khác.</p></div>
+            <div class="card empty"><h2>{{t('Không tìm thấy chuyến bay phù hợp','No eligible flights found')}}</h2><p class="muted">{{t('Hiện chưa có chuyến bay phù hợp với ngày và hành trình bạn đã chọn. Vui lòng thử ngày khác hoặc sân bay khác.','No flight currently matches your selected date and route. Try another date or airport.')}}</p></div>
           }
         </ng-template>
       }
@@ -136,6 +136,7 @@ export class ResultsComponent{
   /** Validation/API messages are shown as global toasts instead of inline banners. */
   private __toast=inject(ToastService);
   readonly language=inject(LanguageService);
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   private route=inject(ActivatedRoute);
   private api=inject(ApiService);
   private state=inject(BookingStateService);

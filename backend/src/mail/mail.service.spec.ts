@@ -415,8 +415,8 @@ describe('MailService', () => {
       expect(html).toContain('Flight Status:');
       expect(html).toContain('DELAYED');
       expect(html).toContain('Technical inspection requirement');
-      expect(html).toContain('2026-10-28 10:00 (Asia/Ho_Chi_Minh)');
-      expect(html).toContain('2026-10-28 13:00 (Asia/Ho_Chi_Minh)');
+      expect(html).toContain('28/10/2026 10:00 (Asia/Ho_Chi_Minh)');
+      expect(html).toContain('28/10/2026 13:00 (Asia/Ho_Chi_Minh)');
       expect(html).toContain('Please use Track Booking to check the latest flight status and trip details.');
     });
   });

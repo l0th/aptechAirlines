@@ -8,47 +8,47 @@ import { LanguageService } from '../core/language.service';
 @Component({
   standalone:true,
   template:`
-    <div class="eyebrow">VẬN HÀNH</div>
+    <div class="eyebrow">{{t('VẬN HÀNH','OPERATIONS')}}</div>
     <div class="section-head">
-      <div><h1 class="title">Bảng điều khiển</h1><p class="subtitle">Tổng quan đặt chỗ, doanh thu, hành vi khách hàng và mức sử dụng ghế.</p></div>
-      <button class="btn btn-outline" (click)="load()">Làm mới</button>
+      <div><h1 class="title">{{t('Bảng điều khiển','Dashboard')}}</h1><p class="subtitle">{{t('Tổng quan đặt chỗ, doanh thu, hành vi khách hàng và mức sử dụng ghế.','Overview of bookings, revenue, customer behavior and seat utilization.')}}</p></div>
+      <button class="btn btn-outline" (click)="load()">{{t('Làm mới','Refresh')}}</button>
     </div>
 
     
     <div class="grid grid-4 stats">
-      <div class="card"><span>Đặt chỗ</span><strong>{{data?.total_bookings??'—'}}</strong><small>{{data?.status_breakdown?.confirmed||0}} {{language.pick('đã xác nhận','confirmed')}}</small></div>
-      <div class="card"><span>Doanh thu ròng</span><strong>{{money(data?.net_revenue_vnd||0)}}</strong><small>Dựa trên sổ giao dịch</small></div>
-      <div class="card"><span>Giá trị đang hoạt động</span><strong>{{money(data?.active_booking_value_vnd||0)}}</strong><small>Đã xác nhận + đã đổi chuyến</small></div>
-      <div class="card"><span>Hệ số lấp đầy</span><strong>{{capacity?.overall_load_factor_percent??'—'}}{{capacity?'%':''}}</strong><small>{{capacity?.total_scheduled_flights||0}} {{language.pick('chuyến bay theo lịch','scheduled flights')}}</small></div>
+      <div class="card"><span>{{t('Đặt chỗ','Bookings')}}</span><strong>{{data?.total_bookings??'—'}}</strong><small>{{data?.status_breakdown?.confirmed||0}} {{t('đã xác nhận','confirmed')}}</small></div>
+      <div class="card"><span>{{t('Doanh thu ròng','Net revenue')}}</span><strong>{{money(data?.net_revenue_vnd||0)}}</strong><small>{{t('Dựa trên sổ giao dịch','Based on the transaction ledger')}}</small></div>
+      <div class="card"><span>{{t('Giá trị đang hoạt động','Active booking value')}}</span><strong>{{money(data?.active_booking_value_vnd||0)}}</strong><small>{{t('Đã xác nhận + đã đổi chuyến','Confirmed + rescheduled')}}</small></div>
+      <div class="card"><span>{{t('Hệ số lấp đầy','Load factor')}}</span><strong>{{capacity?.overall_load_factor_percent??'—'}}{{capacity?'%':''}}</strong><small>{{capacity?.total_scheduled_flights||0}} {{t('chuyến bay theo lịch','scheduled flights')}}</small></div>
     </div>
 
     <div class="dashboard-grid">
       <section class="card panel">
-        <div class="panel-head"><h2>Trạng thái đặt chỗ</h2><span>{{language.pick('Tỷ lệ hủy','Cancellation rate')}} {{data?.cancellation_rate_percent||0}}%</span></div>
+        <div class="panel-head"><h2>{{t('Trạng thái đặt chỗ','Booking status')}}</h2><span>{{t('Tỷ lệ hủy','Cancellation rate')}} {{data?.cancellation_rate_percent||0}}%</span></div>
         <div class="status-grid">
-          <div><span>Đã xác nhận</span><b>{{data?.status_breakdown?.confirmed||0}}</b></div>
-          <div><span>Đang giữ chỗ</span><b>{{data?.status_breakdown?.blocked||0}}</b></div>
-          <div><span>Đã đổi chuyến</span><b>{{data?.status_breakdown?.rescheduled||0}}</b></div>
-          <div><span>Đã hủy</span><b>{{data?.status_breakdown?.cancelled||0}}</b></div>
+          <div><span>{{t('Đã xác nhận','Confirmed')}}</span><b>{{data?.status_breakdown?.confirmed||0}}</b></div>
+          <div><span>{{t('Đang giữ chỗ','On hold')}}</span><b>{{data?.status_breakdown?.blocked||0}}</b></div>
+          <div><span>{{t('Đã đổi chuyến','Rescheduled')}}</span><b>{{data?.status_breakdown?.rescheduled||0}}</b></div>
+          <div><span>{{t('Đã hủy','Cancelled')}}</span><b>{{data?.status_breakdown?.cancelled||0}}</b></div>
         </div>
       </section>
 
       <section class="card panel">
-        <div class="panel-head"><h2>Cơ cấu hành khách</h2><span>{{language.pick('Đặt trước','Lead time')}} {{data?.average_lead_time_days||0}} {{language.pick('ngày','days')}}</span></div>
+        <div class="panel-head"><h2>{{t('Cơ cấu hành khách','Passenger demographics')}}</h2><span>{{t('Đặt trước','Lead time')}} {{data?.average_lead_time_days||0}} {{t('ngày','days')}}</span></div>
         <div class="status-grid">
-          <div><span>Người lớn</span><b>{{data?.passenger_demographics?.adults||0}}</b></div>
-          <div><span>Trẻ em</span><b>{{data?.passenger_demographics?.children||0}}</b></div>
-          <div><span>Cao tuổi</span><b>{{data?.passenger_demographics?.seniors||0}}</b></div>
-          <div><span>Tỷ lệ quay lại</span><b>{{data?.repeat_customer_stats?.repeat_customer_rate_percent||0}}%</b></div>
+          <div><span>{{t('Người lớn','Adults')}}</span><b>{{data?.passenger_demographics?.adults||0}}</b></div>
+          <div><span>{{t('Trẻ em','Children')}}</span><b>{{data?.passenger_demographics?.children||0}}</b></div>
+          <div><span>{{t('Cao tuổi','Seniors')}}</span><b>{{data?.passenger_demographics?.seniors||0}}</b></div>
+          <div><span>{{t('Tỷ lệ quay lại','Repeat customer rate')}}</span><b>{{data?.repeat_customer_stats?.repeat_customer_rate_percent||0}}%</b></div>
         </div>
       </section>
     </div>
 
     <section class="card routes">
-      <div class="panel-head"><h2>Tuyến phổ biến</h2><span>Lượng hành khách</span></div>
+      <div class="panel-head"><h2>{{t('Tuyến phổ biến','Top routes')}}</h2><span>{{t('Lượng hành khách','Passenger volume')}}</span></div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Tuyến</th><th>Đặt chỗ</th><th>Hành khách</th><th>Giá trị đang hoạt động</th></tr></thead>
+          <thead><tr><th>{{t('Tuyến','Route')}}</th><th>{{t('Đặt chỗ','Bookings')}}</th><th>{{t('Hành khách','Passengers')}}</th><th>{{t('Giá trị đang hoạt động','Active booking value')}}</th></tr></thead>
           <tbody>
             @for(r of data?.top_routes||[];track r.route){
               <tr><td><strong>{{r.origin_iata}} → {{r.dest_iata}}</strong></td><td>{{r.bookings_count}}</td><td>{{r.passenger_volume}}</td><td>{{money(r.active_booking_value_vnd)}}</td></tr>
@@ -77,5 +77,6 @@ export class DashboardComponent{
     this.api.analyticsCapacity().subscribe({next:r=>this.capacity=r,error:()=>{}})
   }
   money(v:number){return new Intl.NumberFormat('vi-VN',{style:'currency',currency:'VND',maximumFractionDigits:0}).format(v||0)}
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   msg(e:any,f:string){const m=e?.error?.message;return Array.isArray(m)?m.join(' · '):m||f}
 }

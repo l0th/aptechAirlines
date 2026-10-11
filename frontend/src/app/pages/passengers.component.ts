@@ -32,7 +32,7 @@ import { localCalendarDate } from '../core/date-format.util';
             <div class="field"><span>{{lang.pick('Họ','Family name')}}</span><input class="control" [(ngModel)]="p.first_name" (ngModelChange)="draftChanged()" autocomplete="family-name"></div>
             <div class="field"><span>{{lang.pick('Tên','Given name')}}</span><input class="control" [(ngModel)]="p.last_name" (ngModelChange)="draftChanged()" autocomplete="given-name"></div>
             <div class="field locked-field"><span>{{lang.pick('Loại hành khách','Passenger type')}}</span><strong>{{typeLabel(p.passenger_type)}}</strong><small>{{lang.pick('Được xác định từ bước tìm chuyến.','Determined by your flight search.')}}</small></div>
-            <div class="field"><span>CCCD / Passport</span><input class="control" [(ngModel)]="p.id_card_or_passport" (ngModelChange)="draftChanged()" autocomplete="off"></div>
+            <div class="field"><span>{{lang.pick('CCCD / Hộ chiếu','National ID / Passport')}}</span><input class="control" [(ngModel)]="p.id_card_or_passport" (ngModelChange)="draftChanged()" autocomplete="off"></div>
             <div class="field"><span>{{lang.pick('Quốc tịch','Nationality')}}</span><input class="control" [(ngModel)]="p.nationality" (ngModelChange)="draftChanged()" autocomplete="country-name"></div>
             <div class="field"><span>{{lang.pick('Ngày sinh','Date of birth')}}</span><app-date-input [(ngModel)]="p.date_of_birth" (ngModelChange)="draftChanged()" [max]="today"/></div>
           </div>

@@ -16,7 +16,7 @@ import { DayFirstDateInputComponent } from '../shared/day-first-date-input.compo
   template:`
     <div class="eyebrow">ADMIN</div>
     <div class="section-head">
-      <div><h1 class="title">{{title}}</h1><p class="subtitle">{{subtitle}}</p></div>
+      <div><h1 class="title">{{displayTitle}}</h1><p class="subtitle">{{subtitle}}</p></div>
       <div class="head-actions">
         @if(kind==='bookings'&&auth.admin()){
           <button class="btn btn-outline" (click)="runScheduler('run-expiry')" [disabled]="busy">{{t('Quét vé hết hạn','Scan expired holds')}}</button>
@@ -168,6 +168,7 @@ export class AdminListComponent implements OnInit{
   api=inject(ApiService);
   readonly language=inject(LanguageService);
   t(vi:string,en:string){return this.language.pick(vi,en)}
+  get displayTitle(){return({bookings:this.t('Đặt chỗ','Bookings'),users:this.t('Khách hàng','Customers'),flights:this.t('Chuyến bay','Flights'),airports:this.t('Sân bay','Airports')} as Record<string,string>)[this.kind]||this.title}
   auth=inject(AuthService);
   router=inject(Router);
   toast=inject(ToastService);

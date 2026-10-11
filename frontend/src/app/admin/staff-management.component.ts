@@ -9,47 +9,47 @@ import { LanguageService } from '../core/language.service';
   standalone:true,
   imports:[FormsModule],
   template:`
-    <div class="eyebrow">ADMINISTRATION</div>
+    <div class="eyebrow">{{t('QUẢN TRỊ','ADMINISTRATION')}}</div>
     <div class="page-head">
-      <div><h1 class="title">Quản lý nhân viên</h1><p class="subtitle">Quản lý tài khoản CLERK và ADMIN dùng cho cổng nhân viên.</p></div>
-      <button class="btn btn-primary" (click)="openCreate()">+ Thêm nhân viên</button>
+      <div><h1 class="title">{{t('Quản lý nhân viên','Staff management')}}</h1><p class="subtitle">{{t('Quản lý tài khoản CLERK và ADMIN dùng cho cổng nhân viên.','Manage CLERK and ADMIN accounts for the staff portal.')}}</p></div>
+      <button class="btn btn-primary" (click)="openCreate()">{{t('+ Thêm nhân viên','+ Add staff')}}</button>
     </div>
 
     <div class="stats">
-      <div class="card"><span>Tổng nhân viên</span><strong>{{staff.length}}</strong></div>
+      <div class="card"><span>{{t('Tổng nhân viên','Total staff')}}</span><strong>{{staff.length}}</strong></div>
       <div class="card"><span>CLERK</span><strong>{{count('CLERK')}}</strong></div>
       <div class="card"><span>ADMIN</span><strong>{{count('ADMIN')}}</strong></div>
       <div class="card"><span>SUPER ADMIN</span><strong>{{count('SUPER_ADMIN')}}</strong></div>
     </div>
 
     <section class="card toolbar">
-      <input class="control" [(ngModel)]="query" placeholder="Tên, username, email, điện thoại">
-      <select class="control role-filter" [(ngModel)]="statusFilter"><option value="ALL">Mọi trạng thái</option><option value="ACTIVE">Đang hoạt động</option><option value="LOCKED">Đã khóa</option></select>
+      <input class="control" [(ngModel)]="query" [placeholder]="t('Tên, username, email, điện thoại','Name, username, email, phone')">
+      <select class="control role-filter" [(ngModel)]="statusFilter"><option value="ALL">{{t('Mọi trạng thái','All statuses')}}</option><option value="ACTIVE">{{t('Đang hoạt động','Active')}}</option><option value="LOCKED">{{t('Đã khóa','Locked')}}</option></select>
       <select class="control role-filter" [(ngModel)]="roleFilter">
-        <option value="ALL">Tất cả vai trò</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option><option value="SUPER_ADMIN">SUPER_ADMIN</option>
+        <option value="ALL">{{t('Tất cả vai trò','All roles')}}</option><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option><option value="SUPER_ADMIN">SUPER_ADMIN</option>
       </select>
-      <button class="btn btn-outline" (click)="load()" [disabled]="loading">Làm mới</button>
+      <button class="btn btn-outline" (click)="load()" [disabled]="loading">{{t('Làm mới','Refresh')}}</button>
     </section>
 
     @if(editor){
       <div class="modal" (click)="editor=null">
         <section class="card modal-card" (click)="$event.stopPropagation()">
           <button class="close" (click)="editor=null">×</button>
-          <div class="eyebrow">{{editorMode==='create'?'TẠO TÀI KHOẢN NHÂN VIÊN':'CẬP NHẬT NHÂN VIÊN'}}</div>
-          <h2>{{editorMode==='create'?'Tạo tài khoản nhân viên':editor.first_name+' '+editor.last_name}}</h2>
+          <div class="eyebrow">{{editorMode==='create'?t('TẠO TÀI KHOẢN NHÂN VIÊN','CREATE STAFF ACCOUNT'):t('CẬP NHẬT NHÂN VIÊN','UPDATE STAFF')}}</div>
+          <h2>{{editorMode==='create'?t('Tạo tài khoản nhân viên','Create staff account'):editor.first_name+' '+editor.last_name}}</h2>
           <div class="grid grid-2">
             @if(editorMode==='create'){
-              <div class="field"><span>Username</span><input class="control" [(ngModel)]="editor.username" placeholder="Nhập username"></div>
-              <div class="field"><span>Mật khẩu ban đầu</span><input class="control" type="password" [(ngModel)]="editor.password" placeholder="Mật khẩu tối thiểu 6 ký tự"></div>
+              <div class="field"><span>{{t('Tên đăng nhập','Username')}}</span><input class="control" [(ngModel)]="editor.username" [placeholder]="t('Nhập tên đăng nhập','Enter username')"></div>
+              <div class="field"><span>{{t('Mật khẩu ban đầu','Initial password')}}</span><input class="control" type="password" [(ngModel)]="editor.password" [placeholder]="t('Mật khẩu tối thiểu 6 ký tự','At least 6 characters')"></div>
             }
-            <div class="field"><span>Họ</span><input class="control" [(ngModel)]="editor.first_name" placeholder="Họ"></div>
-            <div class="field"><span>Tên</span><input class="control" [(ngModel)]="editor.last_name" placeholder="Tên"></div>
+            <div class="field"><span>{{t('Họ','First name')}}</span><input class="control" [(ngModel)]="editor.first_name" [placeholder]="t('Họ','First name')"></div>
+            <div class="field"><span>{{t('Tên','Last name')}}</span><input class="control" [(ngModel)]="editor.last_name" [placeholder]="t('Tên','Last name')"></div>
             <div class="field"><span>Email</span><input class="control" type="email" [(ngModel)]="editor.email" placeholder="email@aptechairlines.com"></div>
-            <div class="field"><span>Điện thoại</span><input class="control" [(ngModel)]="editor.phone_number" placeholder="Số điện thoại"></div>
-            <div class="field"><span>Vai trò</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'||isSelf(editor)"><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
-            <div class="field"><span>Địa chỉ</span><input class="control" [(ngModel)]="editor.address" placeholder="Địa chỉ liên hệ"></div>
+            <div class="field"><span>{{t('Điện thoại','Phone')}}</span><input class="control" [(ngModel)]="editor.phone_number" [placeholder]="t('Số điện thoại','Phone number')"></div>
+            <div class="field"><span>{{t('Vai trò','Role')}}</span><select class="control" [(ngModel)]="editor.role" [disabled]="editor.originalRole==='SUPER_ADMIN'||isSelf(editor)"><option value="CLERK">CLERK</option><option value="ADMIN">ADMIN</option>@if(editor.originalRole==='SUPER_ADMIN'){<option value="SUPER_ADMIN">SUPER_ADMIN</option>}</select></div>
+            <div class="field"><span>{{t('Địa chỉ','Address')}}</span><input class="control" [(ngModel)]="editor.address" [placeholder]="t('Địa chỉ liên hệ','Contact address')"></div>
           </div>
-          <div class="modal-actions"><button class="btn btn-outline" (click)="editor=null">Đóng</button><button class="btn btn-primary" (click)="save()" [disabled]="busy">{{busy?'Đang lưu…':'Lưu nhân viên'}}</button></div>
+          <div class="modal-actions"><button class="btn btn-outline" (click)="editor=null">{{t('Đóng','Close')}}</button><button class="btn btn-primary" (click)="save()" [disabled]="busy">{{busy?t('Đang lưu…','Saving…'):t('Lưu nhân viên','Save staff')}}</button></div>
         </section>
       </div>
     }
@@ -58,28 +58,28 @@ import { LanguageService } from '../core/language.service';
       <div class="modal" (click)="passwordResetTarget=null">
         <section class="card modal-card small-card" (click)="$event.stopPropagation()">
           <button class="close" (click)="passwordResetTarget=null">×</button>
-          <div class="eyebrow">ĐẶT LẠI MẬT KHẨU</div>
-          <h2>Đặt lại mật khẩu nhân viên</h2>
+          <div class="eyebrow">{{t('ĐẶT LẠI MẬT KHẨU','RESET PASSWORD')}}</div>
+          <h2>{{t('Đặt lại mật khẩu nhân viên','Reset staff password')}}</h2>
           <p class="muted-note">{{language.pick('Tạo mật khẩu mới cho tài khoản','Create a new password for')}} <strong translate="no">{{passwordResetTarget.first_name}} {{passwordResetTarget.last_name}}</strong> (<span translate="no">&#64;{{passwordResetTarget.username}}</span>).</p>
-          <div class="field"><span>Mật khẩu mới (tối thiểu 6 ký tự)</span><input class="control" type="text" [(ngModel)]="tempPassword" placeholder="Nhập mật khẩu mới"></div>
-          <div class="modal-actions"><button class="btn btn-outline" (click)="passwordResetTarget=null">Hủy</button><button class="btn btn-primary" (click)="confirmResetPw()" [disabled]="busy||!tempPassword||tempPassword.length<6">{{busy?'Đang cập nhật…':'Cập nhật mật khẩu'}}</button></div>
+          <div class="field"><span>{{t('Mật khẩu mới (tối thiểu 6 ký tự)','New password (at least 6 characters)')}}</span><input class="control" type="text" [(ngModel)]="tempPassword" [placeholder]="t('Nhập mật khẩu mới','Enter a new password')"></div>
+          <div class="modal-actions"><button class="btn btn-outline" (click)="passwordResetTarget=null">{{t('Hủy','Cancel')}}</button><button class="btn btn-primary" (click)="confirmResetPw()" [disabled]="busy||!tempPassword||tempPassword.length<6">{{busy?t('Đang cập nhật…','Updating…'):t('Cập nhật mật khẩu','Reset password')}}</button></div>
         </section>
       </div>
     }
 
     <section class="card table-card">
-      @if(loading){<div class="empty muted">Đang tải danh sách nhân viên…</div>}
-      @else if(!filtered.length){<div class="empty muted">Không có nhân viên phù hợp.</div>}
+      @if(loading){<div class="empty muted">{{t('Đang tải danh sách nhân viên…','Loading staff…')}}</div>}
+      @else if(!filtered.length){<div class="empty muted">{{t('Không có nhân viên phù hợp.','No matching staff.')}}</div>}
       @else{
         <div class="staff-list">
           @for(x of filtered;track x._id){
             <article class="staff-row">
               <span class="avatar">{{initials(x)}}</span>
-              <div class="identity"><strong translate="no">{{x.first_name}} {{x.last_name}}</strong><small translate="no">&#64;{{x.username}} · {{x.email}}</small><small>{{x.phone_number||'Chưa có số điện thoại'}}</small></div>
+              <div class="identity"><strong translate="no">{{x.first_name}} {{x.last_name}}</strong><small translate="no">&#64;{{x.username}} · {{x.email}}</small><small>{{x.phone_number||t('Chưa có số điện thoại','No phone number')}}</small></div>
               <span class="role" [class.admin]="x.role==='ADMIN'||x.role==='SUPER_ADMIN'">{{x.role}}</span>
-              <span class="pill" [class.locked]="x.is_active===false">{{x.is_active===false?'Đã khóa':'Hoạt động'}}</span>
-              @if(x.role==='SUPER_ADMIN'){<div class="actions"><span class="muted">Chỉ xem</span></div>}
-              @else{<div class="actions"><button class="btn btn-outline" (click)="openEdit(x)">Sửa</button><button class="btn btn-outline" (click)="toggleLock(x)" [disabled]="busy||isSelf(x)">{{x.is_active===false?'Mở khóa':'Khóa'}}</button><button class="btn btn-outline" (click)="openResetPw(x)" [disabled]="busy">Đặt lại MK</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||isSelf(x)">Xóa</button></div>}
+              <span class="pill" [class.locked]="x.is_active===false">{{x.is_active===false?t('Đã khóa','Locked'):t('Hoạt động','Active')}}</span>
+              @if(x.role==='SUPER_ADMIN'){<div class="actions"><span class="muted">{{t('Chỉ xem','Read only')}}</span></div>}
+              @else{<div class="actions"><button class="btn btn-outline" (click)="openEdit(x)">{{t('Sửa','Edit')}}</button><button class="btn btn-outline" (click)="toggleLock(x)" [disabled]="busy||isSelf(x)">{{x.is_active===false?t('Mở khóa','Unlock'):t('Khóa','Lock')}}</button><button class="btn btn-outline" (click)="openResetPw(x)" [disabled]="busy">{{t('Đặt lại MK','Reset password')}}</button><button class="btn btn-outline danger" (click)="remove(x)" [disabled]="busy||isSelf(x)">{{t('Xóa','Delete')}}</button></div>}
             </article>
           }
         </div>
@@ -100,6 +100,7 @@ export class StaffManagementComponent{
   get filtered(){const q=this.query.trim().toLowerCase();return this.staff.filter(x=>(this.roleFilter==='ALL'||x.role===this.roleFilter)&&(this.statusFilter==='ALL'||(this.statusFilter==='LOCKED')===(x.is_active===false))&&(!q||[x.first_name,x.last_name,x.username,x.email,x.phone_number].some(v=>String(v||'').toLowerCase().includes(q))))}
   load(){this.loading=true;this.error='';this.api.users().subscribe({next:r=>{this.staff=(r||[]).filter((u:any)=>u.role!=='CUSTOMER');this.loading=false},error:e=>{this.error=this.msg(e,this.language.pick('Không tải được danh sách nhân viên.','Unable to load staff.'));this.loading=false}})}
   count(role:string){return this.staff.filter(x=>x.role===role).length}
+  t(vi:string,en:string){return this.language.pick(vi,en)}
   initials(x:any){return`${x?.first_name?.[0]||''}${x?.last_name?.[0]||x?.username?.[0]||''}`.toUpperCase()}
   openCreate(){this.editorMode='create';this.error='';this.editor={username:'',password:'Staff@2026',first_name:'',last_name:'',email:'',phone_number:'',address:'',role:'CLERK'}}
   openEdit(x:any){this.editorMode='edit';this.error='';this.editor={...x,originalRole:x.role}}

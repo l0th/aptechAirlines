@@ -12,27 +12,27 @@ import { DayFirstDateInputComponent } from '../shared/day-first-date-input.compo
   imports: [FormsModule, PaginationComponent, DayFirstDateInputComponent],
   template: `
     <div class="container page">
-      <div class="eyebrow">PUBLIC FLIGHT LOOKUP</div>
-      <h1 class="title">Tra cứu lịch bay</h1>
-      <p class="subtitle">Không cần đăng nhập. Nhập số hiệu chuyến bay và ngày để xem giờ khởi hành, giờ đến và trạng thái mới nhất.</p>
+      <div class="eyebrow">{{t('TRA CỨU CHUYẾN BAY CÔNG KHAI','PUBLIC FLIGHT LOOKUP')}}</div>
+      <h1 class="title">{{t('Tra cứu lịch bay','Flight lookup')}}</h1>
+      <p class="subtitle">{{t('Không cần đăng nhập. Nhập số hiệu chuyến bay và ngày để xem giờ khởi hành, giờ đến và trạng thái mới nhất.','No login required. Enter a flight number and date to view the latest departure, arrival and status information.')}}</p>
 
       <section class="card finder">
         <div class="field">
-          <span>Số hiệu chuyến bay</span>
+          <span>{{t('Số hiệu chuyến bay','Flight number')}}</span>
           <input class="control" [(ngModel)]="number" (keyup.enter)="search()" placeholder="APT-DMO-HLD" autocomplete="off">
         </div>
         <div class="field">
-          <span>Ngày bay</span>
+          <span>{{t('Ngày bay','Flight date')}}</span>
           <app-date-input [(ngModel)]="date" (enterPressed)="search()"/>
         </div>
         <button class="btn btn-primary" (click)="search()" [disabled]="loading">
-          {{loading ? 'Đang tra cứu…' : 'Tra cứu'}}
+          {{loading ? t('Đang tra cứu…','Searching…') : t('Tra cứu','Search')}}
         </button>
       </section>
 
       
       @if(searched && !loading && !error && !results.length){
-        <div class="card empty"><h2>Không có chuyến phù hợp</h2><p class="muted">Kiểm tra lại số hiệu chuyến bay và ngày.</p></div>
+        <div class="card empty"><h2>{{t('Không có chuyến phù hợp','No matching flight')}}</h2><p class="muted">{{t('Kiểm tra lại số hiệu chuyến bay và ngày.','Check the flight number and date.')}}</p></div>
       }
 
       @for(f of pagedResults;track f._id||f.flight_id||$index){
@@ -48,7 +48,7 @@ import { DayFirstDateInputComponent } from '../shared/day-first-date-input.compo
 
           <div class="route">
             <div class="airport">
-              <span>Khởi hành</span>
+              <span>{{t('Khởi hành','Departure')}}</span>
               <strong>{{f.origin_iata}}</strong>
               <b>{{clock(f.scheduled_departure_local||f.scheduled_departure)}}</b>
               <small>{{datePart(f.scheduled_departure_local||f.scheduled_departure)}} · {{f.origin_time_zone||language.pick('Giờ địa phương', 'Local time')}}</small>
@@ -60,7 +60,7 @@ import { DayFirstDateInputComponent } from '../shared/day-first-date-input.compo
             <div class="route-line"><i></i><span>→</span></div>
 
             <div class="airport right">
-              <span>Đến nơi</span>
+              <span>{{t('Đến nơi','Arrival')}}</span>
               <strong>{{f.dest_iata}}</strong>
               <b>{{clock(f.scheduled_arrival_local||f.scheduled_arrival)}}</b>
               <small>{{datePart(f.scheduled_arrival_local||f.scheduled_arrival)}} · {{f.dest_time_zone||language.pick('Giờ địa phương', 'Local time')}}</small>
@@ -71,7 +71,7 @@ import { DayFirstDateInputComponent } from '../shared/day-first-date-input.compo
           </div>
 
           @if(hasTimingChange(f)){
-            <div class="change-note">Chuyến bay có giờ thực tế khác lịch dự kiến. Vui lòng ưu tiên thông tin thực tế hiển thị ở trên.</div>
+            <div class="change-note">{{t('Chuyến bay có giờ thực tế khác lịch dự kiến. Vui lòng ưu tiên thông tin thực tế hiển thị ở trên.','Actual flight times differ from the schedule. Use the actual times shown above.')}}</div>
           }
         </article>
       }
@@ -100,6 +100,8 @@ export class LookupComponent {
     const start = (this.page - 1) * this.pageSize;
     return this.results.slice(start, start + this.pageSize);
   }
+
+  t(vi: string, en: string) { return this.language.pick(vi, en); }
 
   search() {
     const number = this.number.trim().toUpperCase();
