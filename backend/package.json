@@ -12,15 +12,11 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "test": "jest",
     "seed:phase-a": "ts-node src/scripts/seed-phase-a.ts",
     "migrate:phase-b": "ts-node src/scripts/migrate-phase-b-seats.ts --execute",
     "migrate:phase-b:dry-run": "ts-node src/scripts/migrate-phase-b-seats.ts --dry-run",
     "repair:reference-data:dry-run": "ts-node src/scripts/repair-reference-data.ts --dry-run",
-    "repair:reference-data": "ts-node src/scripts/repair-reference-data.ts --execute",
-    "seed:e2e": "ts-node src/scripts/seed-e2e-demo.ts",
-    "seed:e2e:cleanup": "ts-node src/scripts/seed-e2e-demo.ts --cleanup",
-    "verify:e2e:matrix": "ts-node src/scripts/execute-e2e-matrix.ts"
+    "repair:reference-data": "ts-node src/scripts/repair-reference-data.ts --execute"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -47,33 +43,16 @@
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
     "@nestjs/schematics": "^10.1.0",
-    "@nestjs/testing": "^10.4.22",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^4.17.21",
-    "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
     "@types/nodemailer": "^8.0.2",
     "@types/passport-jwt": "^4.0.1",
-    "jest": "^30.5.1",
     "rimraf": "^5.0.5",
     "source-map-support": "^0.5.21",
-    "ts-jest": "^29.4.12",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.3"
-  },
-  "jest": {
-    "preset": "ts-jest",
-    "testEnvironment": "node",
-    "roots": [
-      "<rootDir>/src"
-    ],
-    "testRegex": ".*\\.spec\\.ts$",
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ]
   }
 }

@@ -29,7 +29,7 @@ Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Apt
 │   │   ├── policies/   # Quản lý quy tắc hủy vé & % hoàn tiền linh hoạt
 │   │   ├── bookings/   # Giữ chỗ (Rule > 14 ngày), mua vé, đổi vé, hủy vé, tra cứu
 │   │   ├── seat-allocation/ # Quản lý ghế vật lý, đặt trước chỗ ngồi & phụ phí
-│   │   ├── scripts/    # Safe Deterministic E2E Demo Seed Script (seed-e2e-demo.ts)
+│   │   ├── scripts/    # Công cụ seed, migration và sửa dữ liệu quản trị
 │   │   ├── seed/       # Tự động nạp sân bay, chính sách & SUPER_ADMIN duy nhất
 │   │   ├── app.module.ts
 │   │   └── main.ts
@@ -57,7 +57,7 @@ Hệ thống Quản lý và Đặt vé Máy bay (ARS) mang thương hiệu **Apt
 Database **không** nằm trong git (dữ liệu nằm trong Docker volume). Repo kèm sẵn bản chụp dữ liệu demo tại `database/snapshot/airline_db.archive.gz`.
 
 ```bash
-git clone <repo> && cd <repo> && git checkout frontend-v2
+git clone <repo> && cd <repo>
 cp .env.example .env            # hoặc copy .env cũ, nhưng MONGO_URI phải là mongodb://mongodb:27017/airline_db
 docker compose up -d --build
 sh database/import-db.sh        # nạp dữ liệu demo (users, sân bay, chuyến bay, chính sách, giá ghế...)
@@ -89,7 +89,7 @@ Dữ liệu tài khoản, sân bay, chính sách, chuyến bay... được quả
 
 Nếu muốn dùng MongoDB bên ngoài thay cho container đi kèm, chỉ cần đổi `MONGO_URI` trong `.env` sang connection string của MongoDB đó.
 
-## 🚀 Hướng dẫn Chạy Hệ thống & Kiểm thử
+## 🚀 Hướng dẫn Chạy Hệ thống
 
 ### Cách 1: Chạy toàn bộ qua Docker Compose (Khuyên dùng)
 Yêu cầu bật Docker Desktop, sau đó chạy lệnh tại thư mục gốc:
@@ -109,8 +109,6 @@ docker compose up --build
    ```
    Backend lắng nghe tại `http://localhost:3000/api`. Kết nối MongoDB mặc định tại `mongodb://localhost:27017/airline_db`.
 
-   `npm run seed:e2e` chỉ dành cho kiểm thử/demo khi chủ động cần dữ liệu mẫu; không nằm trong luồng Docker khởi động thông thường.
-
 2. **Khởi động Frontend:**
    ```bash
    cd frontend
@@ -119,20 +117,13 @@ docker compose up --build
    ```
    Truy cập giao diện tại `http://localhost:4200`.
 
-### Chạy Toàn bộ Bộ Kiểm thử Tự động (Automated Unit Tests)
-```bash
-cd backend
-npm test
-```
-- **Kết quả:** **33 Test Suites passed, 790 Tests passed (100% PASS)** trong ~15 - 25 giây.
-
 ---
 
 ## 📌 Tuyên bố Sẵn sàng Chấm Đồ án & Demo (Submission-Ready Disclaimer)
 - **Tính trọn vẹn nghiệp vụ:** Toàn bộ các quy trình nghiệp vụ chính từ 3.1 đến 3.10 đã được cài đặt hoàn chỉnh (All major 3.1–3.10 workflows are implemented); riêng mục §3.3.4.1 được ghi nhận là một phần (**PARTIAL**) do hạng vé FIRST có thể chọn trên hợp đồng dữ liệu/giao diện tra cứu nhưng hiện tại không có cấu hình tàu bay nào trong catalog đội bay thương mại cung cấp khoang ghế FIRST vật lý có thể đặt chỗ (hệ thống khai thác các cấu hình 1, 2 và 3 hạng ghế trên 6 dòng tàu bay A20N, A21N, B789, A359, B738, AT76).
 - **Thanh toán Trực tuyến Quốc tế:** Phân hệ PayPal Phase 1B được thiết kế phòng vệ tài chính đầy đủ, có cơ chế đối soát và hoàn tiền bồi hoàn. Cấu hình nộp đồ án để mặc định `PAYPAL_ENABLED=false` nhằm đảm bảo hệ thống tự vận hành độc lập không phụ thuộc tài khoản sandbox cá nhân sinh viên.
 - **Dịch vụ Email nhắc nhở:** Được tích hợp chế độ `[MAIL:DEV-FALLBACK]`, tự động ghi nhận đầy đủ nội dung email nhắc giữ chỗ 3 tuần và thư báo hủy vé vào console log khi môi trường thử nghiệm không có máy chủ SMTP bên ngoài.
-- **Bảo toàn dữ liệu hạt nhân:** Script `npm run seed:e2e` hoạt động lũy thừa (Idempotent), tuyệt đối không xóa hoặc ghi đè tài khoản `SUPER_ADMIN` nguyên thủy.
+- **Bảo toàn dữ liệu hạt nhân:** Bản chụp MongoDB đi kèm giữ nguyên dữ liệu demo và tài khoản quản trị cần cho quá trình đánh giá.
 
 ---
 

@@ -29,6 +29,10 @@ export class BookingsQuoteService extends BookingsQuotePart {
     userId?: string,
   ): Promise<{
     total_fare: number;
+    base_fare: number;
+    booking_time_adjustment: number;
+    load_adjustment: number;
+    skymiles_discount: number;
     total_seat_fees: number;
     total_amount: number;
     currency: string;
@@ -117,6 +121,9 @@ export class BookingsQuoteService extends BookingsQuotePart {
       : 0;
 
     let totalFare = 0;
+    let baseFare = 0;
+    let fareAfterBookingTime = 0;
+    let fareAfterLoad = 0;
     let earlyBirdPercent = 0;
     let loadFactorPercent = 0;
     let loadAdjustmentPercent = 0;
@@ -145,8 +152,22 @@ export class BookingsQuoteService extends BookingsQuotePart {
         ffDiscountPercent = pricing.ff_percent;
 
         let fare = pricing.final_price;
-        if (p.passenger_type === PassengerType.CHILD) fare = Math.round(pricing.final_price * 0.75);
-        if (p.passenger_type === PassengerType.SENIOR) fare = Math.round(pricing.final_price * 0.85);
+        let passengerMultiplier = 1;
+        if (p.passenger_type === PassengerType.CHILD) passengerMultiplier = 0.75;
+        if (p.passenger_type === PassengerType.SENIOR) passengerMultiplier = 0.85;
+        fare = Math.round(pricing.final_price * passengerMultiplier);
+
+        // Keep an auditable monetary breakdown for checkout. The final fare remains
+        // authoritative; each intermediate amount uses the same passenger multiplier.
+        const bookingTimeMultiplier = 1 + pricing.early_bird_percent / 100;
+        const loadMultiplier = 1 + pricing.load_adjustment_percent / 100;
+        baseFare += Math.round(inventory.base_price * passengerMultiplier);
+        fareAfterBookingTime += Math.round(
+          inventory.base_price * bookingTimeMultiplier * passengerMultiplier,
+        );
+        fareAfterLoad += Math.round(
+          inventory.base_price * bookingTimeMultiplier * loadMultiplier * passengerMultiplier,
+        );
         totalFare += fare;
       }
     }
@@ -192,6 +213,10 @@ export class BookingsQuoteService extends BookingsQuotePart {
 
     return {
       total_fare: totalFare,
+      base_fare: baseFare,
+      booking_time_adjustment: fareAfterBookingTime - baseFare,
+      load_adjustment: fareAfterLoad - fareAfterBookingTime,
+      skymiles_discount: Math.max(0, fareAfterLoad - totalFare),
       total_seat_fees: totalSeatFees,
       total_amount: totalAmount,
       currency: 'VND',
